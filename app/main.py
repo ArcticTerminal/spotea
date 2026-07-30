@@ -8,6 +8,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from app.config import settings
 from app.database import Base, SessionLocal, engine
 from app.deps import NotAuthenticated
+from app.migrations import run_migrations
 from app.models import User
 from app.routers import auth as auth_router
 from app.routers import content as content_router
@@ -27,6 +28,7 @@ def _ensure_default_user() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
+    run_migrations(engine)
     _ensure_default_user()
     yield
 

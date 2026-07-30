@@ -3,8 +3,17 @@ from sqlalchemy.orm import Session
 
 from app.deps import get_db, require_login
 from app.models import Content, Feed
-from app.rss import ChannelResolutionError, InvalidFeedError, fetch_feed, resolve_feed_url
-from app.schemas import FeedAddResult, FeedCreate, FeedOut, RefreshResult
+from app.rss import (
+    ChannelResolutionError,
+    InvalidFeedError,
+    extract_channel_id,
+    fetch_channel_shorts_ids,
+    fetch_channel_video_durations,
+    fetch_feed,
+    resolve_feed_url,
+    search_channels,
+)
+from app.schemas import ChannelSearchResultOut, FeedAddResult, FeedCreate, FeedOut, RefreshResult
 
 router = APIRouter(prefix="/feeds", tags=["feeds"], dependencies=[Depends(require_login)])
 
@@ -22,17 +31,30 @@ def _sync_feed_content(db: Session, feed: Feed) -> int:
         feed.channel_title = parsed.channel_title
 
     incoming_ids = [entry.video_id for entry in parsed.entries]
-    existing_ids = {
-        video_id
-        for (video_id,) in db.query(Content.video_id).filter(
+    existing_rows = {
+        row.video_id: row
+        for row in db.query(Content).filter(
             Content.feed_id == feed.id, Content.video_id.in_(incoming_ids)
         )
     }
+    missing_duration_ids = {
+        video_id for video_id, row in existing_rows.items() if row.duration_seconds is None
+    }
+    candidate_entries = [entry for entry in parsed.entries if entry.video_id not in existing_rows]
+
+    channel_id = extract_channel_id(feed.rss_url)
+
+    new_entries = candidate_entries
+    if candidate_entries and channel_id:
+        shorts_ids = fetch_channel_shorts_ids(channel_id)
+        new_entries = [entry for entry in candidate_entries if entry.video_id not in shorts_ids]
+
+    durations: dict[str, int] = {}
+    if (new_entries or missing_duration_ids) and channel_id:
+        durations = fetch_channel_video_durations(channel_id)
 
     new_count = 0
-    for entry in parsed.entries:
-        if entry.video_id in existing_ids:
-            continue
+    for entry in new_entries:
         db.add(
             Content(
                 feed_id=feed.id,
@@ -41,9 +63,14 @@ def _sync_feed_content(db: Session, feed: Feed) -> int:
                 title=entry.title,
                 thumbnail_url=entry.thumbnail_url,
                 published_at=entry.published_at,
+                duration_seconds=durations.get(entry.video_id),
             )
         )
         new_count += 1
+
+    for video_id in missing_duration_ids:
+        if video_id in durations:
+            existing_rows[video_id].duration_seconds = durations[video_id]
 
     db.commit()
     return new_count
@@ -75,6 +102,15 @@ def add_feed(payload: FeedCreate, db: Session = Depends(get_db)) -> FeedAddResul
     new_count = _sync_feed_content(db, feed)
 
     return FeedAddResult(feed=FeedOut.model_validate(feed), new_content_count=new_count)
+
+
+@router.get("/search", response_model=list[ChannelSearchResultOut])
+def search_feeds(q: str) -> list[ChannelSearchResultOut]:
+    query = q.strip()
+    if not query:
+        return []
+
+    return [ChannelSearchResultOut(**result.__dict__) for result in search_channels(query)]
 
 
 @router.get("", response_model=list[FeedOut])

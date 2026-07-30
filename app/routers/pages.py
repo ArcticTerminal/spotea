@@ -4,10 +4,12 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session, joinedload
 
 from app.deps import get_db, require_login
+from app.formatting import format_duration
 from app.models import Content, Feed
 
 router = APIRouter(dependencies=[Depends(require_login)])
 templates = Jinja2Templates(directory="app/templates")
+templates.env.filters["duration"] = format_duration
 
 DEFAULT_USER_ID = 1
 

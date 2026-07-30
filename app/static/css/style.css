@@ -102,36 +102,72 @@ body {
   color: #fff;
 }
 
-.layout {
+.btn-ghost:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.btn-ghost:disabled:hover {
+  border-color: #333;
+  color: #b3b3b3;
+}
+
+.tabs {
   display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
+  gap: 1.25rem;
+  padding: 0 1rem;
+  border-bottom: 1px solid #222;
+}
+
+.tab-btn {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: #888;
+  font-size: 0.9rem;
+  font-weight: 600;
+  padding: 0.75rem 0.1rem;
+  cursor: pointer;
+}
+
+.tab-btn:hover {
+  color: #ccc;
+}
+
+.tab-btn.active {
+  color: #fff;
+  border-bottom-color: #1db954;
+}
+
+.layout {
   padding: 1rem;
-  align-items: stretch;
+  max-width: 1100px;
+  margin: 0 auto;
 }
 
-.sidebar {
-  width: 100%;
+.tab-panel[hidden] {
+  display: none;
 }
 
-@media (min-width: 700px) {
-  .layout {
-    flex-direction: row;
-    gap: 2rem;
-    padding: 1.5rem;
-    align-items: flex-start;
-  }
-
-  .sidebar {
-    width: 280px;
-    flex-shrink: 0;
-  }
+.channels-panel-inner {
+  max-width: 480px;
+  margin: 0 auto;
 }
 
-.sidebar h2 {
+.channels-panel-inner h2 {
   font-size: 1rem;
   color: #b3b3b3;
   margin: 0 0 0.75rem;
+}
+
+@media (min-width: 700px) {
+  .tabs {
+    padding: 0 1.5rem;
+  }
+
+  .layout {
+    padding: 1.5rem;
+  }
 }
 
 #feed-form {
@@ -203,9 +239,92 @@ body {
   color: #f15e6c;
 }
 
-.content-area {
+.channel-search input {
+  width: 100%;
+  padding: 0.5rem 0.6rem;
+  border-radius: 6px;
+  border: 1px solid #333;
+  background: #2a2a2a;
+  color: #f5f5f5;
+  margin-bottom: 0.75rem;
+}
+
+.search-results {
+  list-style: none;
+  margin: 0 0 1.5rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.search-results:empty {
+  margin: 0;
+}
+
+.search-result {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.4rem 0.6rem;
+  background: #1e1e1e;
+  border-radius: 6px;
+}
+
+.search-result-thumb {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+  background: #2a2a2a;
+  display: block;
+}
+
+.search-result-info {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.search-result-title {
+  font-size: 0.88rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.search-result-subs {
+  font-size: 0.75rem;
+  color: #888;
+}
+
+.search-empty {
+  font-size: 0.85rem;
+  color: #888;
+  padding: 0.4rem 0.6rem;
+}
+
+.btn-add-channel {
+  border: none;
+  border-radius: 999px;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: #2a2a2a;
+  color: #f5f5f5;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.btn-add-channel:hover {
+  background: #3a3a3a;
+}
+
+.btn-add-channel:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 .content-header {
@@ -261,6 +380,18 @@ body {
   }
 }
 
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+.pagination[hidden] {
+  display: none;
+}
+
 .card {
   background: #1a1a1a;
   border-radius: 10px;
@@ -269,7 +400,12 @@ body {
   flex-direction: column;
 }
 
+.card[hidden] {
+  display: none;
+}
+
 .card .thumb {
+  position: relative;
   aspect-ratio: 16 / 9;
   background: #2a2a2a;
 }
@@ -279,6 +415,45 @@ body {
   height: 100%;
   object-fit: cover;
   display: block;
+}
+
+.duration-badge {
+  position: absolute;
+  bottom: 0.4rem;
+  left: 0.4rem;
+  background: rgba(0, 0, 0, 0.75);
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  line-height: 1.4;
+}
+
+.btn-favorite {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.4rem;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(0, 0, 0, 0.55);
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 0.9rem;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-favorite:hover {
+  color: #fff;
+}
+
+.btn-favorite.is-favorite {
+  color: #f2c94c;
 }
 
 .card-body {
@@ -292,6 +467,7 @@ body {
   margin: 0;
   font-size: 0.9rem;
   line-height: 1.3;
+  min-height: 2.34rem;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -355,11 +531,18 @@ body {
 .btn-delete {
   background: none;
   border: none;
-  color: #888;
+  color: #f5f5f5;
   cursor: pointer;
-  font-size: 0.9rem;
   padding: 0.3rem;
   line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-delete svg {
+  width: 16px;
+  height: 16px;
 }
 
 .btn-delete:hover {
@@ -380,6 +563,26 @@ body {
   to {
     transform: rotate(360deg);
   }
+}
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.overlay[hidden] {
+  display: none;
+}
+
+.spinner-lg {
+  width: 48px;
+  height: 48px;
+  border-width: 4px;
 }
 
 /* Player page */

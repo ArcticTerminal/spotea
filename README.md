@@ -4,9 +4,16 @@ A self-hosted app for following YouTube channels via RSS, downloading
 selected videos as audio, and listening to them from your browser — like a
 personal, free alternative to following musicians/creators on Spotify.
 
-- Add the RSS feed of any YouTube channel you follow
-- On every visit, feeds are re-parsed and new uploads show up automatically
-- Pick what you want to keep, download it as audio (via [yt-dlp](https://github.com/yt-dlp/yt-dlp))
+- Follow a channel by pasting any YouTube URL (or searching for it by name) —
+  no need to know how to construct an RSS feed link yourself
+- On every visit, feeds are re-parsed and new uploads show up automatically;
+  YouTube Shorts are filtered out since they don't fit a "listen to it"
+  library
+- Browse your Library with sorting (newest/oldest/title/channel), a
+  channel/favorites filter, and pagination
+- Pick what you want to keep, download it as audio (via [yt-dlp](https://github.com/yt-dlp/yt-dlp)) —
+  video length is shown on the thumbnail before you do
+- Star anything as a favorite for quick access later
 - Play it back from a simple in-browser player
 - Delete it later to free up space, or re-download anytime
 
@@ -34,7 +41,8 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for how it's built.
    docker compose up -d
    ```
 
-3. Open `http://localhost:8000` and log in with `APP_PASSWORD`.
+3. Open `http://localhost:8000` (or whatever `HOST_PORT` you set in `.env`)
+   and log in with `APP_PASSWORD`.
 
 Downloaded audio and the SQLite database persist in `./data` on the host,
 so they survive container restarts and rebuilds.
@@ -82,6 +90,7 @@ All configuration is via environment variables (see `.env.example`):
 | `DATABASE_URL` | no | `sqlite:////app/data/spotifrei.db` | SQLAlchemy database URL |
 | `STORAGE_DIR` | no | `/app/data/storage` | Where downloaded audio files are stored |
 | `AUDIO_FORMAT` | no | `mp3` | Audio format yt-dlp extracts to |
+| `HOST_PORT` | no | `8000` | Host port docker-compose publishes the app on (Docker only) |
 
 ## License
 

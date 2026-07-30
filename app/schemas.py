@@ -25,15 +25,30 @@ class ContentOut(BaseModel):
     video_id: str
     title: str
     thumbnail_url: str | None
+    duration_seconds: int | None
     published_at: datetime | None
     status: str
     added_at: datetime
+    is_favorite: bool
 
 
 class StatusOut(BaseModel):
     id: int
     status: str
     error_message: str | None = None
+
+
+class FavoriteOut(BaseModel):
+    id: int
+    is_favorite: bool
+
+
+class ChannelSearchResultOut(BaseModel):
+    channel_id: str
+    title: str
+    thumbnail_url: str | None
+    subscriber_count: int | None
+    channel_url: str
 
 
 class FeedAddResult(BaseModel):

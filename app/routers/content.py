@@ -9,7 +9,7 @@ from app.deps import get_db, require_login
 from app.downloader import DownloadError, download_audio
 from app.models import Content
 from app.rss import VIDEO_ID_RE
-from app.schemas import ContentOut, StatusOut
+from app.schemas import ContentOut, FavoriteOut, StatusOut
 
 router = APIRouter(prefix="/content", tags=["content"], dependencies=[Depends(require_login)])
 
@@ -61,9 +61,11 @@ def list_content(db: Session = Depends(get_db)) -> list[ContentOut]:
             video_id=c.video_id,
             title=c.title,
             thumbnail_url=c.thumbnail_url,
+            duration_seconds=c.duration_seconds,
             published_at=c.published_at,
             status=c.status,
             added_at=c.added_at,
+            is_favorite=c.is_favorite,
         )
         for c in rows
     ]
@@ -94,6 +96,22 @@ def start_download(
 def get_status(content_id: int, db: Session = Depends(get_db)) -> StatusOut:
     content = _get_content_or_404(db, content_id)
     return StatusOut(id=content.id, status=content.status, error_message=content.error_message)
+
+
+@router.post("/{content_id}/favorite", response_model=FavoriteOut)
+def add_favorite(content_id: int, db: Session = Depends(get_db)) -> FavoriteOut:
+    content = _get_content_or_404(db, content_id)
+    content.is_favorite = True
+    db.commit()
+    return FavoriteOut(id=content.id, is_favorite=content.is_favorite)
+
+
+@router.delete("/{content_id}/favorite", response_model=FavoriteOut)
+def remove_favorite(content_id: int, db: Session = Depends(get_db)) -> FavoriteOut:
+    content = _get_content_or_404(db, content_id)
+    content.is_favorite = False
+    db.commit()
+    return FavoriteOut(id=content.id, is_favorite=content.is_favorite)
 
 
 @router.get("/{content_id}/stream")

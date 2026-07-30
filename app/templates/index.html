@@ -14,29 +14,23 @@
     </form>
   </header>
 
-  <main class="layout">
-    <aside class="sidebar">
-      <h2>Followed channels</h2>
-      <form id="feed-form">
-        <input type="url" id="feed-url" name="channel_url" placeholder="YouTube channel URL (e.g. youtube.com/@handle)" required />
-        <button type="submit">Add</button>
-      </form>
-      <p id="feed-error" class="error" hidden></p>
-      <ul id="feed-list">
-        {% for feed in feeds %}
-        <li data-feed-id="{{ feed.id }}">
-          <span>{{ feed.channel_title or feed.rss_url }}</span>
-          <button type="button" class="unfollow" data-feed-id="{{ feed.id }}" aria-label="Unfollow">×</button>
-        </li>
-        {% endfor %}
-      </ul>
-    </aside>
+  <nav class="tabs" role="tablist">
+    <button type="button" class="tab-btn active" data-tab="library" role="tab" aria-selected="true">Library</button>
+    <button type="button" class="tab-btn" data-tab="channels" role="tab" aria-selected="false">Channels</button>
+  </nav>
 
-    <section class="content-area">
+  <main class="layout">
+    <section id="tab-library" class="tab-panel" data-tab-panel="library">
       <div class="content-header">
         <h2>Latest</h2>
         <div class="content-header-actions">
-          <span id="refresh-status" class="muted"></span>
+          <select id="channel-filter" class="sort-select" aria-label="Filter">
+            <option value="">All channels</option>
+            <option value="__favorites__">★ Favorites</option>
+            {% for feed in feeds %}
+            <option value="{{ feed.channel_title }}">{{ feed.channel_title or feed.rss_url }}</option>
+            {% endfor %}
+          </select>
           <select id="sort-select" class="sort-select" aria-label="Sort by">
             <option value="date-desc">Newest first</option>
             <option value="date-asc">Oldest first</option>
@@ -51,11 +45,47 @@
         {% include "_content_card.html" %}
         {% endfor %}
       </div>
+      <div id="pagination" class="pagination" hidden>
+        <button type="button" id="prev-page" class="btn-ghost">‹ Prev</button>
+        <span id="page-indicator" class="muted"></span>
+        <button type="button" id="next-page" class="btn-ghost">Next ›</button>
+      </div>
       <p id="empty-state" class="muted" {% if content %}hidden{% endif %}>
-        No content yet — add a channel RSS feed to get started.
+        No content yet — add a channel in the Channels tab to get started.
       </p>
     </section>
+
+    <section id="tab-channels" class="tab-panel" data-tab-panel="channels" hidden>
+      <div class="channels-panel-inner">
+        <h2>Search channels</h2>
+        <div class="channel-search">
+          <input type="text" id="channel-search-input" placeholder="Search YouTube channels…" autocomplete="off" />
+        </div>
+        <ul id="channel-search-results" class="search-results"></ul>
+
+        <h2>Add by URL</h2>
+        <form id="feed-form">
+          <input type="url" id="feed-url" name="channel_url" placeholder="YouTube channel URL (e.g. youtube.com/@handle)" required />
+          <button type="submit">Add</button>
+        </form>
+        <p id="feed-error" class="error" hidden></p>
+
+        <h2>Followed channels</h2>
+        <ul id="feed-list">
+          {% for feed in feeds %}
+          <li data-feed-id="{{ feed.id }}">
+            <span>{{ feed.channel_title or feed.rss_url }}</span>
+            <button type="button" class="unfollow" data-feed-id="{{ feed.id }}" aria-label="Unfollow">×</button>
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+    </section>
   </main>
+
+  <div id="refresh-overlay" class="overlay" hidden>
+    <span class="spinner spinner-lg" role="status" aria-label="Refreshing"></span>
+  </div>
 
   <script src="/static/js/app.js"></script>
 </body>

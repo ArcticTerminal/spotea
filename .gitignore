@@ -4,5 +4,6 @@ __pycache__/
 venv/
 .env
 data/*.db
+data/*.db.bak-*
 data/storage/*
 !data/storage/.gitkeep

@@ -29,25 +29,30 @@ data/spotifrei.db             (Docker volume)
 ```
 spotifrei/
   app/
-    main.py               # FastAPI app + router mount
+    main.py               # FastAPI app + router mount + migrations on startup
     config.py              # env-based settings
     database.py             # SQLAlchemy engine/session
-    models.py                # User, Feed, Content
-    schemas.py                 # Pydantic request/response models
-    auth.py                     # login/session handling
-    deps.py                       # get_db, require_login
-    rss.py                         # feedparser-based RSS fetching/parsing
-    downloader.py                    # yt-dlp wrapper + background download
+    migrations.py            # lightweight "add column if missing" patcher
+    formatting.py              # Jinja filters (duration formatting)
+    models.py                    # User, Feed, Content
+    schemas.py                     # Pydantic request/response models
+    auth.py                          # login/session handling
+    deps.py                            # get_db, require_login
+    rss.py                               # feedparser + yt-dlp metadata helpers
+    downloader.py                          # yt-dlp wrapper + background download
     routers/
       auth.py
-      feeds.py
-      content.py
+      feeds.py                               # feeds, search, refresh
+      content.py                               # download/status/stream/favorite/delete
+      pages.py                                   # home + player page rendering
     templates/
       login.html
       index.html
+      _content_card.html                           # single card partial, reused per item
       player.html
     static/
-      js/app.js                       # polling, download trigger
+      js/app.js                                      # tabs, search, sort/filter/pagination,
+                                                       # polling, download/favorite/delete triggers
       css/style.css
   data/                                 # mounted as Docker volume
     storage/{video_id}.mp3
@@ -75,8 +80,9 @@ Unique: `(user_id, rss_url)`.
 
 **content** — `id PK`, `feed_id FK`, `user_id FK` (denormalized for query
 convenience), `video_id` (YouTube ID), `title`, `thumbnail_url`,
-`published_at`, `status`, `file_path`, `error_message`, `added_at`,
-`downloaded_at`.
+`duration_seconds` (nullable — backfilled from the channel's uploads
+playlist, not in the RSS feed), `published_at`, `status`, `file_path`,
+`error_message`, `added_at`, `downloaded_at`, `is_favorite`.
 Unique: `(user_id, video_id)`.
 Index: `(user_id, status)`, `(user_id, published_at DESC)`.
 
@@ -88,6 +94,15 @@ not_downloaded ──▶ downloading ──▶ ready
                       error ──(retry)──▶ downloading
 ```
 
+**Schema evolution** — `Base.metadata.create_all()` (in `main.py`'s startup)
+only creates tables that don't exist yet; it never alters existing ones. Each
+column added after the initial release (`is_favorite`, `duration_seconds`) is
+also registered in `app/migrations.py`, which runs on every startup and adds
+the column via `ALTER TABLE ... ADD COLUMN` if it's missing — a lightweight
+stand-in for a real migration framework (Alembic would be overkill at this
+scale). New installs get every column for free via `create_all()`; upgrading
+existing installs is what `migrations.py` is for.
+
 ## 4. Endpoints
 
 | Method | Path | Purpose |
@@ -95,14 +110,17 @@ not_downloaded ──▶ downloading ──▶ ready
 | GET | `/login` | Login page |
 | POST | `/login` | Check password, set session cookie |
 | POST | `/logout` | Clear session |
-| GET | `/` | Home page (feeds + content list), requires login |
+| GET | `/` | Home page (Library/Channels tabs), requires login |
+| GET | `/feeds/search?q=` | Search YouTube channels by name (for the Channels tab) |
 | POST | `/feeds` | Add a channel by URL (resolved to RSS via yt-dlp), run first parse |
 | DELETE | `/feeds/{id}` | Unfollow |
-| POST | `/feeds/refresh` | Re-parse all feeds, insert new content rows |
+| POST | `/feeds/refresh` | Re-parse all feeds, insert new content rows, backfill durations |
 | GET | `/content` | JSON content list (used for polling) |
 | POST | `/content/{id}/download` | Start yt-dlp download in the background |
 | GET | `/content/{id}/status` | Current status |
 | GET | `/content/{id}/stream` | Serve the audio file (Range-request support) |
+| POST | `/content/{id}/favorite` | Mark as favorite |
+| DELETE | `/content/{id}/favorite` | Unmark as favorite |
 | DELETE | `/content/{id}` | Delete file, reset status to `not_downloaded` |
 | GET | `/player/{id}` | Player page |
 
@@ -118,21 +136,74 @@ against `APP_PASSWORD`; on match, a signed session cookie is set (Starlette
 gate for the whole instance, appropriate for a small self-hosted deployment.
 
 **Page load** — The page renders immediately with existing DB content, then
-JS triggers `POST /feeds/refresh` in the background and updates the grid when
-it completes — no blank-screen wait for RSS fetches.
+JS triggers `POST /feeds/refresh` behind a full-screen loading overlay (dark
+backdrop + spinner) and reloads the page if new content arrived — no
+blank-screen wait for RSS fetches, and no layout-shifting inline "Refreshing…"
+text competing with the filter/sort controls.
+
+**Tabs** — The home page is split into **Library** (content grid) and
+**Channels** (search, add-by-URL, followed list) — two `<section>` panels
+toggled via `hidden`, not separate routes. The active tab persists in
+`localStorage` across visits.
+
+**Search & add a channel** — Typing in the Channels tab's search box
+(debounced ~400ms) hits `GET /feeds/search?q=` → `search_channels()` (in
+`rss.py`) runs a `yt-dlp` flat extraction of YouTube's channel-filtered
+search results (`sp=EgIQAg%3D%3D` query param) and returns channel_id,
+title, thumbnail, and subscriber count. Clicking "Add" on a result — or
+pasting a URL directly in the "Add by URL" form — both hit the same
+`POST /feeds {channel_url}`.
 
 **Add feed** — `POST /feeds {channel_url}` → the user pastes any regular
 YouTube channel URL (`/@handle`, `/channel/UC..`, `/c/..`, `/user/..`), not a
 raw RSS link. `resolve_feed_url()` (in `rss.py`) resolves that to a
-`channel_id` via yt-dlp (`extract_flat`, `playlist_items=0` — fast, no video
-listing) and builds the RSS URL from it; a URL that's already an RSS feed
+`channel_id`: a `/channel/UC..` URL is matched directly via regex (no
+network call), anything else goes through yt-dlp (`extract_flat`,
+`playlist_items=0` — fast, no video listing). An already-direct RSS feed
 link is passed through unchanged. The resolved RSS URL is then validated
 with feedparser (400 on failure either way) → feed saved → first parse run
 immediately, writing new content rows.
 
-**Refresh** — For each feed, RSS `video_id`s are checked against the DB;
-missing ones are inserted as `status=not_downloaded`. Existing rows are left
-untouched.
+**Refresh** — For each feed, RSS `video_id`s are checked against the DB.
+For video_ids not yet known, the feed's channel Shorts tab
+(`fetch_channel_shorts_ids()`) is checked and any Shorts are silently
+skipped — they don't fit a "listen to it" library. Non-Short new entries are
+inserted as `status=not_downloaded`. If there are new entries, or any
+existing row is still missing `duration_seconds`, the channel's uploads
+playlist (`fetch_channel_video_durations()`) is fetched once and used to
+fill in durations — chosen over the `/videos` tab because some channels
+override that tab's default sort (e.g. "Popular"), which can silently drop
+recent uploads from a bounded flat listing; the uploads playlist is always
+newest-first. Existing rows otherwise are left untouched.
+
+**Library controls (sort / filter / pagination)** — All client-side, over
+the already-rendered card set (`app.js`'s `refreshGridView()`), no extra
+requests:
+- **Sort**: newest/oldest/title A–Z/Z–A/channel A–Z, via comparators over
+  each card's `data-*` attributes.
+- **Filter**: one dropdown holds "All channels", "★ Favorites"
+  (`card.dataset.favorite`), and each followed channel — favorites isn't a
+  separate control, just another filter value.
+- **Pagination**: 20 cards/page; `hidden` attribute toggles visibility (see
+  the CSS gotcha note below). Prev/Next scroll the window back to the top.
+- Sort, filter, and page selection each persist to `localStorage`
+  independently (except the current page number, which resets on reload).
+
+  > **CSS gotcha to remember**: any element whose class sets `display`
+  > (`.card`, `.pagination`, `.tab-panel`, `.overlay` all set `display: flex`)
+  > needs an explicit `.the-class[hidden] { display: none; }` rule. The
+  > native `hidden` attribute and an author class rule both have equal CSS
+  > specificity, and the author rule wins — so `element.hidden = true` alone
+  > silently does nothing if the class already sets `display`. This caused a
+  > real bug where pagination didn't actually hide the previous page's
+  > cards. Any new toggle-visibility element needs this pattern from the
+  > start.
+
+**Favorites** — A star button overlaid on each card's thumbnail calls
+`POST`/`DELETE /content/{id}/favorite`, updates the card's `data-favorite`
+and the button's visual state immediately, and re-runs `refreshGridView()`
+if the favorites filter is currently active (so unstarring removes it from
+view right away).
 
 **Download** — `POST /content/{id}/download` → 409 if already `downloading`
 → `status='downloading'` set synchronously → yt-dlp job dispatched to the
@@ -173,6 +244,8 @@ Environment variables (`.env`, documented in `.env.example`):
 - `DATABASE_URL` — default `sqlite:////app/data/spotifrei.db`
 - `STORAGE_DIR` — default `/app/data/storage`
 - `AUDIO_FORMAT` — default `mp3`
+- `HOST_PORT` — default `8000`; docker-compose–only (publishes the container's
+  fixed internal port 8000 on this host port), not read by the app itself
 
 `requirements.txt`: `fastapi`, `uvicorn[standard]`, `sqlalchemy`,
 `feedparser`, `yt-dlp`, `jinja2`, `python-multipart`, `itsdangerous`
@@ -193,7 +266,8 @@ Environment variables (`.env`, documented in `.env.example`):
   yt-dlp for audio extraction), installs `requirements.txt`, copies `app/`,
   runs `uvicorn app.main:app --host 0.0.0.0 --port 8000`.
 - `docker-compose.yml`: single `app` service, builds from the Dockerfile,
-  maps `8000:8000`, mounts `./data:/app/data` (persists the SQLite DB and
+  maps `${HOST_PORT:-8000}:8000` (override `HOST_PORT` in `.env` if 8000 is
+  taken on the host), mounts `./data:/app/data` (persists the SQLite DB and
   downloaded audio across container restarts/upgrades), reads env vars from
   `.env`.
 - `.env.example` ships in the repo so users copy it to `.env` and fill in
@@ -210,6 +284,8 @@ Environment variables (`.env`, documented in `.env.example`):
 
 ## 11. Implementation milestones
 
+MVP (v1), one milestone at a time, each tested end-to-end before moving on:
+
 1. Project scaffold + DB models, FastAPI boots empty
 2. Login/session (shared password) wired in, gating all routes
 3. Feed add + RSS parse (backend, tested via curl)
@@ -218,3 +294,27 @@ Environment variables (`.env`, documented in `.env.example`):
 6. Player page + stream endpoint
 7. Delete
 8. Dockerfile + docker-compose + README for self-hosting
+
+Post-MVP additions, same one-at-a-time/test-then-continue approach:
+
+9. Resolve any pasted channel URL to its RSS feed via yt-dlp (no more asking
+   users to construct an RSS link by hand)
+10. Mobile-responsive layout (sidebar/grid stacking, 2-column mobile grid)
+    and client-side content sorting
+11. Library/Channels tabs, replacing the old sidebar+content two-column
+    layout
+12. Channel search (YouTube search results, channel-type filtered) with
+    add-from-results, alongside the existing add-by-URL form
+13. Client-side pagination and channel filtering over the content grid,
+    unified with sorting in one `refreshGridView()` pass
+14. Favorites (star toggle, `is_favorite` column + migration), later folded
+    into the channel filter dropdown as a filter value rather than a
+    separate checkbox
+15. Full-screen loading overlay for background refreshes, replacing inline
+    status text that was breaking the filter row's layout
+16. Card polish: fixed-height titles (so action buttons align regardless of
+    title length), a plain SVG trash icon instead of a colored emoji, video
+    duration badges (backfilled via the channel's uploads playlist)
+17. Exclude YouTube Shorts from import entirely (checked against the
+    channel's Shorts tab, not a duration heuristic) — doesn't fit a
+    "listen to it" library

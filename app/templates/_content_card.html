@@ -5,11 +5,22 @@
   data-title="{{ item.title }}"
   data-channel="{{ item.feed.channel_title or '' }}"
   data-published="{{ item.published_at.isoformat() if item.published_at else '' }}"
+  data-favorite="{{ 'true' if item.is_favorite else 'false' }}"
 >
   <div class="thumb">
     {% if item.thumbnail_url %}
     <img src="{{ item.thumbnail_url }}" alt="" loading="lazy" />
     {% endif %}
+    {% if item.duration_seconds %}
+    <span class="duration-badge">{{ item.duration_seconds | duration }}</span>
+    {% endif %}
+    <button
+      type="button"
+      class="btn-favorite{{ ' is-favorite' if item.is_favorite else '' }}"
+      data-content-id="{{ item.id }}"
+      aria-label="Toggle favorite"
+      aria-pressed="{{ 'true' if item.is_favorite else 'false' }}"
+    >★</button>
   </div>
   <div class="card-body">
     <h3 class="card-title" title="{{ item.title }}">{{ item.title }}</h3>
@@ -20,7 +31,9 @@
     <div class="card-action">
       {% if item.status == "ready" %}
       <a class="btn-play" href="/player/{{ item.id }}">▶ Play</a>
-      <button type="button" class="btn-delete" data-content-id="{{ item.id }}" aria-label="Delete download">🗑</button>
+      <button type="button" class="btn-delete" data-content-id="{{ item.id }}" aria-label="Delete download">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></svg>
+      </button>
       {% elif item.status == "downloading" %}
       <span class="spinner" role="status" aria-label="Downloading"></span>
       {% elif item.status == "error" %}
