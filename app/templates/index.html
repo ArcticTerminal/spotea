@@ -35,7 +35,16 @@
     <section class="content-area">
       <div class="content-header">
         <h2>Latest</h2>
-        <span id="refresh-status" class="muted"></span>
+        <div class="content-header-actions">
+          <span id="refresh-status" class="muted"></span>
+          <select id="sort-select" class="sort-select" aria-label="Sort by">
+            <option value="date-desc">Newest first</option>
+            <option value="date-asc">Oldest first</option>
+            <option value="title-asc">Title A–Z</option>
+            <option value="title-desc">Title Z–A</option>
+            <option value="channel-asc">Channel A–Z</option>
+          </select>
+        </div>
       </div>
       <div id="content-grid" class="grid">
         {% for item in content %}

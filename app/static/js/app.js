@@ -94,6 +94,43 @@ function setupContentGrid() {
   });
 }
 
+const SORT_STORAGE_KEY = "spotifrei-sort";
+
+const SORT_COMPARATORS = {
+  "date-desc": (a, b) => (b.dataset.published || "").localeCompare(a.dataset.published || ""),
+  "date-asc": (a, b) => (a.dataset.published || "").localeCompare(b.dataset.published || ""),
+  "title-asc": (a, b) => a.dataset.title.localeCompare(b.dataset.title, undefined, { sensitivity: "base" }),
+  "title-desc": (a, b) => b.dataset.title.localeCompare(a.dataset.title, undefined, { sensitivity: "base" }),
+  "channel-asc": (a, b) =>
+    a.dataset.channel.localeCompare(b.dataset.channel, undefined, { sensitivity: "base" }),
+};
+
+function sortCards(criterion) {
+  const grid = document.getElementById("content-grid");
+  if (!grid) return;
+
+  const comparator = SORT_COMPARATORS[criterion] || SORT_COMPARATORS["date-desc"];
+  const cards = Array.from(grid.querySelectorAll(".card")).sort(comparator);
+  cards.forEach((card) => grid.appendChild(card));
+}
+
+function setupSorting() {
+  const select = document.getElementById("sort-select");
+  if (!select) return;
+
+  const saved = localStorage.getItem(SORT_STORAGE_KEY);
+  if (saved && SORT_COMPARATORS[saved]) {
+    select.value = saved;
+  }
+
+  select.addEventListener("change", () => {
+    localStorage.setItem(SORT_STORAGE_KEY, select.value);
+    sortCards(select.value);
+  });
+
+  sortCards(select.value);
+}
+
 async function refreshFeeds() {
   const statusEl = document.getElementById("refresh-status");
   if (statusEl) statusEl.textContent = "Refreshing…";
@@ -159,5 +196,6 @@ document.addEventListener("DOMContentLoaded", () => {
   setupFeedForm();
   setupUnfollowButtons();
   setupContentGrid();
+  setupSorting();
   refreshFeeds();
 });

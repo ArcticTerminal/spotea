@@ -1,4 +1,11 @@
-<article class="card" data-content-id="{{ item.id }}" data-status="{{ item.status }}">
+<article
+  class="card"
+  data-content-id="{{ item.id }}"
+  data-status="{{ item.status }}"
+  data-title="{{ item.title }}"
+  data-channel="{{ item.feed.channel_title or '' }}"
+  data-published="{{ item.published_at.isoformat() if item.published_at else '' }}"
+>
   <div class="thumb">
     {% if item.thumbnail_url %}
     <img src="{{ item.thumbnail_url }}" alt="" loading="lazy" />
