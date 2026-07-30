@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.deps import get_db, require_login
 from app.models import Content, Feed
-from app.rss import InvalidFeedError, fetch_feed
+from app.rss import ChannelResolutionError, InvalidFeedError, fetch_feed, resolve_feed_url
 from app.schemas import FeedAddResult, FeedCreate, FeedOut, RefreshResult
 
 router = APIRouter(prefix="/feeds", tags=["feeds"], dependencies=[Depends(require_login)])
@@ -51,7 +51,12 @@ def _sync_feed_content(db: Session, feed: Feed) -> int:
 
 @router.post("", response_model=FeedAddResult, status_code=status.HTTP_201_CREATED)
 def add_feed(payload: FeedCreate, db: Session = Depends(get_db)) -> FeedAddResult:
-    rss_url = payload.rss_url.strip()
+    channel_url = payload.channel_url.strip()
+
+    try:
+        rss_url = resolve_feed_url(channel_url)
+    except ChannelResolutionError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     existing = db.query(Feed).filter(Feed.user_id == DEFAULT_USER_ID, Feed.rss_url == rss_url).first()
     if existing:

@@ -96,7 +96,7 @@ not_downloaded ──▶ downloading ──▶ ready
 | POST | `/login` | Check password, set session cookie |
 | POST | `/logout` | Clear session |
 | GET | `/` | Home page (feeds + content list), requires login |
-| POST | `/feeds` | Add a new RSS URL, run first parse |
+| POST | `/feeds` | Add a channel by URL (resolved to RSS via yt-dlp), run first parse |
 | DELETE | `/feeds/{id}` | Unfollow |
 | POST | `/feeds/refresh` | Re-parse all feeds, insert new content rows |
 | GET | `/content` | JSON content list (used for polling) |
@@ -121,9 +121,14 @@ gate for the whole instance, appropriate for a small self-hosted deployment.
 JS triggers `POST /feeds/refresh` in the background and updates the grid when
 it completes — no blank-screen wait for RSS fetches.
 
-**Add feed** — `POST /feeds {rss_url}` → validated with feedparser (400 if
-invalid) → feed saved → first parse run immediately, writing new content
-rows.
+**Add feed** — `POST /feeds {channel_url}` → the user pastes any regular
+YouTube channel URL (`/@handle`, `/channel/UC..`, `/c/..`, `/user/..`), not a
+raw RSS link. `resolve_feed_url()` (in `rss.py`) resolves that to a
+`channel_id` via yt-dlp (`extract_flat`, `playlist_items=0` — fast, no video
+listing) and builds the RSS URL from it; a URL that's already an RSS feed
+link is passed through unchanged. The resolved RSS URL is then validated
+with feedparser (400 on failure either way) → feed saved → first parse run
+immediately, writing new content rows.
 
 **Refresh** — For each feed, RSS `video_id`s are checked against the DB;
 missing ones are inserted as `status=not_downloaded`. Existing rows are left

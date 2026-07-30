@@ -120,7 +120,7 @@ function setupFeedForm() {
     event.preventDefault();
     errorEl.hidden = true;
 
-    const rssUrl = document.getElementById("feed-url").value.trim();
+    const channelUrl = document.getElementById("feed-url").value.trim();
     const submitBtn = form.querySelector("button[type=submit]");
     submitBtn.disabled = true;
 
@@ -128,7 +128,7 @@ function setupFeedForm() {
       const res = await fetch("/feeds", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rss_url: rssUrl }),
+        body: JSON.stringify({ channel_url: channelUrl }),
       });
 
       if (!res.ok) {

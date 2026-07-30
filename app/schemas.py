@@ -4,7 +4,7 @@ from pydantic import BaseModel, ConfigDict
 
 
 class FeedCreate(BaseModel):
-    rss_url: str
+    channel_url: str
 
 
 class FeedOut(BaseModel):

@@ -4,12 +4,45 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 import feedparser
+import yt_dlp
 
 VIDEO_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{11}$")
+
+RSS_FEED_URL_TEMPLATE = "https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
+
+_CHANNEL_RESOLVE_OPTS = {
+    "quiet": True,
+    "no_warnings": True,
+    "extract_flat": "in_playlist",
+    "playlist_items": "0",
+}
 
 
 class InvalidFeedError(Exception):
     pass
+
+
+class ChannelResolutionError(Exception):
+    pass
+
+
+def resolve_feed_url(url: str) -> str:
+    """Turn a YouTube channel URL (any form: @handle, /channel/UC.., /c/.., /user/..)
+    or an already-direct RSS feed URL into a usable RSS feed URL."""
+    if "feeds/videos.xml" in url:
+        return url
+
+    try:
+        with yt_dlp.YoutubeDL(_CHANNEL_RESOLVE_OPTS) as ydl:
+            info = ydl.extract_info(url, download=False)
+    except yt_dlp.utils.DownloadError as exc:
+        raise ChannelResolutionError(f"Could not resolve channel URL: {exc}") from exc
+
+    channel_id = info.get("channel_id") if info else None
+    if not channel_id:
+        raise ChannelResolutionError("Could not determine a channel ID from this URL")
+
+    return RSS_FEED_URL_TEMPLATE.format(channel_id=channel_id)
 
 
 @dataclass
