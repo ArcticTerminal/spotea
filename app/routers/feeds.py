@@ -14,6 +14,7 @@ from app.rss import (
     search_channels,
 )
 from app.schemas import ChannelSearchResultOut, FeedAddResult, FeedCreate, FeedOut, RefreshResult
+from app.storage import delete_files_for_feed
 
 router = APIRouter(prefix="/feeds", tags=["feeds"], dependencies=[Depends(require_login)])
 
@@ -123,6 +124,10 @@ def delete_feed(feed_id: int, db: Session = Depends(get_db)) -> None:
     feed = db.query(Feed).filter(Feed.id == feed_id, Feed.user_id == DEFAULT_USER_ID).first()
     if not feed:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Feed not found")
+
+    # Content rows cascade with the feed, but their files on disk don't.
+    delete_files_for_feed(db, feed.id)
+
     db.delete(feed)
     db.commit()
 

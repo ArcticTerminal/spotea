@@ -33,7 +33,8 @@ spotifrei/
     config.py              # env-based settings
     database.py             # SQLAlchemy engine/session
     migrations.py            # lightweight "add column if missing" patcher
-    formatting.py              # Jinja filters (duration formatting)
+    formatting.py              # Jinja filters (duration, file size)
+    storage.py                  # disk usage, cache clearing, orphan sweep
     models.py                    # User, Feed, Content
     schemas.py                     # Pydantic request/response models
     auth.py                          # login/session handling
@@ -43,7 +44,8 @@ spotifrei/
     routers/
       auth.py
       feeds.py                               # feeds, search, refresh
-      content.py                               # download/status/stream/favorite/delete
+      content.py                               # download/status/stream/favorite/save/delete
+      storage.py                                 # clear-all endpoint
       pages.py                                   # home + player page rendering
     templates/
       login.html
@@ -51,8 +53,10 @@ spotifrei/
       _content_card.html                           # single card partial, reused per item
       player.html
     static/
-      js/app.js                                      # tabs, search, sort/filter/pagination,
-                                                       # polling, download/favorite/delete triggers
+      js/ui.js                                       # shared confirm modal + toast (loaded first)
+      js/app.js                                        # tabs, search, sort/filter/pagination,
+                                                        # polling, download/save/delete triggers
+      js/player.js                                       # custom audio player controls
       css/style.css
   data/                                 # mounted as Docker volume
     storage/{video_id}.mp3
@@ -82,7 +86,12 @@ Unique: `(user_id, rss_url)`.
 convenience), `video_id` (YouTube ID), `title`, `thumbnail_url`,
 `duration_seconds` (nullable — backfilled from the channel's uploads
 playlist, not in the RSS feed), `published_at`, `status`, `file_path`,
-`error_message`, `added_at`, `downloaded_at`, `is_favorite`.
+`error_message`, `added_at`, `downloaded_at`, `is_favorite`, `is_saved`.
+`is_favorite` and `is_saved` are separate on purpose: **saving** is a
+lightweight "come back to this" bookmark, toggled from the Library grid
+without opening anything; **favoriting** is a considered "I liked this",
+toggled from the player while you're actually listening. Both are filter
+options in the Library.
 Unique: `(user_id, video_id)`.
 Index: `(user_id, status)`, `(user_id, published_at DESC)`.
 
@@ -96,8 +105,8 @@ not_downloaded ──▶ downloading ──▶ ready
 
 **Schema evolution** — `Base.metadata.create_all()` (in `main.py`'s startup)
 only creates tables that don't exist yet; it never alters existing ones. Each
-column added after the initial release (`is_favorite`, `duration_seconds`) is
-also registered in `app/migrations.py`, which runs on every startup and adds
+column added after the initial release (`is_favorite`, `duration_seconds`,
+`is_saved`) is also registered in `app/migrations.py`, which runs on every startup and adds
 the column via `ALTER TABLE ... ADD COLUMN` if it's missing — a lightweight
 stand-in for a real migration framework (Alembic would be overkill at this
 scale). New installs get every column for free via `create_all()`; upgrading
@@ -119,8 +128,11 @@ existing installs is what `migrations.py` is for.
 | POST | `/content/{id}/download` | Start yt-dlp download in the background |
 | GET | `/content/{id}/status` | Current status |
 | GET | `/content/{id}/stream` | Serve the audio file (Range-request support) |
-| POST | `/content/{id}/favorite` | Mark as favorite |
+| POST | `/content/{id}/favorite` | Mark as favorite (from the player) |
 | DELETE | `/content/{id}/favorite` | Unmark as favorite |
+| POST | `/content/{id}/save` | Save for later (from the Library grid) |
+| DELETE | `/content/{id}/save` | Un-save |
+| DELETE | `/storage` | Delete every downloaded file (Storage tab "Clear all") |
 | DELETE | `/content/{id}` | Delete file, reset status to `not_downloaded` |
 | GET | `/player/{id}` | Player page |
 
@@ -141,10 +153,10 @@ backdrop + spinner) and reloads the page if new content arrived — no
 blank-screen wait for RSS fetches, and no layout-shifting inline "Refreshing…"
 text competing with the filter/sort controls.
 
-**Tabs** — The home page is split into **Library** (content grid) and
-**Channels** (search, add-by-URL, followed list) — two `<section>` panels
-toggled via `hidden`, not separate routes. The active tab persists in
-`localStorage` across visits.
+**Tabs** — The home page is split into **Library** (content grid),
+**Channels** (search, add-by-URL, followed list) and **Storage** (what's on
+disk) — `<section>` panels toggled via `hidden`, not separate routes. The
+active tab persists in `localStorage` across visits.
 
 **Search & add a channel** — Typing in the Channels tab's search box
 (debounced ~400ms) hits `GET /feeds/search?q=` → `search_channels()` (in
@@ -199,27 +211,76 @@ requests:
   > cards. Any new toggle-visibility element needs this pattern from the
   > start.
 
-**Favorites** — A star button overlaid on each card's thumbnail calls
-`POST`/`DELETE /content/{id}/favorite`, updates the card's `data-favorite`
-and the button's visual state immediately, and re-runs `refreshGridView()`
-if the favorites filter is currently active (so unstarring removes it from
-view right away).
+**Save for later** — A bookmark toggle at the right end of each card's action
+row (`margin-left: auto`, so it lines up across every card regardless of
+whether the card shows Download / Play+delete / a spinner) calls
+`POST`/`DELETE /content/{id}/save`. It deliberately does *not* float over the
+artwork — an icon pinned onto a busy thumbnail reads as a stray artifact
+rather than a control. Because the save toggle shares the action row, the
+`updateCard()` re-render on any status change has to re-emit it, which is why
+`cardActionHtml()` is composed of `statusActionHtml() + saveButtonHtml()`.
 
-**Download** — `POST /content/{id}/download` → 409 if already `downloading`
-→ `status='downloading'` set synchronously → yt-dlp job dispatched to the
+**Confirm dialogs & toasts** — Native `window.confirm`/`window.alert` are not
+used anywhere. `static/js/ui.js` loads before the page script on every page
+and exposes `confirmDialog(message, label) -> Promise<boolean>` (centered
+modal, backdrop-click and Escape both cancel, focus lands on the *safe*
+button so a reflexive Enter never confirms a destructive action) and
+`showToast(message)` (bottom-centre, auto-dismissing). Both lazily create
+their own DOM, so no template needs to carry markup for them.
+
+**Download** — There is no download button. Every card just says **Play**;
+opening the player is what fetches the audio, so downloads are a side effect
+of listening rather than a separate chore, and the downloaded files are
+treated as a disposable cache (see Storage below). Cards that are already on
+disk get a small check badge on the artwork so you can tell what will start
+instantly.
+
+`POST /content/{id}/download` → 409 if already `downloading` →
+`status='downloading'` set synchronously → yt-dlp job dispatched to the
 background → response returns immediately. On completion: `status='ready'` +
 `file_path`; on failure: `status='error'` + `error_message`.
 
-**Polling** — For each card in `downloading` state, the frontend polls
-`GET /content/{id}/status` every 1.5–2s; stops once `ready` or `error`.
+> **Never start a download on plain page load.** Browsers speculatively load
+> links — a prerender executes the target page's JavaScript — so simply having
+> `<a href="/player/{id}">` on a card is enough for the browser to open the
+> player behind your back and, if the player downloads unconditionally, fill
+> the user's disk with things they never clicked. This actually happened
+> during development (server logs showed `GET /player/N` + `POST
+> /content/N/download` for pages nobody visited). `player.js` therefore gates
+> `prepareAudio()` behind `whenVisible()`, which waits out
+> `document.prerendering` and a non-`visible` `visibilityState`.
 
-**Play** — `GET /player/{id}` → `<audio src="/content/{id}/stream">`. The
-stream endpoint returns 409 if `status != ready`; the file path always comes
-from the DB, never from the request (prevents path traversal).
+**Polling** — While the player is preparing, it polls
+`GET /content/{id}/status` every 1.5s until `ready` or `error`.
 
-**Delete** — File removed from disk, DB row reset to `status='not_downloaded'`
-+ `file_path=NULL` (row kept, not deleted) — re-downloading later doesn't
-require refreshing the feed again.
+**Storage** — The Storage tab lists everything on disk with per-item sizes, a
+total, per-item removal and "Clear all". Sizes are read from disk at render
+time rather than stored, so a file deleted behind the app's back reports 0
+instead of inflating the total. Two things to keep in mind:
+- Content rows cascade-delete with their feed, but **files do not** —
+  `delete_files_for_feed()` runs before a feed is deleted, otherwise
+  unfollowing a channel strands its audio on disk permanently.
+- `clear_all()` also sweeps any `*.{AUDIO_FORMAT}` in the storage directory
+  that no row points at, so "Clear all" really does free everything it
+  claims (older builds leaked exactly these orphans).
+
+**Play** — `GET /player/{id}` renders a custom player rather than a native
+`<audio controls>` bar (which renders as a light pill that clashes badly with
+the dark theme). The `<audio>` element is hidden and driven by
+`static/js/player.js`: large artwork, title/channel, a seek bar with
+elapsed/total times, ±15s skip buttons flanking a large round play/pause
+button, and a footer row with volume and the favorite toggle. Keyboard:
+Space toggles playback, ←/→ skip. `<input type=range>` can't style its
+already-played portion, so both sliders paint it with a gradient driven by a
+`--fill` custom property that the JS keeps in sync.
+
+The stream endpoint returns 409 if `status != ready`; the file path always
+comes from the DB, never from the request (prevents path traversal).
+
+**Delete** — Removing a download (Storage tab, per item or in bulk) deletes
+the file and resets the row to `status='not_downloaded'` + `file_path=NULL`.
+The row is kept, so the item stays in the Library and comes back just by
+playing it again. Confirmed through the shared modal, not `window.confirm`.
 
 ## 6. Concurrency & security
 
@@ -270,6 +331,16 @@ Environment variables (`.env`, documented in `.env.example`):
   taken on the host), mounts `./data:/app/data` (persists the SQLite DB and
   downloaded audio across container restarts/upgrades), reads env vars from
   `.env`.
+- **Static assets are served with `Cache-Control: no-cache`**
+  (`RevalidatingStaticFiles` in `main.py`). Starlette's `StaticFiles` sends
+  ETag/Last-Modified but no `Cache-Control`, and browsers then fall back to
+  *heuristic* freshness — serving cached CSS/JS for a while without asking the
+  server at all. After `docker compose up -d --build` that means a user can be
+  running new templates against stale CSS/JS, which renders as a subtly or
+  completely broken UI (buttons unpositioned, dialogs invisible) with nothing
+  in the logs. `no-cache` still permits caching, it just forces revalidation;
+  unchanged files come back as a cheap 304. Do not "optimise" this into a long
+  max-age without adding content-hashed asset URLs first.
 - `.env.example` ships in the repo so users copy it to `.env` and fill in
   `APP_PASSWORD` / `SECRET_KEY` before first run.
 - README will document: `docker compose up -d`, how to set the password, and
@@ -318,3 +389,28 @@ Post-MVP additions, same one-at-a-time/test-then-continue approach:
 17. Exclude YouTube Shorts from import entirely (checked against the
     channel's Shorts tab, not a duration heuristic) — doesn't fit a
     "listen to it" library
+18. Serve static assets with `Cache-Control: no-cache` — without it,
+    browsers heuristically cached CSS/JS and kept rendering post-upgrade
+    pages with pre-upgrade styles
+19. Replaced `window.confirm`/`window.alert` with a shared modal + toast
+    (`static/js/ui.js`)
+20. Custom player (seek, ±15s, volume, keyboard) replacing native
+    `<audio controls>`; favorite toggle moved from the grid into the player
+21. "Save for later" (`is_saved`) as a separate bookmark toggle in the card
+    action row, filterable alongside channels and favorites
+22. Cards reduced to a single **Play** action — playing is what downloads,
+    with the player showing a preparing state — plus a **Storage** tab for
+    per-item and bulk cache clearing, a downloaded badge on cached items,
+    a guard so speculative link prerendering can't start downloads, and
+    cleanup of audio orphaned by unfollowing a channel
+
+### Verifying UI work
+
+Browser tooling isn't wired into this environment, and reasoning about CSS
+without rendering it has produced shipped-broken UI before. The reliable loop
+is a headless screenshot: drive the locally installed Chromium-based browser
+with `puppeteer-core` (`executablePath` pointed at it — no browser download
+needed), log in, navigate, optionally click through to a state (modal open,
+filter applied), and screenshot. Check both desktop and phone viewports, and
+assert on real post-interaction state (`dataset` values after a reload) rather
+than assuming the handler worked.

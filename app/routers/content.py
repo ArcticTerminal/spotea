@@ -9,7 +9,7 @@ from app.deps import get_db, require_login
 from app.downloader import DownloadError, download_audio
 from app.models import Content
 from app.rss import VIDEO_ID_RE
-from app.schemas import ContentOut, FavoriteOut, StatusOut
+from app.schemas import ContentOut, FavoriteOut, SavedOut, StatusOut
 
 router = APIRouter(prefix="/content", tags=["content"], dependencies=[Depends(require_login)])
 
@@ -66,6 +66,7 @@ def list_content(db: Session = Depends(get_db)) -> list[ContentOut]:
             status=c.status,
             added_at=c.added_at,
             is_favorite=c.is_favorite,
+            is_saved=c.is_saved,
         )
         for c in rows
     ]
@@ -112,6 +113,22 @@ def remove_favorite(content_id: int, db: Session = Depends(get_db)) -> FavoriteO
     content.is_favorite = False
     db.commit()
     return FavoriteOut(id=content.id, is_favorite=content.is_favorite)
+
+
+@router.post("/{content_id}/save", response_model=SavedOut)
+def add_saved(content_id: int, db: Session = Depends(get_db)) -> SavedOut:
+    content = _get_content_or_404(db, content_id)
+    content.is_saved = True
+    db.commit()
+    return SavedOut(id=content.id, is_saved=content.is_saved)
+
+
+@router.delete("/{content_id}/save", response_model=SavedOut)
+def remove_saved(content_id: int, db: Session = Depends(get_db)) -> SavedOut:
+    content = _get_content_or_404(db, content_id)
+    content.is_saved = False
+    db.commit()
+    return SavedOut(id=content.id, is_saved=content.is_saved)
 
 
 @router.get("/{content_id}/stream")

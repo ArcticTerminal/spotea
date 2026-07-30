@@ -1,135 +1,59 @@
-const POLL_INTERVAL_MS = 1500;
-
-const TRASH_ICON_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></svg>`;
-
 function escapeHtml(str) {
   const div = document.createElement("div");
   div.textContent = str ?? "";
   return div.innerHTML;
 }
 
-function cardActionHtml(contentId, status, errorMessage) {
-  if (status === "ready") {
-    return `
-      <a class="btn-play" href="/player/${contentId}">▶ Play</a>
-      <button type="button" class="btn-delete" data-content-id="${contentId}" aria-label="Delete download">${TRASH_ICON_SVG}</button>
-    `;
-  }
-  if (status === "downloading") {
-    return `<span class="spinner" role="status" aria-label="Downloading"></span>`;
-  }
-  if (status === "error") {
-    return `
-      <span class="status-error" title="${escapeHtml(errorMessage)}">Failed</span>
-      <button type="button" class="btn-download" data-content-id="${contentId}">Retry</button>
-    `;
-  }
-  return `<button type="button" class="btn-download" data-content-id="${contentId}">Download</button>`;
-}
-
-function updateCard(contentId, status, errorMessage) {
+async function toggleSaved(contentId, button) {
   const card = document.querySelector(`.card[data-content-id="${contentId}"]`);
-  if (!card) return;
-  card.dataset.status = status;
-  const action = card.querySelector(".card-action");
-  if (action) action.innerHTML = cardActionHtml(contentId, status, errorMessage);
-}
+  const isSaved = card?.dataset.saved === "true";
 
-function pollStatus(contentId) {
-  const timer = setInterval(async () => {
-    try {
-      const res = await fetch(`/content/${contentId}/status`);
-      if (!res.ok) throw new Error("status check failed");
-      const data = await res.json();
-      updateCard(contentId, data.status, data.error_message);
-      if (data.status === "ready" || data.status === "error") {
-        clearInterval(timer);
-      }
-    } catch (err) {
-      clearInterval(timer);
-    }
-  }, POLL_INTERVAL_MS);
-}
-
-async function startDownload(contentId) {
-  updateCard(contentId, "downloading");
   try {
-    const res = await fetch(`/content/${contentId}/download`, { method: "POST" });
-    if (!res.ok && res.status !== 409) {
-      const data = await res.json().catch(() => ({}));
-      updateCard(contentId, "error", data.detail || "Could not start download");
+    const res = await fetch(`/content/${contentId}/save`, {
+      method: isSaved ? "DELETE" : "POST",
+    });
+    if (!res.ok) {
+      showToast("Could not update saved items");
       return;
     }
-    pollStatus(contentId);
-  } catch (err) {
-    updateCard(contentId, "error", "Could not start download");
-  }
-}
-
-async function deleteContent(contentId) {
-  if (!confirm("Delete the downloaded audio? You can re-download it later.")) return;
-  const res = await fetch(`/content/${contentId}`, { method: "DELETE" });
-  if (!res.ok) return;
-  const data = await res.json();
-  updateCard(contentId, data.status);
-}
-
-async function toggleFavorite(contentId, button) {
-  const card = document.querySelector(`.card[data-content-id="${contentId}"]`);
-  const isFavorite = card?.dataset.favorite === "true";
-
-  try {
-    const res = await fetch(`/content/${contentId}/favorite`, {
-      method: isFavorite ? "DELETE" : "POST",
-    });
-    if (!res.ok) return;
     const data = await res.json();
 
-    if (card) card.dataset.favorite = String(data.is_favorite);
-    if (button) {
-      button.classList.toggle("is-favorite", data.is_favorite);
-      button.setAttribute("aria-pressed", String(data.is_favorite));
-    }
+    if (card) card.dataset.saved = String(data.is_saved);
+    if (button) applySavedState(button, data.is_saved);
 
-    if (document.getElementById("channel-filter")?.value === FAVORITES_FILTER_VALUE) {
+    // Un-saving while the Saved filter is active should drop it from view.
+    if (document.getElementById("channel-filter")?.value === SAVED_FILTER_VALUE) {
       refreshGridView();
     }
   } catch (err) {
-    // ignore transient errors
+    showToast("Could not update saved items");
   }
+}
+
+function applySavedState(button, isSaved) {
+  button.classList.toggle("is-on", isSaved);
+  button.setAttribute("aria-pressed", String(isSaved));
+  button.title = isSaved ? "Saved for later" : "Save for later";
+  const svg = button.querySelector("svg");
+  if (svg) svg.setAttribute("fill", isSaved ? "currentColor" : "none");
 }
 
 function setupContentGrid() {
   const grid = document.getElementById("content-grid");
   if (!grid) return;
 
+  // Downloading is no longer a card-level action — playing something is what
+  // fetches it — so the only interactive control left here is the save toggle.
   grid.addEventListener("click", (event) => {
-    const downloadBtn = event.target.closest(".btn-download");
-    if (downloadBtn) {
-      startDownload(downloadBtn.dataset.contentId);
-      return;
-    }
-
-    const deleteBtn = event.target.closest(".btn-delete");
-    if (deleteBtn) {
-      deleteContent(deleteBtn.dataset.contentId);
-      return;
-    }
-
-    const favoriteBtn = event.target.closest(".btn-favorite");
-    if (favoriteBtn) {
-      toggleFavorite(favoriteBtn.dataset.contentId, favoriteBtn);
-    }
-  });
-
-  grid.querySelectorAll('.card[data-status="downloading"]').forEach((card) => {
-    pollStatus(card.dataset.contentId);
+    const saveBtn = event.target.closest(".btn-save");
+    if (saveBtn) toggleSaved(saveBtn.dataset.contentId, saveBtn);
   });
 }
 
 const SORT_STORAGE_KEY = "spotifrei-sort";
 const FILTER_STORAGE_KEY = "spotifrei-channel-filter";
 const FAVORITES_FILTER_VALUE = "__favorites__";
+const SAVED_FILTER_VALUE = "__saved__";
 const PAGE_SIZE = 20;
 
 let currentPage = 1;
@@ -169,15 +93,16 @@ function refreshGridView() {
   if (!grid) return;
 
   const filterValue = document.getElementById("channel-filter")?.value || "";
-  const favoritesOnly = filterValue === FAVORITES_FILTER_VALUE;
   const sortValue = document.getElementById("sort-select")?.value || "date-desc";
   const comparator = SORT_COMPARATORS[sortValue] || SORT_COMPARATORS["date-desc"];
 
   const allCards = Array.from(grid.querySelectorAll(".card"));
   const filtered = allCards
-    .filter((card) =>
-      favoritesOnly ? card.dataset.favorite === "true" : !filterValue || card.dataset.channel === filterValue
-    )
+    .filter((card) => {
+      if (filterValue === FAVORITES_FILTER_VALUE) return card.dataset.favorite === "true";
+      if (filterValue === SAVED_FILTER_VALUE) return card.dataset.saved === "true";
+      return !filterValue || card.dataset.channel === filterValue;
+    })
     .sort(comparator);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
@@ -339,7 +264,7 @@ async function addChannel(channelUrl, button) {
       button.disabled = false;
       button.textContent = "Add";
     }
-    alert(data.detail || "Could not add channel");
+    showToast(data.detail || "Could not add channel");
   } catch (err) {
     if (button) {
       button.disabled = false;
@@ -438,12 +363,53 @@ function setupTabs() {
   activate(savedIsValid ? saved : "library");
 }
 
+function setupStorage() {
+  const clearBtn = document.getElementById("clear-storage");
+  if (clearBtn) {
+    clearBtn.addEventListener("click", async () => {
+      const confirmed = await confirmDialog(
+        "Delete all downloaded audio? Your channels and saved items stay — you can download anything again by playing it.",
+        "Clear all"
+      );
+      if (!confirmed) return;
+
+      const res = await fetch("/storage", { method: "DELETE" });
+      if (res.ok) window.location.reload();
+      else showToast("Could not clear downloads");
+    });
+  }
+
+  const list = document.getElementById("storage-list");
+  if (!list) return;
+
+  list.addEventListener("click", async (event) => {
+    const btn = event.target.closest(".storage-remove");
+    if (!btn) return;
+
+    const confirmed = await confirmDialog(
+      "Remove this download? You can get it back by playing it again.",
+      "Remove"
+    );
+    if (!confirmed) return;
+
+    const res = await fetch(`/content/${btn.dataset.contentId}`, { method: "DELETE" });
+    if (res.ok) window.location.reload();
+    else showToast("Could not remove this download");
+  });
+}
+
 function setupUnfollowButtons() {
   document.querySelectorAll(".unfollow").forEach((btn) => {
     btn.addEventListener("click", async () => {
-      if (!confirm("Unfollow this channel?")) return;
+      const confirmed = await confirmDialog(
+        "Unfollow this channel? Its videos will be removed from your library.",
+        "Unfollow"
+      );
+      if (!confirmed) return;
+
       const res = await fetch(`/feeds/${btn.dataset.feedId}`, { method: "DELETE" });
       if (res.ok) window.location.reload();
+      else showToast("Could not unfollow this channel");
     });
   });
 }
@@ -453,6 +419,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupChannelSearch();
   setupFeedForm();
   setupUnfollowButtons();
+  setupStorage();
   setupContentGrid();
   setupSorting();
   setupChannelFilter();

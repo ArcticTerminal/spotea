@@ -58,6 +58,7 @@ class Content(Base):
     added_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
     downloaded_at: Mapped[datetime | None] = mapped_column(default=None)
     is_favorite: Mapped[bool] = mapped_column(default=False)
+    is_saved: Mapped[bool] = mapped_column(default=False)
 
     feed: Mapped["Feed"] = relationship(back_populates="content")
     user: Mapped["User"] = relationship(back_populates="content")

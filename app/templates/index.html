@@ -17,6 +17,7 @@
   <nav class="tabs" role="tablist">
     <button type="button" class="tab-btn active" data-tab="library" role="tab" aria-selected="true">Library</button>
     <button type="button" class="tab-btn" data-tab="channels" role="tab" aria-selected="false">Channels</button>
+    <button type="button" class="tab-btn" data-tab="storage" role="tab" aria-selected="false">Storage</button>
   </nav>
 
   <main class="layout">
@@ -26,7 +27,8 @@
         <div class="content-header-actions">
           <select id="channel-filter" class="sort-select" aria-label="Filter">
             <option value="">All channels</option>
-            <option value="__favorites__">★ Favorites</option>
+            <option value="__favorites__">Favorites</option>
+            <option value="__saved__">Saved for later</option>
             {% for feed in feeds %}
             <option value="{{ feed.channel_title }}">{{ feed.channel_title or feed.rss_url }}</option>
             {% endfor %}
@@ -81,12 +83,47 @@
         </ul>
       </div>
     </section>
+
+    <section id="tab-storage" class="tab-panel" data-tab-panel="storage" hidden>
+      <div class="channels-panel-inner">
+        <h2>Downloaded audio</h2>
+
+        <div class="storage-summary">
+          <div>
+            <span class="storage-total">{{ usage.total_bytes | filesize }}</span>
+            <span class="muted">across {{ usage.count }} item{{ '' if usage.count == 1 else 's' }}</span>
+          </div>
+          {% if usage.count %}
+          <button type="button" id="clear-storage" class="btn-danger">Clear all</button>
+          {% endif %}
+        </div>
+
+        {% if usage.count %}
+        <ul id="storage-list" class="storage-list">
+          {% for item in usage.items %}
+          <li data-content-id="{{ item.id }}">
+            <div class="storage-item-info">
+              <span class="storage-item-title">{{ item.title }}</span>
+              <span class="storage-item-meta">{{ item.channel_title }} · {{ item.size_bytes | filesize }}</span>
+            </div>
+            <button type="button" class="storage-remove" data-content-id="{{ item.id }}" aria-label="Remove download">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></svg>
+            </button>
+          </li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <p class="muted">Nothing downloaded yet. Anything you play gets cached here.</p>
+        {% endif %}
+      </div>
+    </section>
   </main>
 
   <div id="refresh-overlay" class="overlay" hidden>
     <span class="spinner spinner-lg" role="status" aria-label="Refreshing"></span>
   </div>
 
+  <script src="/static/js/ui.js"></script>
   <script src="/static/js/app.js"></script>
 </body>
 </html>

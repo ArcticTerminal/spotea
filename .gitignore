@@ -7,3 +7,4 @@ data/*.db
 data/*.db.bak-*
 data/storage/*
 !data/storage/.gitkeep
+.claude/

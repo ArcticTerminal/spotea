@@ -327,6 +327,83 @@ body {
   cursor: default;
 }
 
+/* Storage tab */
+
+.storage-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding: 0.9rem 1rem;
+  background: #1e1e1e;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+}
+
+.storage-total {
+  font-size: 1.15rem;
+  font-weight: 700;
+  margin-right: 0.4rem;
+}
+
+.storage-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.storage-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.55rem 0.75rem;
+  background: #1a1a1a;
+  border-radius: 6px;
+}
+
+.storage-item-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.storage-item-title {
+  font-size: 0.85rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.storage-item-meta {
+  font-size: 0.72rem;
+  color: #888;
+}
+
+.storage-remove {
+  background: none;
+  border: none;
+  color: #888;
+  cursor: pointer;
+  padding: 0.3rem;
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.storage-remove svg {
+  width: 16px;
+  height: 16px;
+}
+
+.storage-remove:hover {
+  color: #f15e6c;
+}
+
 .content-header {
   display: flex;
   align-items: center;
@@ -406,6 +483,7 @@ body {
 
 .card .thumb {
   position: relative;
+  display: block;
   aspect-ratio: 16 / 9;
   background: #2a2a2a;
 }
@@ -430,30 +508,53 @@ body {
   line-height: 1.4;
 }
 
-.btn-favorite {
+/* Marks content that's already on disk and will start instantly. Mirrors the
+   duration badge on the opposite corner. */
+.downloaded-badge {
   position: absolute;
-  top: 0.4rem;
+  bottom: 0.4rem;
   right: 0.4rem;
-  width: 26px;
-  height: 26px;
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
-  border: none;
-  background: rgba(0, 0, 0, 0.55);
-  color: rgba(255, 255, 255, 0.65);
-  font-size: 0.9rem;
-  line-height: 1;
-  cursor: pointer;
+  background: #1db954;
+  color: #000;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
-.btn-favorite:hover {
+.downloaded-badge svg {
+  width: 11px;
+  height: 11px;
+}
+
+/* Save-for-later toggle, pinned to the right end of the card's action row so
+   it sits with the other actions instead of floating over the artwork. */
+.btn-save {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: #7a7a7a;
+  cursor: pointer;
+  padding: 0.3rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.btn-save svg {
+  width: 16px;
+  height: 16px;
+}
+
+.btn-save:hover {
   color: #fff;
 }
 
-.btn-favorite.is-favorite {
-  color: #f2c94c;
+.btn-save.is-on {
+  color: #1db954;
 }
 
 .card-body {
@@ -585,6 +686,113 @@ body {
   border-width: 4px;
 }
 
+/* Confirm dialog */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  z-index: 1100;
+}
+
+.modal-overlay[hidden] {
+  display: none;
+}
+
+.modal {
+  background: #232323;
+  border-radius: 12px;
+  padding: 1.5rem;
+  width: 100%;
+  max-width: 360px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+}
+
+.modal p {
+  margin: 0 0 1.5rem;
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.btn-quiet {
+  background: none;
+  border: none;
+  color: #b3b3b3;
+  border-radius: 999px;
+  padding: 0.5rem 1rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-quiet:hover {
+  color: #fff;
+}
+
+.btn-danger {
+  background: #f15e6c;
+  border: none;
+  color: #000;
+  border-radius: 999px;
+  padding: 0.5rem 1.15rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.btn-danger:hover {
+  background: #ff7482;
+}
+
+.modal button:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+/* Toasts */
+
+.toast-container {
+  position: fixed;
+  left: 50%;
+  bottom: 1.5rem;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  z-index: 1200;
+  width: max-content;
+  max-width: calc(100vw - 2rem);
+}
+
+.toast {
+  background: #2f2f2f;
+  color: #f5f5f5;
+  border-left: 3px solid #f15e6c;
+  border-radius: 8px;
+  padding: 0.65rem 1rem;
+  font-size: 0.85rem;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.5);
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.toast-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
 /* Player page */
 
 .player-body {
@@ -593,55 +801,293 @@ body {
   justify-content: center;
   min-height: 100vh;
   padding: 1.5rem;
+  background: radial-gradient(circle at 50% 0%, #1f1f1f 0%, #121212 60%);
 }
 
 .player-card {
-  background: #1a1a1a;
-  border-radius: 12px;
-  padding: 2rem;
   width: 100%;
-  max-width: 420px;
-  text-align: center;
+  max-width: 380px;
 }
 
 .back-link {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
   color: #b3b3b3;
   text-decoration: none;
   font-size: 0.85rem;
-  margin-bottom: 1rem;
+  font-weight: 600;
+  margin-bottom: 1.5rem;
+}
+
+.back-link svg {
+  width: 16px;
+  height: 16px;
 }
 
 .back-link:hover {
   color: #fff;
 }
 
-.player-thumb {
-  border-radius: 10px;
+.player-art {
+  border-radius: 8px;
   overflow: hidden;
   aspect-ratio: 16 / 9;
   background: #2a2a2a;
-  margin-bottom: 1.25rem;
+  margin-bottom: 1.75rem;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
 }
 
-.player-thumb img {
+.player-art img {
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
 }
 
+.player-meta {
+  margin-bottom: 1.5rem;
+}
+
 .player-title {
-  font-size: 1.1rem;
-  margin: 0 0 0.25rem;
+  font-size: 1.35rem;
+  font-weight: 700;
+  line-height: 1.3;
+  margin: 0 0 0.35rem;
 }
 
 .player-channel {
   color: #b3b3b3;
   font-size: 0.9rem;
-  margin: 0 0 1.5rem;
+  margin: 0;
 }
 
-.player-card audio {
+audio {
+  display: none;
+}
+
+/* Range inputs (seek + volume) — the played portion is painted via --fill,
+   which player.js keeps in sync with the current value. */
+
+.range {
+  -webkit-appearance: none;
+  appearance: none;
   width: 100%;
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(to right, #fff var(--fill, 0%), #4d4d4d var(--fill, 0%));
+  cursor: pointer;
+  outline: none;
+}
+
+.range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  border: none;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.range:hover::-webkit-slider-thumb,
+.range:focus-visible::-webkit-slider-thumb {
+  opacity: 1;
+}
+
+.range::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  border: none;
+}
+
+.range:hover {
+  background: linear-gradient(to right, #1db954 var(--fill, 0%), #4d4d4d var(--fill, 0%));
+}
+
+.prepare-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  margin-bottom: 1.25rem;
+  font-size: 0.85rem;
+  color: #b3b3b3;
+}
+
+.prepare-state[hidden] {
+  display: none;
+}
+
+.prepare-state.is-error {
+  color: #f15e6c;
+}
+
+.prepare-state .spinner[hidden] {
+  display: none;
+}
+
+.transport.is-disabled {
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+.progress-block {
+  margin-bottom: 1.25rem;
+}
+
+.progress-times {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 0.5rem;
+  font-size: 0.7rem;
+  color: #a7a7a7;
+  font-variant-numeric: tabular-nums;
+}
+
+.transport {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.btn-transport {
+  position: relative;
+  background: none;
+  border: none;
+  color: #b3b3b3;
+  cursor: pointer;
+  padding: 0.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-transport:hover {
+  color: #fff;
+}
+
+.btn-transport svg {
+  width: 26px;
+  height: 26px;
+}
+
+.transport-num {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.5rem;
+  font-weight: 700;
+  padding-top: 2px;
+}
+
+.btn-play-main {
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  border: none;
+  background: #fff;
+  color: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.12s ease, background 0.12s ease;
+}
+
+.btn-play-main:hover {
+  transform: scale(1.06);
+  background: #1ed760;
+}
+
+.btn-play-main svg {
+  width: 26px;
+  height: 26px;
+}
+
+.btn-play-main svg[hidden] {
+  display: none;
+}
+
+.player-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.volume-group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1;
+  max-width: 160px;
+}
+
+.range-volume {
+  flex: 1;
+}
+
+.btn-quiet-icon {
+  background: none;
+  border: none;
+  color: #b3b3b3;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.btn-quiet-icon:hover {
+  color: #fff;
+}
+
+.btn-quiet-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.btn-quiet-icon svg[hidden] {
+  display: none;
+}
+
+.btn-fav {
+  background: none;
+  border: none;
+  color: #b3b3b3;
+  cursor: pointer;
+  padding: 0.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.btn-fav svg {
+  width: 22px;
+  height: 22px;
+}
+
+.btn-fav:hover {
+  color: #fff;
+  transform: scale(1.08);
+}
+
+.btn-fav.is-on {
+  color: #1db954;
+}
+
+.btn-fav:disabled {
+  opacity: 0.5;
+  cursor: default;
 }

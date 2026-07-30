@@ -30,6 +30,7 @@ class ContentOut(BaseModel):
     status: str
     added_at: datetime
     is_favorite: bool
+    is_saved: bool
 
 
 class StatusOut(BaseModel):
@@ -41,6 +42,11 @@ class StatusOut(BaseModel):
 class FavoriteOut(BaseModel):
     id: int
     is_favorite: bool
+
+
+class SavedOut(BaseModel):
+    id: int
+    is_saved: bool
 
 
 class ChannelSearchResultOut(BaseModel):

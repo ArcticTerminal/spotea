@@ -8,6 +8,7 @@ from sqlalchemy.engine import Engine
 _COLUMN_MIGRATIONS = [
     ("content", "is_favorite", "BOOLEAN NOT NULL DEFAULT 0"),
     ("content", "duration_seconds", "INTEGER"),
+    ("content", "is_saved", "BOOLEAN NOT NULL DEFAULT 0"),
 ]
 
 

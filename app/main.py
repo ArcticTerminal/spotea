@@ -14,6 +14,7 @@ from app.routers import auth as auth_router
 from app.routers import content as content_router
 from app.routers import feeds as feeds_router
 from app.routers import pages as pages_router
+from app.routers import storage as storage_router
 
 DEFAULT_USER_ID = 1
 
@@ -42,11 +43,30 @@ app.add_middleware(
     same_site="lax",
 )
 
-app.mount("/static", StaticFiles(directory="app/static"), name="static")
+class RevalidatingStaticFiles(StaticFiles):
+    """Static files that must be revalidated before reuse.
+
+    Starlette's StaticFiles sends ETag/Last-Modified but no Cache-Control, and
+    browsers then fall back to *heuristic* freshness: they serve the cached copy
+    for a while without asking the server at all. After an upgrade
+    (`docker compose up -d --build`) that means users can keep running stale
+    CSS/JS against new templates — which renders as a subtly (or completely)
+    broken UI. "no-cache" still allows caching, it just forces a revalidation
+    request; unchanged files come back as a cheap 304.
+    """
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
+app.mount("/static", RevalidatingStaticFiles(directory="app/static"), name="static")
 
 app.include_router(auth_router.router)
 app.include_router(feeds_router.router)
 app.include_router(content_router.router)
+app.include_router(storage_router.router)
 app.include_router(pages_router.router)
 
 

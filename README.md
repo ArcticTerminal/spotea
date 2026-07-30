@@ -9,13 +9,17 @@ personal, free alternative to following musicians/creators on Spotify.
 - On every visit, feeds are re-parsed and new uploads show up automatically;
   YouTube Shorts are filtered out since they don't fit a "listen to it"
   library
-- Browse your Library with sorting (newest/oldest/title/channel), a
-  channel/favorites filter, and pagination
-- Pick what you want to keep, download it as audio (via [yt-dlp](https://github.com/yt-dlp/yt-dlp)) —
-  video length is shown on the thumbnail before you do
-- Star anything as a favorite for quick access later
-- Play it back from a simple in-browser player
-- Delete it later to free up space, or re-download anytime
+- Browse your Library with sorting (newest/oldest/title/channel), filtering
+  (by channel, favorites, or saved), and pagination
+- Bookmark anything as "save for later" straight from the Library
+- Just hit **Play** — the audio is fetched in the background
+  (via [yt-dlp](https://github.com/yt-dlp/yt-dlp)) while the player opens; no
+  separate download step. Length is shown on the thumbnail, and anything
+  already cached is marked so you know it starts instantly
+- Listen in a proper player — seek bar, ±15s skip, volume, keyboard
+  shortcuts — and favorite what you liked while it's playing
+- The **Storage** tab shows exactly what's using disk, and clears it per item
+  or all at once; anything you clear comes back next time you play it
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for how it's built.
 
