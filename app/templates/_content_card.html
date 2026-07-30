@@ -1,0 +1,27 @@
+<article class="card" data-content-id="{{ item.id }}" data-status="{{ item.status }}">
+  <div class="thumb">
+    {% if item.thumbnail_url %}
+    <img src="{{ item.thumbnail_url }}" alt="" loading="lazy" />
+    {% endif %}
+  </div>
+  <div class="card-body">
+    <h3 class="card-title" title="{{ item.title }}">{{ item.title }}</h3>
+    <p class="card-channel">{{ item.feed.channel_title }}</p>
+    {% if item.published_at %}
+    <p class="card-date">{{ item.published_at.strftime('%d %b %Y') }}</p>
+    {% endif %}
+    <div class="card-action">
+      {% if item.status == "ready" %}
+      <a class="btn-play" href="/player/{{ item.id }}">▶ Play</a>
+      <button type="button" class="btn-delete" data-content-id="{{ item.id }}" aria-label="Delete download">🗑</button>
+      {% elif item.status == "downloading" %}
+      <span class="spinner" role="status" aria-label="Downloading"></span>
+      {% elif item.status == "error" %}
+      <span class="status-error">Failed</span>
+      <button type="button" class="btn-download" data-content-id="{{ item.id }}">Retry</button>
+      {% else %}
+      <button type="button" class="btn-download" data-content-id="{{ item.id }}">Download</button>
+      {% endif %}
+    </div>
+  </div>
+</article>

@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>spotifrei</title>
+  <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <h1>spotifrei</h1>
+    <form method="post" action="/logout">
+      <button type="submit" class="btn-ghost">Log out</button>
+    </form>
+  </header>
+
+  <main class="layout">
+    <aside class="sidebar">
+      <h2>Followed channels</h2>
+      <form id="feed-form">
+        <input type="url" id="feed-url" name="rss_url" placeholder="YouTube channel RSS URL" required />
+        <button type="submit">Add</button>
+      </form>
+      <p id="feed-error" class="error" hidden></p>
+      <ul id="feed-list">
+        {% for feed in feeds %}
+        <li data-feed-id="{{ feed.id }}">
+          <span>{{ feed.channel_title or feed.rss_url }}</span>
+          <button type="button" class="unfollow" data-feed-id="{{ feed.id }}" aria-label="Unfollow">×</button>
+        </li>
+        {% endfor %}
+      </ul>
+    </aside>
+
+    <section class="content-area">
+      <div class="content-header">
+        <h2>Latest</h2>
+        <span id="refresh-status" class="muted"></span>
+      </div>
+      <div id="content-grid" class="grid">
+        {% for item in content %}
+        {% include "_content_card.html" %}
+        {% endfor %}
+      </div>
+      <p id="empty-state" class="muted" {% if content %}hidden{% endif %}>
+        No content yet — add a channel RSS feed to get started.
+      </p>
+    </section>
+  </main>
+
+  <script src="/static/js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+from pathlib import Path
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    app_password: str
+    secret_key: str
+    database_url: str = "sqlite:////app/data/spotifrei.db"
+    storage_dir: Path = Path("/app/data/storage")
+    audio_format: str = "mp3"
+
+    model_config = SettingsConfigDict(env_file=".env", case_sensitive=False)
+
+
+settings = Settings()

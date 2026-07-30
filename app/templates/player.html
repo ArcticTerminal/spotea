@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{ content.title }} — spotifrei</title>
+  <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+<body class="player-body">
+  <main class="player-card">
+    <a class="back-link" href="/">&larr; Back</a>
+    <div class="player-thumb">
+      {% if content.thumbnail_url %}
+      <img src="{{ content.thumbnail_url }}" alt="" />
+      {% endif %}
+    </div>
+    <h1 class="player-title">{{ content.title }}</h1>
+    <p class="player-channel">{{ content.feed.channel_title }}</p>
+    <audio controls autoplay src="/content/{{ content.id }}/stream"></audio>
+  </main>
+</body>
+</html>

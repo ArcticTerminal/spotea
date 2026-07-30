@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+feedparser
+yt-dlp
+jinja2
+python-multipart
+itsdangerous
+pydantic-settings
