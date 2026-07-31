@@ -15,6 +15,19 @@ router = APIRouter(prefix="/content", tags=["content"], dependencies=[Depends(re
 
 DEFAULT_USER_ID = 1
 
+# In-memory only: fine for a single-process app, and progress ticks too
+# frequently to justify a DB write on every hook call.
+_download_progress: dict[int, tuple[str, int | None]] = {}
+
+# Keyed by extension rather than the configured AUDIO_FORMAT so files
+# downloaded under a previous format setting still get a correct Content-Type.
+AUDIO_MEDIA_TYPES = {
+    ".mp3": "audio/mpeg",
+    ".m4a": "audio/mp4",
+    ".opus": "audio/ogg",
+    ".webm": "audio/webm",
+}
+
 
 def _get_content_or_404(db: Session, content_id: int) -> Content:
     content = (
@@ -26,8 +39,11 @@ def _get_content_or_404(db: Session, content_id: int) -> Content:
 
 
 def _run_download(content_id: int, video_id: str, db: Session) -> None:
+    def on_progress(phase: str, percent: int | None) -> None:
+        _download_progress[content_id] = (phase, percent)
+
     try:
-        file_path = download_audio(video_id)
+        file_path = download_audio(video_id, on_progress=on_progress)
     except DownloadError as exc:
         content = db.get(Content, content_id)
         if content is not None:
@@ -35,6 +51,8 @@ def _run_download(content_id: int, video_id: str, db: Session) -> None:
             content.error_message = str(exc)[:1000]
             db.commit()
         return
+    finally:
+        _download_progress.pop(content_id, None)
 
     content = db.get(Content, content_id)
     if content is not None:
@@ -96,7 +114,14 @@ def start_download(
 @router.get("/{content_id}/status", response_model=StatusOut)
 def get_status(content_id: int, db: Session = Depends(get_db)) -> StatusOut:
     content = _get_content_or_404(db, content_id)
-    return StatusOut(id=content.id, status=content.status, error_message=content.error_message)
+    phase, percent = _download_progress.get(content_id, (None, None))
+    return StatusOut(
+        id=content.id,
+        status=content.status,
+        error_message=content.error_message,
+        progress_percent=percent,
+        phase=phase,
+    )
 
 
 @router.post("/{content_id}/favorite", response_model=FavoriteOut)
@@ -142,7 +167,8 @@ def stream_content(content_id: int, db: Session = Depends(get_db)) -> FileRespon
     if not file_path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File missing on disk")
 
-    return FileResponse(file_path, media_type="audio/mpeg", filename=file_path.name)
+    media_type = AUDIO_MEDIA_TYPES.get(file_path.suffix, "application/octet-stream")
+    return FileResponse(file_path, media_type=media_type, filename=file_path.name)
 
 
 @router.delete("/{content_id}", response_model=StatusOut)

@@ -172,7 +172,12 @@ function setupPagination() {
 
 async function refreshFeeds() {
   const overlay = document.getElementById("refresh-overlay");
+  const btn = document.getElementById("refresh-feeds-btn");
   if (overlay) overlay.hidden = false;
+  if (btn) {
+    btn.disabled = true;
+    btn.classList.add("is-spinning");
+  }
 
   try {
     const res = await fetch("/feeds/refresh", { method: "POST" });
@@ -183,10 +188,31 @@ async function refreshFeeds() {
       return;
     }
   } catch (err) {
-    // Existing content stays on screen; a failed background refresh isn't critical.
+    showToast("Could not refresh feeds");
   } finally {
     if (overlay) overlay.hidden = true;
+    if (btn) {
+      btn.disabled = false;
+      btn.classList.remove("is-spinning");
+    }
   }
+}
+
+// Refreshing every followed channel's RSS is several network calls per channel,
+// so it's only worth doing once when the app is first opened in a browser
+// session — not on every reload. A manual button covers everything else.
+const SESSION_REFRESH_KEY = "spotifrei-session-refreshed";
+
+function maybeAutoRefresh() {
+  if (sessionStorage.getItem(SESSION_REFRESH_KEY)) return;
+  sessionStorage.setItem(SESSION_REFRESH_KEY, "1");
+  refreshFeeds();
+}
+
+function setupRefreshButton() {
+  const btn = document.getElementById("refresh-feeds-btn");
+  if (!btn) return;
+  btn.addEventListener("click", () => refreshFeeds());
 }
 
 function debounce(fn, delay) {
@@ -424,6 +450,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupSorting();
   setupChannelFilter();
   setupPagination();
+  setupRefreshButton();
   refreshGridView();
-  refreshFeeds();
+  maybeAutoRefresh();
 });

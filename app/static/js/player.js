@@ -220,6 +220,10 @@ async function prepareAudio(audio) {
       } else if (data.status === "error") {
         clearInterval(timer);
         fail(data.error_message ? "Download failed" : "Download failed");
+      } else if (data.phase === "converting") {
+        prepareText.textContent = "Converting…";
+      } else if (data.progress_percent != null) {
+        prepareText.textContent = `Downloading audio… ${data.progress_percent}%`;
       }
     } catch (err) {
       clearInterval(timer);

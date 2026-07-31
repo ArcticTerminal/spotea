@@ -37,6 +37,8 @@ class StatusOut(BaseModel):
     id: int
     status: str
     error_message: str | None = None
+    progress_percent: int | None = None
+    phase: str | None = None
 
 
 class FavoriteOut(BaseModel):

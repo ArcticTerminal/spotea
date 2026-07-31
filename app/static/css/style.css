@@ -88,6 +88,44 @@ body {
   font-size: 1.25rem;
 }
 
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.btn-icon {
+  background: none;
+  border: 1px solid #333;
+  color: #b3b3b3;
+  border-radius: 999px;
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.btn-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.btn-icon:hover {
+  border-color: #666;
+  color: #fff;
+}
+
+.btn-icon:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.btn-icon.is-spinning svg {
+  animation: spin 0.8s linear infinite;
+}
+
 .btn-ghost {
   background: none;
   border: 1px solid #333;
