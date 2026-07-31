@@ -10,9 +10,13 @@ CONTENT_STATUSES = ("not_downloaded", "downloading", "ready", "error")
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = (
+        CheckConstraint("audio_quality IN ('high', 'medium', 'low')", name="ck_user_audio_quality"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(100))
+    audio_quality: Mapped[str] = mapped_column(String(10), default="high")
 
     feeds: Mapped[list["Feed"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     content: Mapped[list["Content"]] = relationship(back_populates="user", cascade="all, delete-orphan")

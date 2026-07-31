@@ -424,6 +424,28 @@ function setupStorage() {
   });
 }
 
+function setupSettings() {
+  const form = document.getElementById("settings-form");
+  if (!form) return;
+
+  form.addEventListener("change", async (event) => {
+    const input = event.target.closest('input[name="audio_quality"]');
+    if (!input) return;
+
+    try {
+      const res = await fetch("/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ audio_quality: input.value }),
+      });
+      if (!res.ok) throw new Error("update failed");
+      showToast("Audio quality updated");
+    } catch (err) {
+      showToast("Could not update audio quality");
+    }
+  });
+}
+
 function setupUnfollowButtons() {
   document.querySelectorAll(".unfollow").forEach((btn) => {
     btn.addEventListener("click", async () => {
@@ -446,6 +468,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupFeedForm();
   setupUnfollowButtons();
   setupStorage();
+  setupSettings();
   setupContentGrid();
   setupSorting();
   setupChannelFilter();

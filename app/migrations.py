@@ -9,6 +9,7 @@ _COLUMN_MIGRATIONS = [
     ("content", "is_favorite", "BOOLEAN NOT NULL DEFAULT 0"),
     ("content", "duration_seconds", "INTEGER"),
     ("content", "is_saved", "BOOLEAN NOT NULL DEFAULT 0"),
+    ("users", "audio_quality", "VARCHAR(10) NOT NULL DEFAULT 'high'"),
 ]
 
 

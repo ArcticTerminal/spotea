@@ -27,6 +27,7 @@
     <button type="button" class="tab-btn active" data-tab="library" role="tab" aria-selected="true">Library</button>
     <button type="button" class="tab-btn" data-tab="channels" role="tab" aria-selected="false">Channels</button>
     <button type="button" class="tab-btn" data-tab="storage" role="tab" aria-selected="false">Storage</button>
+    <button type="button" class="tab-btn" data-tab="settings" role="tab" aria-selected="false">Settings</button>
   </nav>
 
   <main class="layout">
@@ -124,6 +125,37 @@
         {% else %}
         <p class="muted">Nothing downloaded yet. Anything you play gets cached here.</p>
         {% endif %}
+      </div>
+    </section>
+
+    <section id="tab-settings" class="tab-panel" data-tab-panel="settings" hidden>
+      <div class="channels-panel-inner">
+        <h2>Audio quality</h2>
+        <p class="muted">Applies to new downloads only — files you already have keep their current quality.</p>
+
+        <form id="settings-form" class="quality-options">
+          <label class="quality-option">
+            <input type="radio" name="audio_quality" value="high" {{ 'checked' if audio_quality == 'high' }} />
+            <span class="quality-option-body">
+              <span class="quality-option-title">High quality</span>
+              <span class="quality-option-desc">Best sound, ~58 MB per hour of audio</span>
+            </span>
+          </label>
+          <label class="quality-option">
+            <input type="radio" name="audio_quality" value="medium" {{ 'checked' if audio_quality == 'medium' }} />
+            <span class="quality-option-body">
+              <span class="quality-option-title">Medium quality</span>
+              <span class="quality-option-desc">~43 MB per hour of audio — takes a bit longer to prepare since it's re-encoded</span>
+            </span>
+          </label>
+          <label class="quality-option">
+            <input type="radio" name="audio_quality" value="low" {{ 'checked' if audio_quality == 'low' }} />
+            <span class="quality-option-body">
+              <span class="quality-option-title">Data saver</span>
+              <span class="quality-option-desc">Great for spoken content, ~22 MB per hour of audio</span>
+            </span>
+          </label>
+        </form>
       </div>
     </section>
   </main>

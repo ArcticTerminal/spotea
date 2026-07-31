@@ -23,13 +23,13 @@
   </a>
   <div class="card-body">
     <h3 class="card-title" title="{{ item.title }}">{{ item.title }}</h3>
-    <p class="card-channel">{{ item.feed.channel_title }}</p>
-    {% if item.published_at %}
-    <p class="card-date">{{ item.published_at.strftime('%d %b %Y') }}</p>
-    {% endif %}
-    <div class="card-action">
-      <a class="btn-play" href="/player/{{ item.id }}">▶ Play</a>
-
+    <div class="card-meta-row">
+      <div class="card-meta-text">
+        <p class="card-channel">{{ item.feed.channel_title }}</p>
+        {% if item.published_at %}
+        <p class="card-date">{{ item.published_at.strftime('%d %b %Y') }}</p>
+        {% endif %}
+      </div>
       <button
         type="button"
         class="btn-save{{ ' is-on' if item.is_saved else '' }}"

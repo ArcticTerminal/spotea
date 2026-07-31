@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.deps import get_db, require_login
 from app.downloader import DownloadError, download_audio
-from app.models import Content
+from app.models import Content, User
 from app.rss import VIDEO_ID_RE
 from app.schemas import ContentOut, FavoriteOut, SavedOut, StatusOut
 
@@ -38,12 +38,12 @@ def _get_content_or_404(db: Session, content_id: int) -> Content:
     return content
 
 
-def _run_download(content_id: int, video_id: str, db: Session) -> None:
+def _run_download(content_id: int, video_id: str, quality: str, db: Session) -> None:
     def on_progress(phase: str, percent: int | None) -> None:
         _download_progress[content_id] = (phase, percent)
 
     try:
-        file_path = download_audio(video_id, on_progress=on_progress)
+        file_path = download_audio(video_id, quality=quality, on_progress=on_progress)
     except DownloadError as exc:
         content = db.get(Content, content_id)
         if content is not None:
@@ -106,7 +106,8 @@ def start_download(
     content.error_message = None
     db.commit()
 
-    background_tasks.add_task(_run_download, content.id, content.video_id, db)
+    user = db.get(User, DEFAULT_USER_ID)
+    background_tasks.add_task(_run_download, content.id, content.video_id, user.audio_quality, db)
 
     return StatusOut(id=content.id, status=content.status, error_message=content.error_message)
 

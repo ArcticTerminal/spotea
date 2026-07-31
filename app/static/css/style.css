@@ -198,6 +198,48 @@ body {
   margin: 0 0 0.75rem;
 }
 
+.quality-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-top: 1rem;
+}
+
+.quality-option {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid #2a2a2a;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.quality-option:has(input:checked) {
+  border-color: #1db954;
+  background: rgba(29, 185, 84, 0.08);
+}
+
+.quality-option input {
+  accent-color: #1db954;
+  flex-shrink: 0;
+}
+
+.quality-option-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.quality-option-title {
+  font-weight: 600;
+}
+
+.quality-option-desc {
+  font-size: 0.8rem;
+  color: #888;
+}
+
 @media (min-width: 700px) {
   .tabs {
     padding: 0 1.5rem;
@@ -570,7 +612,7 @@ body {
 /* Save-for-later toggle, pinned to the right end of the card's action row so
    it sits with the other actions instead of floating over the artwork. */
 .btn-save {
-  margin-left: auto;
+  flex-shrink: 0;
   background: none;
   border: none;
   color: #7a7a7a;
@@ -613,6 +655,17 @@ body {
   overflow: hidden;
 }
 
+.card-meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.card-meta-text {
+  min-width: 0;
+}
+
 .card-channel {
   margin: 0;
   font-size: 0.8rem;
@@ -623,48 +676,6 @@ body {
   margin: 0;
   font-size: 0.75rem;
   color: #777;
-}
-
-.card-action {
-  margin-top: 0.5rem;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.btn-download,
-.btn-play {
-  border: none;
-  border-radius: 999px;
-  padding: 0.4rem 0.9rem;
-  font-size: 0.8rem;
-  font-weight: 600;
-  cursor: pointer;
-  text-decoration: none;
-  display: inline-block;
-}
-
-.btn-download {
-  background: #2a2a2a;
-  color: #f5f5f5;
-}
-
-.btn-download:hover {
-  background: #3a3a3a;
-}
-
-.btn-play {
-  background: #1db954;
-  color: #000;
-}
-
-.btn-play:hover {
-  background: #1ed760;
-}
-
-.status-error {
-  color: #f15e6c;
-  font-size: 0.8rem;
 }
 
 .btn-delete {

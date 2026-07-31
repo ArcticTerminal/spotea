@@ -66,3 +66,11 @@ class FeedAddResult(BaseModel):
 
 class RefreshResult(BaseModel):
     new_content_count: int
+
+
+class SettingsOut(BaseModel):
+    audio_quality: str
+
+
+class SettingsUpdate(BaseModel):
+    audio_quality: str

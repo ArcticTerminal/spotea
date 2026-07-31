@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.deps import get_db, require_login
 from app.formatting import format_duration, format_size
-from app.models import Content, Feed
+from app.models import Content, Feed, User
 from app.storage import collect_usage
 
 router = APIRouter(dependencies=[Depends(require_login)])
@@ -27,8 +27,11 @@ def home(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
         .all()
     )
     usage = collect_usage(db, DEFAULT_USER_ID)
+    user = db.get(User, DEFAULT_USER_ID)
     return templates.TemplateResponse(
-        request, "index.html", {"feeds": feeds, "content": content, "usage": usage}
+        request,
+        "index.html",
+        {"feeds": feeds, "content": content, "usage": usage, "audio_quality": user.audio_quality},
     )
 
 

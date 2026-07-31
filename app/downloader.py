@@ -9,6 +9,22 @@ YOUTUBE_WATCH_URL = "https://www.youtube.com/watch?v={video_id}"
 
 ProgressCallback = Callable[[str, int | None], None]
 
+# "high" and "low" stick to the mp4a/AAC family so FFmpegExtractAudio can
+# always remux into the m4a target instead of re-encoding. "low" adds a
+# <=64kbps cap, which YouTube already serves as a separate, much smaller
+# pre-encoded stream (~48kbps) on virtually every video — no local
+# transcoding needed either way. YouTube doesn't offer a third, intermediate
+# bitrate though, so "medium" downloads the same high-quality source and
+# re-encodes it locally — the only tier that pays a transcode cost.
+FORMAT_BY_QUALITY = {
+    "high": "bestaudio[acodec^=mp4a]/bestaudio/best",
+    "medium": "bestaudio[acodec^=mp4a]/bestaudio/best",
+    "low": "bestaudio[acodec^=mp4a][abr<=64]/bestaudio[acodec^=mp4a]/bestaudio/best",
+}
+
+MEDIUM_QUALITY_CODEC = "mp3"
+MEDIUM_QUALITY_KBPS = 96
+
 
 class DownloadError(Exception):
     pass
@@ -30,26 +46,28 @@ def _postprocessor_hook(on_progress: ProgressCallback, event: dict) -> None:
         on_progress("converting", None)
 
 
-def download_audio(video_id: str, on_progress: ProgressCallback | None = None) -> Path:
+def download_audio(video_id: str, quality: str = "high", on_progress: ProgressCallback | None = None) -> Path:
     settings.storage_dir.mkdir(parents=True, exist_ok=True)
     out_template = str(settings.storage_dir / f"{video_id}.%(ext)s")
 
+    if quality == "medium":
+        codec = MEDIUM_QUALITY_CODEC
+        postprocessor = {
+            "key": "FFmpegExtractAudio",
+            "preferredcodec": codec,
+            "preferredquality": MEDIUM_QUALITY_KBPS,
+        }
+    else:
+        codec = settings.audio_format
+        postprocessor = {"key": "FFmpegExtractAudio", "preferredcodec": codec}
+
     ydl_opts = {
-        # Preferring the native m4a/AAC stream (present on virtually every video)
-        # lets FFmpegExtractAudio remux instead of re-encode when the target
-        # format is also m4a — turns a duration-scaled transcode into a near
-        # instant container fixup.
-        "format": "bestaudio[acodec^=mp4a]/bestaudio/best",
+        "format": FORMAT_BY_QUALITY.get(quality, FORMAT_BY_QUALITY["high"]),
         "outtmpl": out_template,
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
-        "postprocessors": [
-            {
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": settings.audio_format,
-            }
-        ],
+        "postprocessors": [postprocessor],
     }
 
     if on_progress is not None:
@@ -64,7 +82,7 @@ def download_audio(video_id: str, on_progress: ProgressCallback | None = None) -
     except yt_dlp.utils.DownloadError as exc:
         raise DownloadError(str(exc)) from exc
 
-    final_path = settings.storage_dir / f"{video_id}.{settings.audio_format}"
+    final_path = settings.storage_dir / f"{video_id}.{codec}"
     if not final_path.exists():
         raise DownloadError("Download completed but output file was not found")
 
