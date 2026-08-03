@@ -57,6 +57,7 @@ const SAVED_FILTER_VALUE = "__saved__";
 const PAGE_SIZE = 20;
 
 let currentPage = 1;
+let totalPageCount = 1;
 
 const SORT_COMPARATORS = {
   "date-desc": (a, b) => (b.dataset.published || "").localeCompare(a.dataset.published || ""),
@@ -70,22 +71,30 @@ const SORT_COMPARATORS = {
 function updatePaginationControls(totalPages, totalItems) {
   const pagination = document.getElementById("pagination");
   const indicator = document.getElementById("page-indicator");
+  const firstBtn = document.getElementById("first-page");
   const prevBtn = document.getElementById("prev-page");
   const nextBtn = document.getElementById("next-page");
-  if (!pagination || !indicator || !prevBtn || !nextBtn) return;
+  const lastBtn = document.getElementById("last-page");
+  if (!pagination || !indicator || !firstBtn || !prevBtn || !nextBtn || !lastBtn) return;
+
+  totalPageCount = totalPages;
 
   if (totalItems === 0) {
     pagination.hidden = false;
     indicator.textContent = "No matches";
+    firstBtn.disabled = true;
     prevBtn.disabled = true;
     nextBtn.disabled = true;
+    lastBtn.disabled = true;
     return;
   }
 
   pagination.hidden = totalPages <= 1;
   indicator.textContent = `Page ${currentPage} of ${totalPages}`;
+  firstBtn.disabled = currentPage <= 1;
   prevBtn.disabled = currentPage <= 1;
   nextBtn.disabled = currentPage >= totalPages;
+  lastBtn.disabled = currentPage >= totalPages;
 }
 
 function refreshGridView() {
@@ -153,21 +162,22 @@ function setupChannelFilter() {
 }
 
 function setupPagination() {
+  const firstBtn = document.getElementById("first-page");
   const prevBtn = document.getElementById("prev-page");
   const nextBtn = document.getElementById("next-page");
-  if (!prevBtn || !nextBtn) return;
+  const lastBtn = document.getElementById("last-page");
+  if (!firstBtn || !prevBtn || !nextBtn || !lastBtn) return;
 
-  prevBtn.addEventListener("click", () => {
-    currentPage -= 1;
+  const goTo = (page) => {
+    currentPage = page;
     refreshGridView();
     window.scrollTo({ top: 0, behavior: "smooth" });
-  });
+  };
 
-  nextBtn.addEventListener("click", () => {
-    currentPage += 1;
-    refreshGridView();
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  });
+  firstBtn.addEventListener("click", () => goTo(1));
+  prevBtn.addEventListener("click", () => goTo(currentPage - 1));
+  nextBtn.addEventListener("click", () => goTo(currentPage + 1));
+  lastBtn.addEventListener("click", () => goTo(totalPageCount));
 }
 
 async function refreshFeeds() {
@@ -267,6 +277,11 @@ async function addChannel(channelUrl, button) {
     button.disabled = true;
     button.textContent = "Adding…";
   }
+  // Shown immediately, before the request even starts: add_feed's RSS sync
+  // alone can take a couple of seconds, and leaving the screen looking idle
+  // for that stretch (only the button says anything) reads as nothing
+  // happening yet.
+  showBackfillOverlay("Fetching RSS feed…", "");
 
   try {
     const res = await fetch("/feeds", {
@@ -276,10 +291,16 @@ async function addChannel(channelUrl, button) {
     });
 
     if (res.ok) {
-      window.location.reload();
+      const data = await res.json().catch(() => null);
+      if (data?.feed?.id != null) {
+        await waitForBackfillThenReload(data.feed.id, data.feed.channel_title || channelUrl);
+      } else {
+        window.location.reload();
+      }
       return;
     }
 
+    hideBackfillOverlay();
     if (res.status === 409) {
       if (button) button.textContent = "Already added";
       return;
@@ -292,6 +313,7 @@ async function addChannel(channelUrl, button) {
     }
     showToast(data.detail || "Could not add channel");
   } catch (err) {
+    hideBackfillOverlay();
     if (button) {
       button.disabled = false;
       button.textContent = "Add";
@@ -339,6 +361,7 @@ function setupFeedForm() {
     const channelUrl = document.getElementById("feed-url").value.trim();
     const submitBtn = form.querySelector("button[type=submit]");
     submitBtn.disabled = true;
+    showBackfillOverlay("Fetching RSS feed…", "");
 
     try {
       const res = await fetch("/feeds", {
@@ -348,13 +371,21 @@ function setupFeedForm() {
       });
 
       if (!res.ok) {
+        hideBackfillOverlay();
         const data = await res.json().catch(() => ({}));
         errorEl.textContent = data.detail || "Could not add feed";
         errorEl.hidden = false;
         return;
       }
 
-      window.location.reload();
+      const data = await res.json().catch(() => null);
+      if (data?.feed?.id != null) {
+        await waitForBackfillThenReload(data.feed.id, data.feed.channel_title || channelUrl);
+      } else {
+        window.location.reload();
+      }
+    } catch (err) {
+      hideBackfillOverlay();
     } finally {
       submitBtn.disabled = false;
     }
@@ -365,7 +396,6 @@ const TAB_STORAGE_KEY = "spotifrei-active-tab";
 
 function setupTabs() {
   const tabButtons = document.querySelectorAll(".tab-btn");
-  const panels = document.querySelectorAll(".tab-panel");
   if (!tabButtons.length) return;
 
   function activate(tabName) {
@@ -374,19 +404,24 @@ function setupTabs() {
       btn.classList.toggle("active", isActive);
       btn.setAttribute("aria-selected", String(isActive));
     });
-    panels.forEach((panel) => {
-      panel.hidden = panel.dataset.tabPanel !== tabName;
-    });
+    // Panel visibility itself is driven by the data-active-tab attribute via
+    // CSS (see style.css) — this is what the inline head script also sets,
+    // so both the first paint and later clicks go through the same path.
+    document.documentElement.dataset.activeTab = tabName;
     localStorage.setItem(TAB_STORAGE_KEY, tabName);
+    // replaceState (not pushState) so cycling through tabs doesn't spam the
+    // back-button history — the URL just needs to be right for a refresh.
+    history.replaceState(null, "", `#${tabName}`);
   }
 
   tabButtons.forEach((btn) => {
     btn.addEventListener("click", () => activate(btn.dataset.tab));
   });
 
-  const saved = localStorage.getItem(TAB_STORAGE_KEY);
-  const savedIsValid = saved && document.querySelector(`.tab-btn[data-tab="${saved}"]`);
-  activate(savedIsValid ? saved : "library");
+  // The inline head script already resolved the correct initial tab (URL
+  // hash, falling back to localStorage) and set it on <html> before first
+  // paint — this just syncs the button/URL state to match.
+  activate(document.documentElement.dataset.activeTab || "library");
 }
 
 function setupStorage() {
@@ -446,6 +481,80 @@ function setupSettings() {
   });
 }
 
+function isActiveBackfillPhase(phase) {
+  return phase === "scanning" || phase === "saving";
+}
+
+// Split into a title (what's happening) and a short, single-line detail (the
+// count) instead of one string — concatenating them let the browser wrap
+// mid-phrase wherever it pleased (e.g. "…page" on one line, "7" on the
+// next), which read as broken. Keeping the count in its own nowrap element
+// keeps it atomic no matter how the title line wraps.
+function backfillPhaseParts(phase, done, total) {
+  if (phase === "scanning") {
+    if (total > 0) return { title: "Fetching channel history…", detail: `${done}/${total} videos found` };
+    if (done > 0) return { title: "Fetching channel history…", detail: `Page ${done}` };
+    return { title: "Fetching channel history…", detail: "" };
+  }
+  if (phase === "saving") return { title: "Processing videos…", detail: `${done}/${total}` };
+  return { title: "", detail: "" };
+}
+
+function showBackfillOverlay(title, detail) {
+  const overlay = document.getElementById("backfill-overlay");
+  if (overlay) overlay.hidden = false;
+  setBackfillOverlayText(title, detail);
+}
+
+function hideBackfillOverlay() {
+  const overlay = document.getElementById("backfill-overlay");
+  if (overlay) overlay.hidden = true;
+}
+
+function setBackfillOverlayText(title, detail) {
+  const titleEl = document.getElementById("backfill-overlay-title");
+  const detailEl = document.getElementById("backfill-overlay-detail");
+  if (titleEl) titleEl.textContent = title;
+  if (detailEl) detailEl.textContent = detail || "";
+}
+
+// Polls until a just-added channel's backfill is fully done, then reloads
+// once. Assumes showBackfillOverlay() is already up (callers show it right
+// when the add starts, before the POST even resolves, so there's no gap
+// where the screen looks idle while the RSS sync — which can itself take a
+// couple of seconds — is still in flight).
+async function waitForBackfillThenReload(feedId, title) {
+  setBackfillOverlayText(`${title} — Fetching channel history…`, "");
+
+  const NEVER_STARTED_GRACE_MS = 4000;
+  const MAX_WAIT_MS = 10 * 60 * 1000; // safety valve so a stuck check can't trap the user forever
+  const start = Date.now();
+  let sawActivity = false;
+
+  while (Date.now() - start < MAX_WAIT_MS) {
+    try {
+      const res = await fetch(`/feeds/${feedId}/backfill-status`);
+      if (res.ok) {
+        const data = await res.json();
+        if (isActiveBackfillPhase(data.phase)) {
+          sawActivity = true;
+          const parts = backfillPhaseParts(data.phase, data.done, data.total);
+          setBackfillOverlayText(`${title} — ${parts.title}`, parts.detail);
+        } else if (data.phase === "done") {
+          break;
+        } else if (!sawActivity && Date.now() - start > NEVER_STARTED_GRACE_MS) {
+          break; // no channel id to resolve, or it never got scheduled — nothing to wait for
+        }
+      }
+    } catch (err) {
+      // transient network hiccup — keep polling until MAX_WAIT_MS
+    }
+    await new Promise((r) => setTimeout(r, 400));
+  }
+
+  window.location.reload();
+}
+
 function setupUnfollowButtons() {
   document.querySelectorAll(".unfollow").forEach((btn) => {
     btn.addEventListener("click", async () => {
@@ -455,9 +564,23 @@ function setupUnfollowButtons() {
       );
       if (!confirmed) return;
 
-      const res = await fetch(`/feeds/${btn.dataset.feedId}`, { method: "DELETE" });
-      if (res.ok) window.location.reload();
-      else showToast("Could not unfollow this channel");
+      // Shown the instant the dialog closes: without it, the confirm modal
+      // disappears and the channel briefly flashes back in the list while
+      // the DELETE request is still in flight, right before the reload.
+      const overlay = document.getElementById("refresh-overlay");
+      if (overlay) overlay.hidden = false;
+
+      try {
+        const res = await fetch(`/feeds/${btn.dataset.feedId}`, { method: "DELETE" });
+        if (res.ok) {
+          window.location.reload();
+          return; // stay covered by the overlay through to the reload
+        }
+        showToast("Could not unfollow this channel");
+      } catch (err) {
+        showToast("Could not unfollow this channel");
+      }
+      if (overlay) overlay.hidden = true;
     });
   });
 }

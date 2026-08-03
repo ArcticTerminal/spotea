@@ -88,6 +88,23 @@ body {
   font-size: 1.25rem;
 }
 
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.login-card h1.brand {
+  display: flex;
+  justify-content: center;
+}
+
+.brand-logo {
+  height: 1.5em;
+  width: 1.5em;
+  display: block;
+}
+
 .topbar-actions {
   display: flex;
   align-items: center;
@@ -177,6 +194,20 @@ body {
   border-bottom-color: #1db954;
 }
 
+/* Same data-active-tab trick as the panels: the JS-toggled .active class
+   above only lands after DOMContentLoaded, but none of the buttons are
+   marked active in the server-rendered HTML (there's no server-side way to
+   know which tab was last used) — without this, Library's button would
+   otherwise need a hardcoded default and flash as selected on every reload
+   that lands on a different tab. */
+html[data-active-tab="library"] .tab-btn[data-tab="library"],
+html[data-active-tab="channels"] .tab-btn[data-tab="channels"],
+html[data-active-tab="storage"] .tab-btn[data-tab="storage"],
+html[data-active-tab="settings"] .tab-btn[data-tab="settings"] {
+  color: #fff;
+  border-bottom-color: #1db954;
+}
+
 .layout {
   padding: 1rem;
   max-width: 1100px;
@@ -185,6 +216,21 @@ body {
 
 .tab-panel[hidden] {
   display: none;
+}
+
+/* Once the inline head script has set data-active-tab (before first paint),
+   it becomes the single source of truth for which panel shows — overriding
+   whatever the server rendered as [hidden], so restoring a non-Library tab
+   never flashes Library's content first. */
+html[data-active-tab] .tab-panel {
+  display: none;
+}
+
+html[data-active-tab="library"] .tab-panel[data-tab-panel="library"],
+html[data-active-tab="channels"] .tab-panel[data-tab-panel="channels"],
+html[data-active-tab="storage"] .tab-panel[data-tab-panel="storage"],
+html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
+  display: block;
 }
 
 .channels-panel-inner {
@@ -541,6 +587,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-wrap: wrap;
   gap: 1rem;
   margin-top: 1.5rem;
 }
@@ -718,7 +765,7 @@ body {
 .overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.6);
+  background: rgba(10, 10, 10, 0.94);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -733,6 +780,45 @@ body {
   width: 48px;
   height: 48px;
   border-width: 4px;
+}
+
+.backfill-overlay-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  text-align: center;
+  padding: 0 1.5rem;
+}
+
+.backfill-overlay-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+#backfill-overlay-title {
+  color: #f5f5f5;
+  font-size: 0.95rem;
+  line-height: 1.4;
+  margin: 0;
+  max-width: 320px;
+  /* Reserves room for 2 lines up front, for long channel names — without a
+     fixed height the whole spinner+text block would visibly jump up each
+     time it wraps, since it's vertically centered on the screen. */
+  min-height: 2.8em;
+}
+
+#backfill-overlay-detail {
+  /* A separate line (not just appended text) specifically so a number like
+     "page 7" or "412/1037" is never split mid-phrase by the title's own
+     line wrap — nowrap keeps it atomic since it's always short. */
+  color: #b3b3b3;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  margin: 0;
+  white-space: nowrap;
+  min-height: 1.4em;
 }
 
 /* Confirm dialog */

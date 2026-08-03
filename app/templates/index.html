@@ -1,14 +1,34 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" style="background: #121212">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>spotifrei</title>
+  <link rel="icon" href="/static/img/favicon.ico" />
   <link rel="stylesheet" href="/static/css/style.css" />
+  <script>
+    // Runs before the body paints, so the right tab (from the URL, falling
+    // back to the last one used) is already correct on first render —
+    // without this, the server always renders Library first and JS only
+    // corrects it after DOMContentLoaded, which flashes stale content for a
+    // frame on every reload.
+    (function () {
+      var VALID_TABS = ["library", "channels", "storage", "settings"];
+      var fromHash = location.hash.slice(1);
+      var fromStorage = localStorage.getItem("spotifrei-active-tab");
+      var tab =
+        VALID_TABS.indexOf(fromHash) !== -1
+          ? fromHash
+          : VALID_TABS.indexOf(fromStorage) !== -1
+            ? fromStorage
+            : "library";
+      document.documentElement.dataset.activeTab = tab;
+    })();
+  </script>
 </head>
 <body>
   <header class="topbar">
-    <h1>spotifrei</h1>
+    <h1 class="brand"><img src="/static/img/logo.png" alt="" class="brand-logo" />Spotifrei</h1>
     <div class="topbar-actions">
       <button type="button" id="refresh-feeds-btn" class="btn-icon" aria-label="Refresh feeds" title="Refresh feeds">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -24,7 +44,7 @@
   </header>
 
   <nav class="tabs" role="tablist">
-    <button type="button" class="tab-btn active" data-tab="library" role="tab" aria-selected="true">Library</button>
+    <button type="button" class="tab-btn" data-tab="library" role="tab" aria-selected="false">Library</button>
     <button type="button" class="tab-btn" data-tab="channels" role="tab" aria-selected="false">Channels</button>
     <button type="button" class="tab-btn" data-tab="storage" role="tab" aria-selected="false">Storage</button>
     <button type="button" class="tab-btn" data-tab="settings" role="tab" aria-selected="false">Settings</button>
@@ -58,9 +78,11 @@
         {% endfor %}
       </div>
       <div id="pagination" class="pagination" hidden>
+        <button type="button" id="first-page" class="btn-ghost" aria-label="First page">« First</button>
         <button type="button" id="prev-page" class="btn-ghost">‹ Prev</button>
         <span id="page-indicator" class="muted"></span>
         <button type="button" id="next-page" class="btn-ghost">Next ›</button>
+        <button type="button" id="last-page" class="btn-ghost" aria-label="Last page">Last »</button>
       </div>
       <p id="empty-state" class="muted" {% if content %}hidden{% endif %}>
         No content yet — add a channel in the Channels tab to get started.
@@ -162,6 +184,16 @@
 
   <div id="refresh-overlay" class="overlay" hidden>
     <span class="spinner spinner-lg" role="status" aria-label="Refreshing"></span>
+  </div>
+
+  <div id="backfill-overlay" class="overlay" hidden>
+    <div class="backfill-overlay-content">
+      <span class="spinner spinner-lg" role="status" aria-label="Fetching channel history"></span>
+      <div class="backfill-overlay-text">
+        <p id="backfill-overlay-title"></p>
+        <p id="backfill-overlay-detail"></p>
+      </div>
+    </div>
   </div>
 
   <script src="/static/js/ui.js"></script>

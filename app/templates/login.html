@@ -1,14 +1,15 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" style="background: #121212">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>spotifrei — Login</title>
+  <link rel="icon" href="/static/img/favicon.ico" />
   <link rel="stylesheet" href="/static/css/style.css" />
 </head>
 <body class="login-body">
   <main class="login-card">
-    <h1>spotifrei</h1>
+    <h1 class="brand"><img src="/static/img/logo.png" alt="" class="brand-logo" />Spotifrei</h1>
     {% if error %}
     <p class="error">{{ error }}</p>
     {% endif %}

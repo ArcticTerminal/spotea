@@ -1,6 +1,7 @@
 import re
 import urllib.parse
 from calendar import timegm
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -44,6 +45,18 @@ _SHORTS_FETCH_OPTS = {
     "no_warnings": True,
     "extract_flat": "in_playlist",
     "playlist_items": "1-50",
+}
+
+_SHORTS_BACKFILL_OPTS = {
+    "quiet": True,
+    "no_warnings": True,
+    "extract_flat": "in_playlist",
+}
+
+_BACKFILL_FETCH_OPTS = {
+    "quiet": True,
+    "no_warnings": True,
+    "extract_flat": "in_playlist",
 }
 
 
@@ -156,19 +169,115 @@ def fetch_channel_video_durations(channel_id: str) -> dict[str, int]:
     return durations
 
 
-def fetch_channel_shorts_ids(channel_id: str) -> set[str]:
+def fetch_channel_shorts_ids(channel_id: str, full: bool = False) -> set[str]:
     """Video IDs YouTube itself classifies as Shorts for this channel (its
     dedicated Shorts tab), so they can be excluded — no duration heuristic,
-    since Shorts length isn't strictly bounded to 60s."""
+    since Shorts length isn't strictly bounded to 60s.
+
+    Bounded to the most recent 50 by default, which is enough to cover the
+    handful of candidates a routine RSS-based refresh sees. Pass full=True
+    for a one-time channel backfill, where candidates can span the channel's
+    entire history."""
     url = CHANNEL_SHORTS_URL_TEMPLATE.format(channel_id=channel_id)
+    opts = _SHORTS_BACKFILL_OPTS if full else _SHORTS_FETCH_OPTS
 
     try:
-        with yt_dlp.YoutubeDL(_SHORTS_FETCH_OPTS) as ydl:
+        with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
     except yt_dlp.utils.DownloadError:
         return set()
 
     return {entry["id"] for entry in (info or {}).get("entries") or [] if entry.get("id")}
+
+
+@dataclass
+class BackfillEntry:
+    video_id: str
+    title: str
+    thumbnail_url: str | None
+    duration_seconds: int | None
+
+
+_PAGE_LOG_RE = re.compile(r"page (\d+): Downloading API JSON")
+_ITEM_LOG_RE = re.compile(r"Downloading item (\d+) of (\d+)")
+
+# BackfillProgress: ("listing", page_number, 0) while yt-dlp is still paging
+# through the channel (this is the slow, network-bound part — each page is a
+# request), or ("counting", done, total) once the full item count is known
+# and it's just iterating over already-fetched data (fast).
+BackfillProgress = tuple[str, int, int]
+
+
+class _ScanProgressLogger:
+    """Feeds yt-dlp's own debug log lines — which already say "page 7:
+    Downloading API JSON" and "Downloading item 412 of 1037" — into an
+    on_progress callback. There's no public progress-hook API for playlist
+    listing (progress_hooks is download-only), so this is the only way to
+    get any signal during what can be a genuinely slow scan for a channel
+    with a very long history."""
+
+    def __init__(self, on_progress: Callable[[BackfillProgress], None]):
+        self._on_progress = on_progress
+
+    def debug(self, msg: str) -> None:
+        item_match = _ITEM_LOG_RE.search(msg)
+        if item_match:
+            self._on_progress(("counting", int(item_match.group(1)), int(item_match.group(2))))
+            return
+        page_match = _PAGE_LOG_RE.search(msg)
+        if page_match:
+            self._on_progress(("listing", int(page_match.group(1)), 0))
+
+    def info(self, msg: str) -> None:
+        pass
+
+    def warning(self, msg: str) -> None:
+        pass
+
+    def error(self, msg: str) -> None:
+        pass
+
+
+def fetch_channel_all_videos(
+    channel_id: str, on_progress: Callable[[BackfillProgress], None] | None = None
+) -> list[BackfillEntry]:
+    """Every video in the channel's uploads playlist, not just the ~15 most
+    recent ones the RSS feed exposes. A single flat extraction covers id,
+    title, thumbnail and duration together, newest first — meant for a
+    one-time backfill when a channel is first added, not routine refreshes."""
+    uploads_playlist_id = "UU" + channel_id[2:] if channel_id.startswith("UC") else channel_id
+    url = UPLOADS_PLAYLIST_URL_TEMPLATE.format(playlist_id=uploads_playlist_id)
+
+    opts = _BACKFILL_FETCH_OPTS
+    if on_progress:
+        opts = {**_BACKFILL_FETCH_OPTS, "logger": _ScanProgressLogger(on_progress)}
+
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+    except yt_dlp.utils.DownloadError as exc:
+        raise ChannelResolutionError(f"Could not list channel videos: {exc}") from exc
+
+    entries: list[BackfillEntry] = []
+    for entry in (info or {}).get("entries") or []:
+        video_id = entry.get("id")
+        if not video_id or not VIDEO_ID_RE.match(video_id):
+            continue
+
+        thumbnails = entry.get("thumbnails") or []
+        thumbnail_url = thumbnails[-1]["url"] if thumbnails else None
+        duration = entry.get("duration")
+
+        entries.append(
+            BackfillEntry(
+                video_id=video_id,
+                title=entry.get("title") or "Untitled",
+                thumbnail_url=thumbnail_url,
+                duration_seconds=int(duration) if isinstance(duration, (int, float)) else None,
+            )
+        )
+
+    return entries
 
 
 @dataclass

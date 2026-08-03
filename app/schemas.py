@@ -68,6 +68,13 @@ class RefreshResult(BaseModel):
     new_content_count: int
 
 
+class BackfillStatusOut(BaseModel):
+    feed_id: int
+    phase: str | None = None
+    done: int = 0
+    total: int = 0
+
+
 class SettingsOut(BaseModel):
     audio_quality: str
 
