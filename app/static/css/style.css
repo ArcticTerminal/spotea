@@ -76,11 +76,18 @@ body {
 /* App shell */
 
 .topbar {
+  border-bottom: 1px solid #222;
+}
+
+/* Matches .layout's max-width/centering so the header and tabs line up with
+   the card grid below instead of spanning edge-to-edge on wide screens. */
+.topbar-inner {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 1rem 1.5rem;
-  border-bottom: 1px solid #222;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 1rem;
 }
 
 .topbar h1 {
@@ -168,10 +175,15 @@ body {
 }
 
 .tabs {
+  border-bottom: 1px solid #222;
+}
+
+.tabs-inner {
   display: flex;
   gap: 1.25rem;
+  max-width: 1100px;
+  margin: 0 auto;
   padding: 0 1rem;
-  border-bottom: 1px solid #222;
 }
 
 .tab-btn {
@@ -200,6 +212,7 @@ body {
    know which tab was last used) — without this, Library's button would
    otherwise need a hardcoded default and flash as selected on every reload
    that lands on a different tab. */
+html[data-active-tab="home"] .tab-btn[data-tab="home"],
 html[data-active-tab="library"] .tab-btn[data-tab="library"],
 html[data-active-tab="channels"] .tab-btn[data-tab="channels"],
 html[data-active-tab="storage"] .tab-btn[data-tab="storage"],
@@ -226,6 +239,7 @@ html[data-active-tab] .tab-panel {
   display: none;
 }
 
+html[data-active-tab="home"] .tab-panel[data-tab-panel="home"],
 html[data-active-tab="library"] .tab-panel[data-tab-panel="library"],
 html[data-active-tab="channels"] .tab-panel[data-tab-panel="channels"],
 html[data-active-tab="storage"] .tab-panel[data-tab-panel="storage"],
@@ -287,7 +301,11 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
 }
 
 @media (min-width: 700px) {
-  .tabs {
+  .topbar-inner {
+    padding: 1rem 1.5rem;
+  }
+
+  .tabs-inner {
     padding: 0 1.5rem;
   }
 
@@ -581,6 +599,86 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
     grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
     gap: 1.25rem;
   }
+}
+
+.shelf {
+  margin-bottom: 1.75rem;
+}
+
+.shelf-title {
+  margin: 0 0 0.75rem;
+  font-size: 1.1rem;
+}
+
+.shelf-empty {
+  margin: 0;
+}
+
+.shelf-row {
+  display: flex;
+  gap: 0.75rem;
+  overflow-x: auto;
+  padding-bottom: 0.25rem;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+  cursor: grab;
+  user-select: none;
+}
+
+.shelf-row.dragging,
+.channel-row.dragging {
+  cursor: grabbing;
+}
+
+.shelf-row > .card {
+  -webkit-user-drag: none;
+}
+
+.shelf-row > .card img {
+  pointer-events: none;
+}
+
+.shelf-row > .card {
+  flex: 0 0 170px;
+}
+
+@media (min-width: 480px) {
+  .shelf-row {
+    gap: 1rem;
+  }
+
+  .shelf-row > .card {
+    flex-basis: 200px;
+  }
+}
+
+.channel-row {
+  display: flex;
+  gap: 0.6rem;
+  overflow-x: auto;
+  padding-bottom: 0.25rem;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+  cursor: grab;
+  user-select: none;
+}
+
+.channel-chip {
+  flex: 0 0 auto;
+  background: #1a1a1a;
+  border: 1px solid #333;
+  color: #f5f5f5;
+  border-radius: 999px;
+  padding: 0.5rem 1rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.channel-chip:hover {
+  border-color: #1db954;
+  color: #1db954;
 }
 
 .pagination {

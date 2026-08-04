@@ -168,6 +168,9 @@ def stream_content(content_id: int, db: Session = Depends(get_db)) -> FileRespon
     if not file_path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File missing on disk")
 
+    content.last_played_at = dt.datetime.utcnow()
+    db.commit()
+
     media_type = AUDIO_MEDIA_TYPES.get(file_path.suffix, "application/octet-stream")
     return FileResponse(file_path, media_type=media_type, filename=file_path.name)
 

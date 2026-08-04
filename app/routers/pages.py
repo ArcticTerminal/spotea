@@ -14,6 +14,7 @@ templates.env.filters["duration"] = format_duration
 templates.env.filters["filesize"] = format_size
 
 DEFAULT_USER_ID = 1
+HOME_SHELF_LIMIT = 12
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -28,10 +29,28 @@ def home(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
     )
     usage = collect_usage(db, DEFAULT_USER_ID)
     user = db.get(User, DEFAULT_USER_ID)
+
+    # content is already published_at desc, so filtering it preserves that
+    # order for every shelf except recently-played, which needs its own sort.
+    recently_played = sorted(
+        (c for c in content if c.last_played_at is not None),
+        key=lambda c: c.last_played_at,
+        reverse=True,
+    )[:HOME_SHELF_LIMIT]
+
     return templates.TemplateResponse(
         request,
         "index.html",
-        {"feeds": feeds, "content": content, "usage": usage, "audio_quality": user.audio_quality},
+        {
+            "feeds": feeds,
+            "content": content,
+            "usage": usage,
+            "audio_quality": user.audio_quality,
+            "home_recently_played": recently_played,
+            "home_new_uploads": content[:HOME_SHELF_LIMIT],
+            "home_favorites": [c for c in content if c.is_favorite][:HOME_SHELF_LIMIT],
+            "home_saved": [c for c in content if c.is_saved][:HOME_SHELF_LIMIT],
+        },
     )
 
 

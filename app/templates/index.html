@@ -13,7 +13,7 @@
     // corrects it after DOMContentLoaded, which flashes stale content for a
     // frame on every reload.
     (function () {
-      var VALID_TABS = ["library", "channels", "storage", "settings"];
+      var VALID_TABS = ["home", "library", "channels", "storage", "settings"];
       var fromHash = location.hash.slice(1);
       var fromStorage = localStorage.getItem("spotifrei-active-tab");
       var tab =
@@ -21,36 +21,104 @@
           ? fromHash
           : VALID_TABS.indexOf(fromStorage) !== -1
             ? fromStorage
-            : "library";
+            : "home";
       document.documentElement.dataset.activeTab = tab;
     })();
   </script>
 </head>
 <body>
   <header class="topbar">
-    <h1 class="brand"><img src="/static/img/logo.png" alt="" class="brand-logo" />Spotifrei</h1>
-    <div class="topbar-actions">
-      <button type="button" id="refresh-feeds-btn" class="btn-icon" aria-label="Refresh feeds" title="Refresh feeds">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <polyline points="23 4 23 10 17 10"></polyline>
-          <polyline points="1 20 1 14 7 14"></polyline>
-          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
-        </svg>
-      </button>
-      <form method="post" action="/logout">
-        <button type="submit" class="btn-ghost">Log out</button>
-      </form>
+    <div class="topbar-inner">
+      <h1 class="brand"><img src="/static/img/logo.png" alt="" class="brand-logo" />Spotifrei</h1>
+      <div class="topbar-actions">
+        <button type="button" id="refresh-feeds-btn" class="btn-icon" aria-label="Refresh feeds" title="Refresh feeds">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="23 4 23 10 17 10"></polyline>
+            <polyline points="1 20 1 14 7 14"></polyline>
+            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+          </svg>
+        </button>
+        <form method="post" action="/logout">
+          <button type="submit" class="btn-ghost">Log out</button>
+        </form>
+      </div>
     </div>
   </header>
 
   <nav class="tabs" role="tablist">
+    <div class="tabs-inner">
+    <button type="button" class="tab-btn" data-tab="home" role="tab" aria-selected="false">Home</button>
     <button type="button" class="tab-btn" data-tab="library" role="tab" aria-selected="false">Library</button>
     <button type="button" class="tab-btn" data-tab="channels" role="tab" aria-selected="false">Channels</button>
     <button type="button" class="tab-btn" data-tab="storage" role="tab" aria-selected="false">Storage</button>
     <button type="button" class="tab-btn" data-tab="settings" role="tab" aria-selected="false">Settings</button>
+    </div>
   </nav>
 
   <main class="layout">
+    <section id="tab-home" class="tab-panel" data-tab-panel="home">
+      {% if not content %}
+      <p class="muted">No content yet — add a channel in the Channels tab to get started.</p>
+      {% else %}
+
+      <div class="shelf">
+        <h2 class="shelf-title">New uploads</h2>
+        {% if home_new_uploads %}
+        <div class="shelf-row">
+          {% for item in home_new_uploads %}
+          {% include "_content_card.html" %}
+          {% endfor %}
+        </div>
+        {% else %}
+        <p class="muted shelf-empty">Nothing here yet.</p>
+        {% endif %}
+      </div>
+
+      {% if home_recently_played %}
+      <div class="shelf">
+        <h2 class="shelf-title">Recently played</h2>
+        <div class="shelf-row">
+          {% for item in home_recently_played %}
+          {% include "_content_card.html" %}
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+
+      {% if home_favorites %}
+      <div class="shelf">
+        <h2 class="shelf-title">Favorites</h2>
+        <div class="shelf-row">
+          {% for item in home_favorites %}
+          {% include "_content_card.html" %}
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+
+      <div class="shelf" id="home-shelf-saved" {% if not home_saved %}hidden{% endif %}>
+        <h2 class="shelf-title">Saved for later</h2>
+        <div class="shelf-row" id="home-saved-row">
+          {% for item in home_saved %}
+          {% include "_content_card.html" %}
+          {% endfor %}
+        </div>
+      </div>
+
+      {% endif %}
+
+      {% if feeds %}
+      <div class="shelf">
+        <h2 class="shelf-title">Followed channels</h2>
+        <div class="channel-row" id="home-channel-row">
+          {% for feed in feeds %}
+          <button type="button" class="channel-chip" data-channel="{{ feed.channel_title or '' }}">{{ feed.channel_title or feed.rss_url }}</button>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+    </section>
+
     <section id="tab-library" class="tab-panel" data-tab-panel="library">
       <div class="content-header">
         <h2>Latest</h2>
@@ -59,9 +127,6 @@
             <option value="">All channels</option>
             <option value="__favorites__">Favorites</option>
             <option value="__saved__">Saved for later</option>
-            {% for feed in feeds %}
-            <option value="{{ feed.channel_title }}">{{ feed.channel_title or feed.rss_url }}</option>
-            {% endfor %}
           </select>
           <select id="sort-select" class="sort-select" aria-label="Sort by">
             <option value="date-desc">Newest first</option>

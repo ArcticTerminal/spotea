@@ -5,8 +5,11 @@ function escapeHtml(str) {
 }
 
 async function toggleSaved(contentId, button) {
-  const card = document.querySelector(`.card[data-content-id="${contentId}"]`);
-  const isSaved = card?.dataset.saved === "true";
+  // The same item can appear in several shelves on Home plus the Library
+  // grid at once, so every instance's state has to be kept in sync, not
+  // just the one the click happened in.
+  const cards = document.querySelectorAll(`.card[data-content-id="${contentId}"]`);
+  const isSaved = button?.closest(".card")?.dataset.saved === "true";
 
   try {
     const res = await fetch(`/content/${contentId}/save`, {
@@ -18,8 +21,13 @@ async function toggleSaved(contentId, button) {
     }
     const data = await res.json();
 
-    if (card) card.dataset.saved = String(data.is_saved);
-    if (button) applySavedState(button, data.is_saved);
+    cards.forEach((card) => {
+      card.dataset.saved = String(data.is_saved);
+      const saveBtn = card.querySelector(".btn-save");
+      if (saveBtn) applySavedState(saveBtn, data.is_saved);
+    });
+
+    syncSavedShelf(contentId, data.is_saved);
 
     // Un-saving while the Saved filter is active should drop it from view.
     if (document.getElementById("channel-filter")?.value === SAVED_FILTER_VALUE) {
@@ -28,6 +36,30 @@ async function toggleSaved(contentId, button) {
   } catch (err) {
     showToast("Could not update saved items");
   }
+}
+
+// Home's "Saved for later" shelf is only populated at page render, so a
+// save/un-save needs to patch it in live or it wouldn't show up until the
+// next full reload. The whole shelf (title included) stays hidden while empty.
+function syncSavedShelf(contentId, isSaved) {
+  const shelf = document.getElementById("home-shelf-saved");
+  const row = document.getElementById("home-saved-row");
+  if (!shelf || !row) return;
+
+  const existing = row.querySelector(`.card[data-content-id="${contentId}"]`);
+
+  if (isSaved && !existing) {
+    const source = document.querySelector(`.card[data-content-id="${contentId}"]`);
+    if (source) {
+      const clone = source.cloneNode(true);
+      clone.hidden = false; // the source may be paginated out of view in Library
+      row.prepend(clone);
+    }
+  } else if (!isSaved && existing) {
+    existing.remove();
+  }
+
+  shelf.hidden = row.children.length === 0;
 }
 
 function applySavedState(button, isSaved) {
@@ -39,12 +71,14 @@ function applySavedState(button, isSaved) {
 }
 
 function setupContentGrid() {
-  const grid = document.getElementById("content-grid");
-  if (!grid) return;
+  // Bound on .layout rather than #content-grid so save toggles also work on
+  // Home's shelves, not just the Library grid.
+  const layout = document.querySelector(".layout");
+  if (!layout) return;
 
   // Downloading is no longer a card-level action — playing something is what
   // fetches it — so the only interactive control left here is the save toggle.
-  grid.addEventListener("click", (event) => {
+  layout.addEventListener("click", (event) => {
     const saveBtn = event.target.closest(".btn-save");
     if (saveBtn) toggleSaved(saveBtn.dataset.contentId, saveBtn);
   });
@@ -145,19 +179,119 @@ function setupSorting() {
   });
 }
 
+// The dropdown only lists the fixed filters (All/Favorites/Saved) — Home's
+// channel row is how a specific channel gets picked now — so filtering by
+// channel needs a one-off <option> injected for whichever channel is active,
+// rather than a static list of every followed channel.
+function setChannelFilterValue(channel) {
+  const select = document.getElementById("channel-filter");
+  if (!select) return;
+
+  let option = select.querySelector('option[data-dynamic="true"]');
+  if (!option) {
+    option = document.createElement("option");
+    option.dataset.dynamic = "true";
+    select.appendChild(option);
+  }
+  option.value = channel;
+  option.textContent = channel;
+  select.value = channel;
+}
+
 function setupChannelFilter() {
   const select = document.getElementById("channel-filter");
   if (!select) return;
 
   const saved = localStorage.getItem(FILTER_STORAGE_KEY);
-  if (saved && Array.from(select.options).some((opt) => opt.value === saved)) {
+  if (saved === FAVORITES_FILTER_VALUE || saved === SAVED_FILTER_VALUE || saved === "") {
     select.value = saved;
+  } else if (saved) {
+    setChannelFilterValue(saved);
   }
 
   select.addEventListener("change", () => {
     localStorage.setItem(FILTER_STORAGE_KEY, select.value);
     currentPage = 1;
     refreshGridView();
+  });
+}
+
+function setupHomeChannels() {
+  const row = document.getElementById("home-channel-row");
+  if (!row) return;
+
+  row.addEventListener("click", (event) => {
+    const chip = event.target.closest(".channel-chip");
+    if (!chip) return;
+
+    setChannelFilterValue(chip.dataset.channel);
+    localStorage.setItem(FILTER_STORAGE_KEY, chip.dataset.channel);
+    currentPage = 1;
+    refreshGridView();
+
+    // Push a new history entry for the Home state we're leaving so the back
+    // button returns here — tab switches otherwise only replaceState, which
+    // would make back skip straight past Home to whatever real page (e.g. a
+    // player) was open before it.
+    history.pushState(null, "", location.pathname + location.search + "#home");
+    document.querySelector('.tab-btn[data-tab="library"]')?.click();
+    window.scrollTo(0, 0);
+  });
+}
+
+function setupHorizontalScrollers() {
+  // Shelf/channel rows are wider than their container by design. Genuine
+  // horizontal gestures (trackpad two-finger swipe, shift+wheel, a tilt
+  // wheel) already scroll these natively via overflow-x:auto — no JS
+  // needed. What's missing is click-and-drag for plain mouse users, which
+  // this adds. (An earlier version also redirected plain vertical wheel
+  // scroll into horizontal movement, but that hijacked normal page
+  // scrolling anywhere the cursor was over a row, effectively freezing it —
+  // removed.)
+  document.querySelectorAll(".shelf-row, .channel-row").forEach((row) => {
+    let isDown = false;
+    let dragged = false;
+    let startX = 0;
+    let startScroll = 0;
+
+    row.addEventListener("mousedown", (event) => {
+      isDown = true;
+      dragged = false;
+      startX = event.pageX;
+      startScroll = row.scrollLeft;
+      row.classList.add("dragging");
+    });
+
+    window.addEventListener("mouseup", () => {
+      isDown = false;
+      row.classList.remove("dragging");
+    });
+
+    row.addEventListener("mouseleave", () => {
+      isDown = false;
+      row.classList.remove("dragging");
+    });
+
+    row.addEventListener("mousemove", (event) => {
+      if (!isDown) return;
+      const delta = event.pageX - startX;
+      if (Math.abs(delta) > 5) dragged = true;
+      row.scrollLeft = startScroll - delta;
+      event.preventDefault();
+    });
+
+    // A drag that happened to pass over a card/chip shouldn't also trigger
+    // its click (playing a video, following a channel filter, etc.).
+    row.addEventListener(
+      "click",
+      (event) => {
+        if (dragged) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+      },
+      true
+    );
   });
 }
 
@@ -418,10 +552,20 @@ function setupTabs() {
     btn.addEventListener("click", () => activate(btn.dataset.tab));
   });
 
+  // Needed because most tab switches only replaceState (see above), but
+  // setupHomeChannels() does pushState once when leaving Home via a channel
+  // chip — without this, pressing back would update the URL's hash without
+  // the visible panel following it.
+  window.addEventListener("popstate", () => {
+    const requested = location.hash.slice(1);
+    const isValid = Array.from(tabButtons).some((btn) => btn.dataset.tab === requested);
+    activate(isValid ? requested : "home");
+  });
+
   // The inline head script already resolved the correct initial tab (URL
   // hash, falling back to localStorage) and set it on <html> before first
   // paint — this just syncs the button/URL state to match.
-  activate(document.documentElement.dataset.activeTab || "library");
+  activate(document.documentElement.dataset.activeTab || "home");
 }
 
 function setupStorage() {
@@ -595,6 +739,8 @@ document.addEventListener("DOMContentLoaded", () => {
   setupContentGrid();
   setupSorting();
   setupChannelFilter();
+  setupHomeChannels();
+  setupHorizontalScrollers();
   setupPagination();
   setupRefreshButton();
   refreshGridView();

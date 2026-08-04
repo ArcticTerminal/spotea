@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     storage_dir: Path = Path("/app/data/storage")
     audio_format: str = "m4a"
 
-    model_config = SettingsConfigDict(env_file=".env", case_sensitive=False)
+    model_config = SettingsConfigDict(env_file=".env", case_sensitive=False, extra="ignore")
 
 
 settings = Settings()

@@ -10,6 +10,7 @@ _COLUMN_MIGRATIONS = [
     ("content", "duration_seconds", "INTEGER"),
     ("content", "is_saved", "BOOLEAN NOT NULL DEFAULT 0"),
     ("users", "audio_quality", "VARCHAR(10) NOT NULL DEFAULT 'high'"),
+    ("content", "last_played_at", "DATETIME"),
 ]
 
 
@@ -24,3 +25,18 @@ def run_migrations(engine: Engine) -> None:
             if column in columns:
                 continue
             conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
+
+        # Downloading has always been a play-triggered action (see
+        # content.py), so any 'ready' row from before last_played_at existed
+        # represents a genuine past play — backfill it from downloaded_at as
+        # the closest proxy, or "haven't played yet" would wrongly include
+        # already-downloaded content. A no-op once every such row is backfilled.
+        if "content" in existing_tables:
+            columns = {col["name"] for col in inspect(engine).get_columns("content")}
+            if "last_played_at" in columns:
+                conn.execute(
+                    text(
+                        "UPDATE content SET last_played_at = downloaded_at "
+                        "WHERE last_played_at IS NULL AND status = 'ready' AND downloaded_at IS NOT NULL"
+                    )
+                )

@@ -63,6 +63,7 @@ class Content(Base):
     downloaded_at: Mapped[datetime | None] = mapped_column(default=None)
     is_favorite: Mapped[bool] = mapped_column(default=False)
     is_saved: Mapped[bool] = mapped_column(default=False)
+    last_played_at: Mapped[datetime | None] = mapped_column(default=None)
 
     feed: Mapped["Feed"] = relationship(back_populates="content")
     user: Mapped["User"] = relationship(back_populates="content")
