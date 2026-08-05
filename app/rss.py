@@ -110,7 +110,14 @@ class ChannelSearchResult:
 def _absolute_thumbnail_url(raw: str | None) -> str | None:
     if not raw:
         return None
-    return f"https:{raw}" if raw.startswith("//") else raw
+    url = f"https:{raw}" if raw.startswith("//") else raw
+    # yt3.googleusercontent.com serves the same images (same path) as
+    # yt3.ggpht.com, but browsers hotlinking it cross-origin in an <img> tag
+    # get net::ERR_BLOCKED_BY_ORB (Chrome's Opaque Response Blocking) — the
+    # googleusercontent.com response is missing the headers ORB wants to
+    # confirm it's really an image. ggpht.com (YouTube's dedicated image
+    # CDN) sends them and renders fine, so rewrite to that host.
+    return url.replace("//yt3.googleusercontent.com/", "//yt3.ggpht.com/")
 
 
 def search_channels(query: str) -> list[ChannelSearchResult]:

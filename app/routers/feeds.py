@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
 from app.deps import get_db, require_login
+from app.downloader import download_avatar
 from app.models import Content, Feed
 from app.rss import (
     ChannelResolutionError,
@@ -157,11 +158,14 @@ def _fetch_feed_data(feed_id: int, rss_url: str, avatar_url: str | None) -> _Fee
         if needs_durations:
             durations = fetch_channel_video_durations(channel_id)
 
-    # Fetched once per channel, ever — skipped as soon as a feed has one, so
-    # this never adds a call to the steady-state per-session refresh.
+    # Fetched (and downloaded) once per channel, ever — skipped as soon as a
+    # feed has one, so this never adds a call to the steady-state per-session
+    # refresh.
     fetched_avatar_url = None
     if not avatar_url and channel_id:
-        fetched_avatar_url = fetch_channel_avatar_url(channel_id)
+        remote_avatar_url = fetch_channel_avatar_url(channel_id)
+        if remote_avatar_url:
+            fetched_avatar_url = download_avatar(channel_id, remote_avatar_url)
 
     return _FeedFetchResult(
         parsed=parsed, durations=durations, channel_id=channel_id, avatar_url=fetched_avatar_url

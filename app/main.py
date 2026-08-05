@@ -1,13 +1,13 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
-from fastapi.responses import RedirectResponse
+from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.config import settings
 from app.database import Base, SessionLocal, engine
-from app.deps import NotAuthenticated
+from app.deps import NotAuthenticated, require_login
 from app.migrations import run_migrations
 from app.models import User
 from app.routers import auth as auth_router
@@ -80,3 +80,19 @@ async def handle_not_authenticated(request: Request, exc: NotAuthenticated) -> R
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/avatars/{filename}", dependencies=[Depends(require_login)])
+def get_avatar(filename: str) -> FileResponse:
+    # Downloaded and re-served from our own origin rather than hotlinked
+    # from Google's CDN — see downloader.download_avatar for why. filename
+    # is always "{channel_id}.jpg" from that function, but guard against
+    # path traversal since it still arrives as attacker-controlled input.
+    if "/" in filename or "\\" in filename or filename.startswith("."):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+
+    path = settings.avatars_dir / filename
+    if not path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+
+    return FileResponse(path, media_type="image/jpeg")

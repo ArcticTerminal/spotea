@@ -1,3 +1,5 @@
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Callable
 
@@ -87,3 +89,24 @@ def download_audio(video_id: str, quality: str = "high", on_progress: ProgressCa
         raise DownloadError("Download completed but output file was not found")
 
     return final_path
+
+
+def download_avatar(channel_id: str, avatar_url: str) -> str | None:
+    """Fetch a channel avatar's bytes once and save them locally, returning a
+    same-origin path to re-serve it from. Hotlinking Google's image CDN
+    directly from the browser turned out to be unreliable — Chrome's Opaque
+    Response Blocking (ORB) intermittently rejects it even for a URL that
+    loaded fine moments earlier from the same page — so the app fetches once
+    server-side (where that doesn't apply) instead of trusting the browser to
+    load Google's URL every time."""
+    settings.avatars_dir.mkdir(parents=True, exist_ok=True)
+    dest = settings.avatars_dir / f"{channel_id}.jpg"
+
+    try:
+        req = urllib.request.Request(avatar_url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            dest.write_bytes(resp.read())
+    except (urllib.error.URLError, OSError, TimeoutError):
+        return None
+
+    return f"/avatars/{dest.name}"
