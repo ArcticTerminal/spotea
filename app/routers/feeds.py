@@ -1,19 +1,24 @@
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.database import SessionLocal
 from app.deps import get_db, require_login
 from app.models import Content, Feed
 from app.rss import (
     ChannelResolutionError,
     InvalidFeedError,
+    ParsedFeed,
     extract_channel_id,
     fetch_channel_all_videos,
-    fetch_channel_shorts_ids,
+    fetch_channel_avatar_url,
     fetch_channel_video_durations,
     fetch_feed,
+    longform_feed_url,
     resolve_feed_url,
     search_channels,
 )
@@ -73,13 +78,10 @@ def _run_backfill(feed_id: int, channel_id: str, db: Session) -> None:
         _backfill_progress[feed_id] = ("done", 0, 0)
         return
 
-    shorts_ids = fetch_channel_shorts_ids(channel_id, full=True) if videos else set()
     existing_ids = {
         row.video_id for row in db.query(Content.video_id).filter(Content.feed_id == feed_id)
     }
-    new_entries = [
-        v for v in videos if v.video_id not in shorts_ids and v.video_id not in existing_ids
-    ]
+    new_entries = [v for v in videos if v.video_id not in existing_ids]
 
     oldest_known = (
         db.query(func.min(Content.published_at))
@@ -108,15 +110,80 @@ def _run_backfill(feed_id: int, channel_id: str, db: Session) -> None:
     _backfill_progress[feed_id] = ("done", total, total)
 
 
-def _sync_feed_content(db: Session, feed: Feed) -> int:
-    """Fetch a feed's RSS and insert any content rows not already known. Returns new-row count."""
+# Feed refresh is network-bound (RSS parse + a yt-dlp call per channel), so
+# refresh_feeds fans those out across threads rather than doing them one
+# channel at a time. Kept modest to stay polite to YouTube's servers — this
+# is unauthenticated scraping, and a burst of dozens of concurrent requests
+# risks 429s. DB writes never happen inside the pool (see _apply_feed_data).
+_REFRESH_POOL_SIZE = 8
+
+
+@dataclass
+class _FeedFetchResult:
+    parsed: ParsedFeed | None
+    durations: dict[str, int]
+    channel_id: str | None
+    avatar_url: str | None = None
+
+
+def _fetch_feed_data(feed_id: int, rss_url: str, avatar_url: str | None) -> _FeedFetchResult:
+    """The network half of a feed sync: RSS fetch plus, when needed, a
+    duration lookup and a channel-avatar lookup. Safe to run off the main
+    thread and in parallel across feeds — touches no SQLAlchemy state but
+    its own throwaway read session.
+
+    Fetches via the channel's Videos-tab playlist (UULF) when its channel ID
+    is known, rather than rss_url's plain channel feed — Shorts are excluded
+    there for free, no separate Shorts-tab fetch needed."""
+    channel_id = extract_channel_id(rss_url)
+    fetch_url = longform_feed_url(channel_id) if channel_id else rss_url
+
     try:
-        parsed = fetch_feed(feed.rss_url)
+        parsed = fetch_feed(fetch_url)
     except InvalidFeedError:
+        return _FeedFetchResult(parsed=None, durations={}, channel_id=channel_id)
+
+    durations: dict[str, int] = {}
+    if channel_id and parsed.entries:
+        incoming_ids = [entry.video_id for entry in parsed.entries]
+        with SessionLocal() as read_db:
+            existing = read_db.query(Content.video_id, Content.duration_seconds).filter(
+                Content.feed_id == feed_id, Content.video_id.in_(incoming_ids)
+            ).all()
+        existing_ids = {video_id for video_id, _ in existing}
+        needs_durations = any(vid not in existing_ids for vid in incoming_ids) or any(
+            duration is None for _, duration in existing
+        )
+        if needs_durations:
+            durations = fetch_channel_video_durations(channel_id)
+
+    # Fetched once per channel, ever — skipped as soon as a feed has one, so
+    # this never adds a call to the steady-state per-session refresh.
+    fetched_avatar_url = None
+    if not avatar_url and channel_id:
+        fetched_avatar_url = fetch_channel_avatar_url(channel_id)
+
+    return _FeedFetchResult(
+        parsed=parsed, durations=durations, channel_id=channel_id, avatar_url=fetched_avatar_url
+    )
+
+
+def _apply_feed_data(db: Session, feed: Feed, result: _FeedFetchResult) -> int:
+    """The DB half of a feed sync: insert new content rows and backfill
+    missing durations from an already-fetched _FeedFetchResult. Must run on
+    the request's own session, so always sequential (never in the pool)."""
+    parsed = result.parsed
+    if parsed is None:
         return 0
 
-    if not feed.channel_title and parsed.channel_title:
+    # parsed.channel_title is "Videos" (the UULF playlist's own title, not the
+    # channel's) whenever the fetch went through the Videos-tab playlist, so
+    # only trust it as a channel_title backfill on the plain-feed fallback path.
+    if not feed.channel_title and parsed.channel_title and not result.channel_id:
         feed.channel_title = parsed.channel_title
+
+    if result.avatar_url:
+        feed.avatar_url = result.avatar_url
 
     incoming_ids = [entry.video_id for entry in parsed.entries]
     existing_rows = {
@@ -128,18 +195,7 @@ def _sync_feed_content(db: Session, feed: Feed) -> int:
     missing_duration_ids = {
         video_id for video_id, row in existing_rows.items() if row.duration_seconds is None
     }
-    candidate_entries = [entry for entry in parsed.entries if entry.video_id not in existing_rows]
-
-    channel_id = extract_channel_id(feed.rss_url)
-
-    new_entries = candidate_entries
-    if candidate_entries and channel_id:
-        shorts_ids = fetch_channel_shorts_ids(channel_id)
-        new_entries = [entry for entry in candidate_entries if entry.video_id not in shorts_ids]
-
-    durations: dict[str, int] = {}
-    if (new_entries or missing_duration_ids) and channel_id:
-        durations = fetch_channel_video_durations(channel_id)
+    new_entries = [entry for entry in parsed.entries if entry.video_id not in existing_rows]
 
     new_count = 0
     for entry in new_entries:
@@ -151,14 +207,14 @@ def _sync_feed_content(db: Session, feed: Feed) -> int:
                 title=entry.title,
                 thumbnail_url=entry.thumbnail_url,
                 published_at=entry.published_at,
-                duration_seconds=durations.get(entry.video_id),
+                duration_seconds=result.durations.get(entry.video_id),
             )
         )
         new_count += 1
 
     for video_id in missing_duration_ids:
-        if video_id in durations:
-            existing_rows[video_id].duration_seconds = durations[video_id]
+        if video_id in result.durations:
+            existing_rows[video_id].duration_seconds = result.durations[video_id]
 
     db.commit()
     return new_count
@@ -189,7 +245,8 @@ def add_feed(
     db.commit()
     db.refresh(feed)
 
-    new_count = _sync_feed_content(db, feed)
+    result = _fetch_feed_data(feed.id, feed.rss_url, feed.avatar_url)
+    new_count = _apply_feed_data(db, feed, result)
 
     channel_id = extract_channel_id(rss_url)
     if channel_id:
@@ -239,5 +296,13 @@ def delete_feed(feed_id: int, db: Session = Depends(get_db)) -> None:
 @router.post("/refresh", response_model=RefreshResult)
 def refresh_feeds(db: Session = Depends(get_db)) -> RefreshResult:
     feeds = db.query(Feed).filter(Feed.user_id == DEFAULT_USER_ID).all()
-    total_new = sum(_sync_feed_content(db, feed) for feed in feeds)
+    if not feeds:
+        return RefreshResult(new_content_count=0)
+
+    with ThreadPoolExecutor(max_workers=min(len(feeds), _REFRESH_POOL_SIZE)) as pool:
+        results = list(pool.map(lambda f: _fetch_feed_data(f.id, f.rss_url, f.avatar_url), feeds))
+
+    total_new = sum(
+        _apply_feed_data(db, feed, result) for feed, result in zip(feeds, results)
+    )
     return RefreshResult(new_content_count=total_new)

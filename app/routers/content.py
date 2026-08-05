@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.deps import get_db, require_login
 from app.downloader import DownloadError, download_audio
+from app.formatting import safe_filename
 from app.models import Content, User
 from app.rss import VIDEO_ID_RE
 from app.schemas import ContentOut, FavoriteOut, SavedOut, StatusOut
@@ -158,7 +159,7 @@ def remove_saved(content_id: int, db: Session = Depends(get_db)) -> SavedOut:
 
 
 @router.get("/{content_id}/stream")
-def stream_content(content_id: int, db: Session = Depends(get_db)) -> FileResponse:
+def stream_content(content_id: int, download: bool = False, db: Session = Depends(get_db)) -> FileResponse:
     content = _get_content_or_404(db, content_id)
 
     if content.status != "ready" or not content.file_path:
@@ -168,11 +169,16 @@ def stream_content(content_id: int, db: Session = Depends(get_db)) -> FileRespon
     if not file_path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File missing on disk")
 
-    content.last_played_at = dt.datetime.utcnow()
-    db.commit()
+    # Skipped for a plain file export (?download=1) — that's not the user
+    # actually listening, so it shouldn't count toward "recently played".
+    if not download:
+        content.last_played_at = dt.datetime.utcnow()
+        db.commit()
 
     media_type = AUDIO_MEDIA_TYPES.get(file_path.suffix, "application/octet-stream")
-    return FileResponse(file_path, media_type=media_type, filename=file_path.name)
+    return FileResponse(
+        file_path, media_type=media_type, filename=safe_filename(content.title) + file_path.suffix
+    )
 
 
 @router.delete("/{content_id}", response_model=StatusOut)

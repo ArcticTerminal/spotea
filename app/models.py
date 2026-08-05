@@ -30,6 +30,7 @@ class Feed(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     rss_url: Mapped[str] = mapped_column(String(500))
     channel_title: Mapped[str | None] = mapped_column(String(200), default=None)
+    avatar_url: Mapped[str | None] = mapped_column(String(500), default=None)
     added_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
 
     user: Mapped["User"] = relationship(back_populates="feeds")

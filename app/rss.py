@@ -13,8 +13,8 @@ CHANNEL_ID_URL_RE = re.compile(r"youtube\.com/channel/(UC[\w-]{22})")
 CHANNEL_ID_PARAM_RE = re.compile(r"channel_id=([\w-]+)")
 
 RSS_FEED_URL_TEMPLATE = "https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
+RSS_FEED_PLAYLIST_URL_TEMPLATE = "https://www.youtube.com/feeds/videos.xml?playlist_id={playlist_id}"
 UPLOADS_PLAYLIST_URL_TEMPLATE = "https://www.youtube.com/playlist?list={playlist_id}"
-CHANNEL_SHORTS_URL_TEMPLATE = "https://www.youtube.com/channel/{channel_id}/shorts"
 
 # sp=EgIQAg%3D%3D restricts YouTube search results to the "Channel" type.
 CHANNEL_SEARCH_URL_TEMPLATE = "https://www.youtube.com/results?search_query={query}&sp=EgIQAg%3D%3D"
@@ -40,19 +40,6 @@ _DURATION_FETCH_OPTS = {
     "playlist_items": "1-50",
 }
 
-_SHORTS_FETCH_OPTS = {
-    "quiet": True,
-    "no_warnings": True,
-    "extract_flat": "in_playlist",
-    "playlist_items": "1-50",
-}
-
-_SHORTS_BACKFILL_OPTS = {
-    "quiet": True,
-    "no_warnings": True,
-    "extract_flat": "in_playlist",
-}
-
 _BACKFILL_FETCH_OPTS = {
     "quiet": True,
     "no_warnings": True,
@@ -63,6 +50,21 @@ _BACKFILL_FETCH_OPTS = {
 def extract_channel_id(rss_url: str) -> str | None:
     match = CHANNEL_ID_PARAM_RE.search(rss_url)
     return match.group(1) if match else None
+
+
+def _playlist_id(channel_id: str, prefix: str) -> str:
+    """YouTube maps a channel to several special playlists by swapping the
+    "UC" prefix of its channel ID: "UULF" is the Videos tab (long-form only,
+    Shorts and Lives excluded), "UU" is all uploads mixed together. This is
+    an undocumented but long-stable YouTube convention, not a public API."""
+    return prefix + channel_id[2:] if channel_id.startswith("UC") else channel_id
+
+
+def longform_feed_url(channel_id: str) -> str:
+    """RSS feed scoped to a channel's Videos tab (UULF playlist) instead of
+    all uploads — entries here are never Shorts, so callers don't need a
+    separate Shorts-tab fetch to filter them out."""
+    return RSS_FEED_PLAYLIST_URL_TEMPLATE.format(playlist_id=_playlist_id(channel_id, "UULF"))
 
 
 class InvalidFeedError(Exception):
@@ -144,15 +146,42 @@ def search_channels(query: str) -> list[ChannelSearchResult]:
     return results
 
 
+def fetch_channel_avatar_url(channel_id: str) -> str | None:
+    """Channel avatar (profile picture) — not in the RSS feed or any playlist
+    extraction, so a separate lightweight fetch of the channel page itself is
+    needed. playlist_items=0 (the same _CHANNEL_RESOLVE_OPTS resolve_feed_url
+    uses) skips fetching any videos, just the channel-level metadata. Only
+    called once per channel — see _fetch_feed_data in routers/feeds.py,
+    which skips this once a feed already has an avatar_url."""
+    url = f"https://www.youtube.com/channel/{channel_id}"
+
+    try:
+        with yt_dlp.YoutubeDL(_CHANNEL_RESOLVE_OPTS) as ydl:
+            info = ydl.extract_info(url, download=False)
+    except yt_dlp.utils.DownloadError:
+        return None
+
+    thumbnails = (info or {}).get("thumbnails") or []
+    # The last entry is normally the highest-resolution one, but here it's
+    # "avatar_uncropped" — a raw googleusercontent URL (bare "=s0") that
+    # browsers won't render when hotlinked cross-origin. The entry just
+    # before it is the same image through Google's cropped/processed image
+    # pipeline ("=s900-c-k-c0x00ffffff-no-rj"), which does render — the same
+    # URL shape search_channels' results already use successfully.
+    candidates = [t for t in thumbnails if "uncropped" not in (t.get("id") or "")]
+    pool = candidates or thumbnails
+    return _absolute_thumbnail_url(pool[-1]["url"]) if pool else None
+
+
 def fetch_channel_video_durations(channel_id: str) -> dict[str, int]:
     """Video durations aren't in YouTube's channel RSS feed. yt-dlp's flat
-    extraction of the channel's uploads playlist includes them cheaply though —
-    no per-video fetch needed. The uploads playlist (id: "UU" + channel_id[2:])
-    is always newest-first, unlike the /videos tab, whose sort order some
-    channels override (e.g. "Popular"), which can leave recent uploads out of
-    a bounded flat fetch."""
-    uploads_playlist_id = "UU" + channel_id[2:] if channel_id.startswith("UC") else channel_id
-    url = UPLOADS_PLAYLIST_URL_TEMPLATE.format(playlist_id=uploads_playlist_id)
+    extraction of the channel's Videos-tab playlist (UULF, see _playlist_id)
+    includes them cheaply though — no per-video fetch needed, and Shorts are
+    excluded for free since UULF never contains them. That playlist is
+    always newest-first, unlike the /videos tab, whose sort order some
+    channels override (e.g. "Popular"), which can leave recent uploads out
+    of a bounded flat fetch."""
+    url = UPLOADS_PLAYLIST_URL_TEMPLATE.format(playlist_id=_playlist_id(channel_id, "UULF"))
 
     try:
         with yt_dlp.YoutubeDL(_DURATION_FETCH_OPTS) as ydl:
@@ -167,27 +196,6 @@ def fetch_channel_video_durations(channel_id: str) -> dict[str, int]:
         if video_id and isinstance(duration, (int, float)):
             durations[video_id] = int(duration)
     return durations
-
-
-def fetch_channel_shorts_ids(channel_id: str, full: bool = False) -> set[str]:
-    """Video IDs YouTube itself classifies as Shorts for this channel (its
-    dedicated Shorts tab), so they can be excluded — no duration heuristic,
-    since Shorts length isn't strictly bounded to 60s.
-
-    Bounded to the most recent 50 by default, which is enough to cover the
-    handful of candidates a routine RSS-based refresh sees. Pass full=True
-    for a one-time channel backfill, where candidates can span the channel's
-    entire history."""
-    url = CHANNEL_SHORTS_URL_TEMPLATE.format(channel_id=channel_id)
-    opts = _SHORTS_BACKFILL_OPTS if full else _SHORTS_FETCH_OPTS
-
-    try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-    except yt_dlp.utils.DownloadError:
-        return set()
-
-    return {entry["id"] for entry in (info or {}).get("entries") or [] if entry.get("id")}
 
 
 @dataclass
@@ -241,12 +249,12 @@ class _ScanProgressLogger:
 def fetch_channel_all_videos(
     channel_id: str, on_progress: Callable[[BackfillProgress], None] | None = None
 ) -> list[BackfillEntry]:
-    """Every video in the channel's uploads playlist, not just the ~15 most
-    recent ones the RSS feed exposes. A single flat extraction covers id,
-    title, thumbnail and duration together, newest first — meant for a
-    one-time backfill when a channel is first added, not routine refreshes."""
-    uploads_playlist_id = "UU" + channel_id[2:] if channel_id.startswith("UC") else channel_id
-    url = UPLOADS_PLAYLIST_URL_TEMPLATE.format(playlist_id=uploads_playlist_id)
+    """Every long-form video in the channel's Videos tab (UULF playlist), not
+    just the ~15 most recent ones the RSS feed exposes. A single flat
+    extraction covers id, title, thumbnail and duration together, newest
+    first, with Shorts excluded — meant for a one-time backfill when a
+    channel is first added, not routine refreshes."""
+    url = UPLOADS_PLAYLIST_URL_TEMPLATE.format(playlist_id=_playlist_id(channel_id, "UULF"))
 
     opts = _BACKFILL_FETCH_OPTS
     if on_progress:

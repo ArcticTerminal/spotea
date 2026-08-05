@@ -249,12 +249,24 @@ function setupHorizontalScrollers() {
   // scrolling anywhere the cursor was over a row, effectively freezing it —
   // removed.)
   document.querySelectorAll(".shelf-row, .channel-row").forEach((row) => {
+    // The grab cursor (and drag-to-scroll below) should only kick in once a
+    // row actually has overflow to scroll through — otherwise it's a false
+    // affordance for a gesture that does nothing. Card widths are fixed by
+    // CSS, so only the row's own box size (i.e. viewport width) can change
+    // whether it overflows, which is exactly what ResizeObserver reports.
+    const updateScrollable = () => {
+      row.classList.toggle("is-scrollable", row.scrollWidth > row.clientWidth + 1);
+    };
+    updateScrollable();
+    new ResizeObserver(updateScrollable).observe(row);
+
     let isDown = false;
     let dragged = false;
     let startX = 0;
     let startScroll = 0;
 
     row.addEventListener("mousedown", (event) => {
+      if (!row.classList.contains("is-scrollable")) return;
       isDown = true;
       dragged = false;
       startX = event.pageX;
@@ -483,49 +495,6 @@ function setupChannelSearch() {
   });
 }
 
-function setupFeedForm() {
-  const form = document.getElementById("feed-form");
-  const errorEl = document.getElementById("feed-error");
-  if (!form) return;
-
-  form.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    errorEl.hidden = true;
-
-    const channelUrl = document.getElementById("feed-url").value.trim();
-    const submitBtn = form.querySelector("button[type=submit]");
-    submitBtn.disabled = true;
-    showBackfillOverlay("Fetching RSS feed…", "");
-
-    try {
-      const res = await fetch("/feeds", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ channel_url: channelUrl }),
-      });
-
-      if (!res.ok) {
-        hideBackfillOverlay();
-        const data = await res.json().catch(() => ({}));
-        errorEl.textContent = data.detail || "Could not add feed";
-        errorEl.hidden = false;
-        return;
-      }
-
-      const data = await res.json().catch(() => null);
-      if (data?.feed?.id != null) {
-        await waitForBackfillThenReload(data.feed.id, data.feed.channel_title || channelUrl);
-      } else {
-        window.location.reload();
-      }
-    } catch (err) {
-      hideBackfillOverlay();
-    } finally {
-      submitBtn.disabled = false;
-    }
-  });
-}
-
 const TAB_STORAGE_KEY = "spotifrei-active-tab";
 
 function setupTabs() {
@@ -566,6 +535,29 @@ function setupTabs() {
   // hash, falling back to localStorage) and set it on <html> before first
   // paint — this just syncs the button/URL state to match.
   activate(document.documentElement.dataset.activeTab || "home");
+}
+
+function setupDownloadsOverlay() {
+  const overlay = document.getElementById("downloads-overlay");
+  const openBtn = document.getElementById("open-downloads");
+  const closeBtn = document.getElementById("downloads-close");
+  if (!overlay || !openBtn) return;
+
+  const open = () => {
+    overlay.hidden = false;
+  };
+  const close = () => {
+    overlay.hidden = true;
+  };
+
+  openBtn.addEventListener("click", open);
+  closeBtn.addEventListener("click", close);
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay) close();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !overlay.hidden) close();
+  });
 }
 
 function setupStorage() {
@@ -618,7 +610,6 @@ function setupSettings() {
         body: JSON.stringify({ audio_quality: input.value }),
       });
       if (!res.ok) throw new Error("update failed");
-      showToast("Audio quality updated");
     } catch (err) {
       showToast("Could not update audio quality");
     }
@@ -732,8 +723,8 @@ function setupUnfollowButtons() {
 document.addEventListener("DOMContentLoaded", () => {
   setupTabs();
   setupChannelSearch();
-  setupFeedForm();
   setupUnfollowButtons();
+  setupDownloadsOverlay();
   setupStorage();
   setupSettings();
   setupContentGrid();

@@ -214,8 +214,7 @@ body {
    that lands on a different tab. */
 html[data-active-tab="home"] .tab-btn[data-tab="home"],
 html[data-active-tab="library"] .tab-btn[data-tab="library"],
-html[data-active-tab="channels"] .tab-btn[data-tab="channels"],
-html[data-active-tab="storage"] .tab-btn[data-tab="storage"],
+html[data-active-tab="manage"] .tab-btn[data-tab="manage"],
 html[data-active-tab="settings"] .tab-btn[data-tab="settings"] {
   color: #fff;
   border-bottom-color: #1db954;
@@ -241,8 +240,7 @@ html[data-active-tab] .tab-panel {
 
 html[data-active-tab="home"] .tab-panel[data-tab-panel="home"],
 html[data-active-tab="library"] .tab-panel[data-tab-panel="library"],
-html[data-active-tab="channels"] .tab-panel[data-tab-panel="channels"],
-html[data-active-tab="storage"] .tab-panel[data-tab-panel="storage"],
+html[data-active-tab="manage"] .tab-panel[data-tab-panel="manage"],
 html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   display: block;
 }
@@ -255,7 +253,11 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
 .channels-panel-inner h2 {
   font-size: 1rem;
   color: #b3b3b3;
-  margin: 0 0 0.75rem;
+  margin: 1.75rem 0 0.75rem;
+}
+
+.channels-panel-inner h2:first-child {
+  margin-top: 0;
 }
 
 .quality-options {
@@ -314,42 +316,6 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   }
 }
 
-#feed-form {
-  display: flex;
-  gap: 0.5rem;
-  margin-bottom: 0.5rem;
-}
-
-#feed-form input {
-  flex: 1;
-  min-width: 0;
-  padding: 0.5rem 0.6rem;
-  border-radius: 6px;
-  border: 1px solid #333;
-  background: #2a2a2a;
-  color: #f5f5f5;
-}
-
-#feed-form button {
-  padding: 0.5rem 0.9rem;
-  border: none;
-  border-radius: 6px;
-  background: #1db954;
-  color: #000;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-#feed-form button:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-
-#feed-error {
-  color: #f15e6c;
-  font-size: 0.85rem;
-}
-
 #feed-list {
   list-style: none;
   margin: 0;
@@ -359,24 +325,19 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   gap: 0.4rem;
 }
 
-#feed-list li {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0.4rem 0.6rem;
-  background: #1e1e1e;
-  border-radius: 6px;
-  font-size: 0.9rem;
-}
-
 #feed-list .unfollow {
   background: none;
   border: none;
   color: #888;
   cursor: pointer;
-  font-size: 1rem;
-  line-height: 1;
+  padding: 0.3rem;
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+#feed-list .unfollow svg {
+  width: 16px;
+  height: 16px;
 }
 
 #feed-list .unfollow:hover {
@@ -483,6 +444,13 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   background: #1e1e1e;
   border-radius: 8px;
   margin-bottom: 1rem;
+  flex-shrink: 0;
+}
+
+.storage-summary-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
 }
 
 .storage-total {
@@ -498,6 +466,13 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  /* Lets the list shrink below its content height so overflow-y can kick in
+     — a flex child's default min-height is auto (its content size), which
+     would otherwise stop it from ever scrolling inside modal-downloads'
+     capped height. */
+  min-height: 0;
 }
 
 .storage-list li {
@@ -529,6 +504,7 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   color: #888;
 }
 
+.storage-export,
 .storage-remove {
   background: none;
   border: none;
@@ -539,9 +515,14 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   flex-shrink: 0;
 }
 
+.storage-export svg,
 .storage-remove svg {
   width: 16px;
   height: 16px;
+}
+
+.storage-export:hover {
+  color: #1db954;
 }
 
 .storage-remove:hover {
@@ -619,10 +600,20 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   gap: 0.75rem;
   overflow-x: auto;
   padding-bottom: 0.25rem;
-  scrollbar-width: thin;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
   -webkit-overflow-scrolling: touch;
-  cursor: grab;
   user-select: none;
+}
+
+.shelf-row::-webkit-scrollbar,
+.channel-row::-webkit-scrollbar {
+  display: none;
+}
+
+.shelf-row.is-scrollable,
+.channel-row.is-scrollable {
+  cursor: grab;
 }
 
 .shelf-row.dragging,
@@ -657,14 +648,17 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   gap: 0.6rem;
   overflow-x: auto;
   padding-bottom: 0.25rem;
-  scrollbar-width: thin;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
   -webkit-overflow-scrolling: touch;
-  cursor: grab;
   user-select: none;
 }
 
 .channel-chip {
   flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
   background: #1a1a1a;
   border: 1px solid #333;
   color: #f5f5f5;
@@ -674,6 +668,18 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
+}
+
+.channel-chip.has-avatar {
+  padding: 0.35rem 1.1rem 0.35rem 0.35rem;
+}
+
+.channel-chip-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex: 0 0 auto;
 }
 
 .channel-chip:hover {
@@ -709,8 +715,16 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
 .card .thumb {
   position: relative;
   display: block;
+  width: 100%;
   aspect-ratio: 16 / 9;
   background: #2a2a2a;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: inherit;
+  cursor: pointer;
 }
 
 .card .thumb img {
@@ -957,6 +971,42 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   gap: 0.5rem;
 }
 
+.modal-downloads {
+  max-width: 480px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  flex-shrink: 0;
+}
+
+.modal-header h2 {
+  font-size: 1rem;
+  margin: 0;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0.2rem;
+  flex-shrink: 0;
+}
+
+.modal-close:hover {
+  color: #f5f5f5;
+}
+
 .btn-quiet {
   background: none;
   border: none;
@@ -966,6 +1016,8 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   font-size: 0.85rem;
   font-weight: 600;
   cursor: pointer;
+  display: inline-block;
+  text-decoration: none;
 }
 
 .btn-quiet:hover {
@@ -1026,8 +1078,7 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   transform: translateY(0);
 }
 
-/* Player page */
-
+/* Standalone /player/{id} page */
 .player-body {
   display: flex;
   align-items: center;
@@ -1046,11 +1097,15 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
+  background: none;
+  border: none;
+  padding: 0;
   color: #b3b3b3;
   text-decoration: none;
   font-size: 0.85rem;
   font-weight: 600;
   margin-bottom: 1.5rem;
+  cursor: pointer;
 }
 
 .back-link svg {

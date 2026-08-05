@@ -11,6 +11,7 @@ _COLUMN_MIGRATIONS = [
     ("content", "is_saved", "BOOLEAN NOT NULL DEFAULT 0"),
     ("users", "audio_quality", "VARCHAR(10) NOT NULL DEFAULT 'high'"),
     ("content", "last_played_at", "DATETIME"),
+    ("feeds", "avatar_url", "VARCHAR(500)"),
 ]
 
 

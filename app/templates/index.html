@@ -13,7 +13,7 @@
     // corrects it after DOMContentLoaded, which flashes stale content for a
     // frame on every reload.
     (function () {
-      var VALID_TABS = ["home", "library", "channels", "storage", "settings"];
+      var VALID_TABS = ["home", "library", "manage", "settings"];
       var fromHash = location.hash.slice(1);
       var fromStorage = localStorage.getItem("spotifrei-active-tab");
       var tab =
@@ -27,6 +27,22 @@
   </script>
 </head>
 <body>
+  <div id="refresh-overlay" class="overlay" hidden>
+    <span class="spinner spinner-lg" role="status" aria-label="Refreshing"></span>
+  </div>
+  <script>
+    // Unhidden here, synchronously, before <main> below even parses — not
+    // left to maybeAutoRefresh() in app.js, which only runs after
+    // DOMContentLoaded (and after several other setup calls). Waiting for
+    // that leaves a window where the page looks fully loaded and clickable
+    // but the session's one-time auto-refresh hasn't started yet, so a user
+    // can end up tapping a library item right as content shifts under them.
+    // Keep the key below in sync with SESSION_REFRESH_KEY in app.js.
+    if (!sessionStorage.getItem("spotifrei-session-refreshed")) {
+      document.getElementById("refresh-overlay").hidden = false;
+    }
+  </script>
+
   <header class="topbar">
     <div class="topbar-inner">
       <h1 class="brand"><img src="/static/img/logo.png" alt="" class="brand-logo" />Spotifrei</h1>
@@ -49,16 +65,29 @@
     <div class="tabs-inner">
     <button type="button" class="tab-btn" data-tab="home" role="tab" aria-selected="false">Home</button>
     <button type="button" class="tab-btn" data-tab="library" role="tab" aria-selected="false">Library</button>
-    <button type="button" class="tab-btn" data-tab="channels" role="tab" aria-selected="false">Channels</button>
-    <button type="button" class="tab-btn" data-tab="storage" role="tab" aria-selected="false">Storage</button>
+    <button type="button" class="tab-btn" data-tab="manage" role="tab" aria-selected="false">Manage</button>
     <button type="button" class="tab-btn" data-tab="settings" role="tab" aria-selected="false">Settings</button>
     </div>
   </nav>
 
   <main class="layout">
     <section id="tab-home" class="tab-panel" data-tab-panel="home">
+      {% if feeds %}
+      <div class="shelf">
+        <h2 class="shelf-title">Followed channels</h2>
+        <div class="channel-row" id="home-channel-row">
+          {% for feed in feeds %}
+          <button type="button" class="channel-chip{{ ' has-avatar' if feed.avatar_url else '' }}" data-channel="{{ feed.channel_title or '' }}">
+            {% if feed.avatar_url %}<img class="channel-chip-avatar" src="{{ feed.avatar_url }}" alt="" />{% endif %}
+            <span>{{ feed.channel_title or feed.rss_url }}</span>
+          </button>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+
       {% if not content %}
-      <p class="muted">No content yet — add a channel in the Channels tab to get started.</p>
+      <p class="muted">No content yet — add a channel in the Manage tab to get started.</p>
       {% else %}
 
       <div class="shelf">
@@ -106,17 +135,6 @@
       </div>
 
       {% endif %}
-
-      {% if feeds %}
-      <div class="shelf">
-        <h2 class="shelf-title">Followed channels</h2>
-        <div class="channel-row" id="home-channel-row">
-          {% for feed in feeds %}
-          <button type="button" class="channel-chip" data-channel="{{ feed.channel_title or '' }}">{{ feed.channel_title or feed.rss_url }}</button>
-          {% endfor %}
-        </div>
-      </div>
-      {% endif %}
     </section>
 
     <section id="tab-library" class="tab-panel" data-tab-panel="library">
@@ -150,11 +168,11 @@
         <button type="button" id="last-page" class="btn-ghost" aria-label="Last page">Last »</button>
       </div>
       <p id="empty-state" class="muted" {% if content %}hidden{% endif %}>
-        No content yet — add a channel in the Channels tab to get started.
+        No content yet — add a channel in the Manage tab to get started.
       </p>
     </section>
 
-    <section id="tab-channels" class="tab-panel" data-tab-panel="channels" hidden>
+    <section id="tab-manage" class="tab-panel" data-tab-panel="manage" hidden>
       <div class="channels-panel-inner">
         <h2>Search channels</h2>
         <div class="channel-search">
@@ -162,56 +180,20 @@
         </div>
         <ul id="channel-search-results" class="search-results"></ul>
 
-        <h2>Add by URL</h2>
-        <form id="feed-form">
-          <input type="url" id="feed-url" name="channel_url" placeholder="YouTube channel URL (e.g. youtube.com/@handle)" required />
-          <button type="submit">Add</button>
-        </form>
-        <p id="feed-error" class="error" hidden></p>
-
         <h2>Followed channels</h2>
         <ul id="feed-list">
           {% for feed in feeds %}
-          <li data-feed-id="{{ feed.id }}">
-            <span>{{ feed.channel_title or feed.rss_url }}</span>
-            <button type="button" class="unfollow" data-feed-id="{{ feed.id }}" aria-label="Unfollow">×</button>
-          </li>
-          {% endfor %}
-        </ul>
-      </div>
-    </section>
-
-    <section id="tab-storage" class="tab-panel" data-tab-panel="storage" hidden>
-      <div class="channels-panel-inner">
-        <h2>Downloaded audio</h2>
-
-        <div class="storage-summary">
-          <div>
-            <span class="storage-total">{{ usage.total_bytes | filesize }}</span>
-            <span class="muted">across {{ usage.count }} item{{ '' if usage.count == 1 else 's' }}</span>
-          </div>
-          {% if usage.count %}
-          <button type="button" id="clear-storage" class="btn-danger">Clear all</button>
-          {% endif %}
-        </div>
-
-        {% if usage.count %}
-        <ul id="storage-list" class="storage-list">
-          {% for item in usage.items %}
-          <li data-content-id="{{ item.id }}">
-            <div class="storage-item-info">
-              <span class="storage-item-title">{{ item.title }}</span>
-              <span class="storage-item-meta">{{ item.channel_title }} · {{ item.size_bytes | filesize }}</span>
+          <li class="search-result" data-feed-id="{{ feed.id }}">
+            {% if feed.avatar_url %}<img class="search-result-thumb" src="{{ feed.avatar_url }}" alt="" />{% else %}<span class="search-result-thumb"></span>{% endif %}
+            <div class="search-result-info">
+              <span class="search-result-title">{{ feed.channel_title or feed.rss_url }}</span>
             </div>
-            <button type="button" class="storage-remove" data-content-id="{{ item.id }}" aria-label="Remove download">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></svg>
+            <button type="button" class="unfollow" data-feed-id="{{ feed.id }}" aria-label="Unfollow">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
             </button>
           </li>
           {% endfor %}
         </ul>
-        {% else %}
-        <p class="muted">Nothing downloaded yet. Anything you play gets cached here.</p>
-        {% endif %}
       </div>
     </section>
 
@@ -243,12 +225,60 @@
             </span>
           </label>
         </form>
+
+        <h2>Downloads</h2>
+        <div class="storage-summary">
+          <div>
+            <span class="storage-total">{{ usage.total_bytes | filesize }}</span>
+            <span class="muted">across {{ usage.count }} item{{ '' if usage.count == 1 else 's' }}</span>
+          </div>
+          <button type="button" id="open-downloads" class="btn-quiet">Manage downloads</button>
+        </div>
       </div>
     </section>
   </main>
 
-  <div id="refresh-overlay" class="overlay" hidden>
-    <span class="spinner spinner-lg" role="status" aria-label="Refreshing"></span>
+  <div id="downloads-overlay" class="modal-overlay" hidden>
+    <div class="modal modal-downloads">
+      <div class="modal-header">
+        <h2>Downloaded audio</h2>
+        <button type="button" id="downloads-close" class="modal-close" aria-label="Close">×</button>
+      </div>
+
+      <div class="storage-summary">
+        <div>
+          <span class="storage-total">{{ usage.total_bytes | filesize }}</span>
+          <span class="muted">across {{ usage.count }} item{{ '' if usage.count == 1 else 's' }}</span>
+        </div>
+        {% if usage.count %}
+        <div class="storage-summary-actions">
+          <a href="/storage/export" download class="btn-quiet">Export all</a>
+          <button type="button" id="clear-storage" class="btn-danger">Clear all</button>
+        </div>
+        {% endif %}
+      </div>
+
+      {% if usage.count %}
+      <ul id="storage-list" class="storage-list">
+        {% for item in usage.items %}
+        <li data-content-id="{{ item.id }}">
+          <div class="storage-item-info">
+            <span class="storage-item-title">{{ item.title }}</span>
+            <span class="storage-item-meta">{{ item.channel_title }} · {{ item.size_bytes | filesize }}</span>
+          </div>
+          <a class="storage-export" href="/content/{{ item.id }}/stream?download=1" download aria-label="Export">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+          </a>
+          <button type="button" class="storage-remove" data-content-id="{{ item.id }}" aria-label="Remove download">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></svg>
+          </button>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="muted">Nothing downloaded yet. Anything you play gets cached here.</p>
+      {% endif %}
+    </div>
   </div>
 
   <div id="backfill-overlay" class="overlay" hidden>

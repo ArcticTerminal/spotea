@@ -13,6 +13,7 @@ class FeedOut(BaseModel):
     id: int
     rss_url: str
     channel_title: str | None
+    avatar_url: str | None
     added_at: datetime
 
 
