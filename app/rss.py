@@ -2,11 +2,15 @@ import re
 import urllib.parse
 from calendar import timegm
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
 import feedparser
 import yt_dlp
+
+from app.config import settings
+from app.downloader import download_avatar
 
 VIDEO_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{11}$")
 CHANNEL_ID_URL_RE = re.compile(r"youtube\.com/channel/(UC[\w-]{22})")
@@ -120,6 +124,20 @@ def _absolute_thumbnail_url(raw: str | None) -> str | None:
     return url.replace("//yt3.googleusercontent.com/", "//yt3.ggpht.com/")
 
 
+def _cached_or_downloaded_avatar(channel_id: str, remote_url: str | None) -> str | None:
+    """Same treatment as a followed channel's avatar (see download_avatar) —
+    search result thumbnails are hotlinked from the browser too, and are just
+    as exposed to Chrome's Opaque Response Blocking. Reuses the followed-
+    channel cache by filename, so a channel already followed (or searched
+    before) skips the download entirely."""
+    if not remote_url:
+        return None
+    cached = settings.avatars_dir / f"{channel_id}.jpg"
+    if cached.is_file():
+        return f"/avatars/{channel_id}.jpg"
+    return download_avatar(channel_id, remote_url)
+
+
 def search_channels(query: str) -> list[ChannelSearchResult]:
     search_url = CHANNEL_SEARCH_URL_TEMPLATE.format(query=urllib.parse.quote(query))
 
@@ -129,15 +147,24 @@ def search_channels(query: str) -> list[ChannelSearchResult]:
     except yt_dlp.utils.DownloadError:
         return []
 
-    results: list[ChannelSearchResult] = []
+    entries = []
     for entry in (info or {}).get("entries") or []:
         channel_id = entry.get("channel_id") or entry.get("id")
         if not channel_id:
             continue
-
         thumbnails = entry.get("thumbnails") or []
-        thumbnail_url = _absolute_thumbnail_url(thumbnails[-1].get("url")) if thumbnails else None
+        remote_thumbnail_url = _absolute_thumbnail_url(thumbnails[-1].get("url")) if thumbnails else None
+        entries.append((channel_id, entry, remote_thumbnail_url))
 
+    # Downloaded in parallel — sequentially, ~10 results would add several
+    # seconds to every keystroke's search request.
+    with ThreadPoolExecutor(max_workers=min(len(entries), 8) or 1) as pool:
+        thumbnail_urls = list(
+            pool.map(lambda e: _cached_or_downloaded_avatar(e[0], e[2]), entries)
+        )
+
+    results: list[ChannelSearchResult] = []
+    for (channel_id, entry, _), thumbnail_url in zip(entries, thumbnail_urls):
         results.append(
             ChannelSearchResult(
                 channel_id=channel_id,
