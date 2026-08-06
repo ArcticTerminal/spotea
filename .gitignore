@@ -3,6 +3,7 @@ __pycache__/
 .venv/
 venv/
 .env
+.pytest_cache/
 data/*.db
 data/*.db.bak-*
 data/storage/*
