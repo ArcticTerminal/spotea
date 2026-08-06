@@ -34,8 +34,8 @@ spotifrei/
     config.py              # env-based settings
     database.py             # SQLAlchemy engine/session
     migrations.py            # lightweight "add column if missing" patcher
-    content_query.py           # shared sort/filter/paginate query, used by both
-                                # the server-rendered page 1 and the AJAX endpoint
+    content_query.py           # shared filter/paginate query (newest-first), used
+                                # by both the server-rendered page 1 and the AJAX endpoint
     formatting.py              # Jinja filters (duration, file size)
     storage.py                  # disk usage, cache clearing, orphan sweep, zip export
     models.py                    # User, Feed, Content
@@ -61,7 +61,7 @@ spotifrei/
       player.html
     static/
       js/ui.js                                       # shared confirm modal + toast (loaded first)
-      js/app.js                                        # tabs, search, server-side sort/filter/
+      js/app.js                                        # tabs, search, server-side filter/
                                                         # pagination fetches, polling,
                                                         # download/save/delete triggers
       js/player.js                                       # custom audio player controls
@@ -145,7 +145,7 @@ content as never played.
 | DELETE | `/feeds/{id}` | Unfollow (deletes cached audio for the feed first) |
 | POST | `/feeds/refresh` | Re-parse all feeds in parallel, insert new content rows, backfill durations/avatar |
 | GET | `/feeds/{id}/backfill-status` | Poll progress of the one-time full channel history scan |
-| GET | `/content?page=&sort=&filter=` | JSON content page (server-side sort/filter/pagination; also used for polling) |
+| GET | `/content?page=&filter=` | JSON content page, newest-first (server-side filter/pagination; also used for polling) |
 | POST | `/content/{id}/download` | Start yt-dlp download in the background |
 | GET | `/content/{id}/status` | Current status (+ download/convert progress) |
 | GET | `/content/{id}/stream?download=` | Serve the audio file (Range-request support); `download=1` skips the `last_played_at` update |
@@ -176,7 +176,7 @@ gate for the whole instance, appropriate for a small self-hosted deployment.
 then triggers `POST /feeds/refresh` behind a full-screen loading overlay
 (dark backdrop + spinner) and reloads the page if new content arrived — no
 blank-screen wait for RSS fetches, and no layout-shifting inline "Refreshing…"
-text competing with the filter/sort controls. Refreshing every followed
+text competing with the filter controls. Refreshing every followed
 channel's RSS is several network calls per channel, so this auto-refresh
 only fires once per browser session (`sessionStorage`, `maybeAutoRefresh()`
 in `app.js`), not on every reload — a manual refresh button covers
@@ -184,7 +184,7 @@ everything else.
 
 **Tabs** — The home page is split into **Home** (shelves: followed channels,
 new uploads, recently played, favorites, saved), **Library** (the full,
-sortable/filterable/paginated content grid), **Manage** (channel search,
+searchable/filterable/paginated content grid), **Manage** (channel search,
 add-by-URL, followed list) and **Settings** (audio quality + a "Manage
 downloads" modal, which is where the old standalone Storage tab moved) —
 `<section>` panels toggled via `hidden`, not separate routes. The active tab
@@ -291,32 +291,43 @@ re-zipping it would just burn CPU for no size benefit. Duplicate filenames
 be exported individually via `GET /content/{id}/stream?download=1`, which
 skips the `last_played_at` update a real playback triggers.
 
-**Library controls (sort / filter / pagination)** — Server-side:
-`content_query.py`'s `query_content_page()` is the single shared
-implementation, used both for the server-rendered page 1 (`pages.py`'s
-`home()`) and for every subsequent sort/filter/page change, so the two never
-disagree on what "page 1, date-desc, no filter" contains. `app.js`'s
-`refreshGridView()` calls `GET /content?page=&sort=&filter=`, swaps
-`#content-grid`'s innerHTML with the returned page, and re-renders
+**Library controls (filter / pagination)** — Always newest-first
+(`Content.published_at.desc()`, hardcoded); there's no sort control. An
+earlier version had one (newest/oldest/title A–Z/Z–A/channel A–Z), but once
+the filter box could search titles too, alphabetical sort mostly duplicated
+"search for the thing you want," and oldest-first duplicated one click on
+"Last »" — dropped rather than kept as unused surface. `content_query.py`'s
+`query_content_page()` is the single shared implementation, used both for
+the server-rendered page 1 (`pages.py`'s `home()`) and for every subsequent
+filter/page change, so the two never disagree on what "page 1, no filter"
+contains. `app.js`'s `refreshGridView()` calls `GET /content?page=&filter=`,
+swaps `#content-grid`'s innerHTML with the returned page, and re-renders
 pagination controls from the response's `total_pages` — no client-side
 comparator or slicing logic. A monotonically increasing request sequence
 number (`gridRequestSeq`) drops any response that arrives after a newer
-request was already sent, so a slow stale fetch (e.g. after rapidly
-switching sort then filter) can't overwrite a newer one.
-- **Sort**: newest/oldest/title A–Z/Z–A/channel A–Z (`_ORDER_MAP` in
-  `content_query.py`).
-- **Filter**: one dropdown holds "All channels", "★ Favorites"
-  (`filter=__favorites__`), "Saved for later" (`filter=__saved__`), and each
-  followed channel by title — favorites/saved aren't separate controls,
-  just other filter values.
+request was already sent, so a slow stale fetch (e.g. after rapidly typing
+into the search box) can't overwrite a newer one.
+- **Filter** is two controls sharing one piece of state
+  (`currentChannelFilter` in `app.js`), kept mutually exclusive — picking one
+  clears the other:
+  - A dropdown for the non-text filters: "All channels" (`filter=""`), "★
+    Favorites" (`filter=__favorites__`), "Saved for later"
+    (`filter=__saved__`), "Previously played" (`filter=__played__`,
+    `Content.last_played_at IS NOT NULL` — set on stream, not on download).
+  - A debounced (~300ms) search box matching, case-insensitively, either the
+    video title or the channel title (`Feed.channel_title.ilike()` OR
+    `Content.title.ilike()`) — so searching doesn't require knowing which
+    field the match is in. Clicking a channel chip on Home
+    (`setupHomeChannels()`) fills this box with that channel's name rather
+    than picking it from a dropdown list of every followed channel.
 - **Pagination**: `DEFAULT_PAGE_SIZE = 20`; `hidden` attribute toggles page
   visibility (see the CSS gotcha note below). Prev/Next scroll the window
   back to the top. An out-of-range page is clamped server-side.
-- Sort and filter persist to `localStorage` independently (the current page
-  number resets on reload); `initializeLibraryGrid()` only re-fetches on
-  load if a restored preference differs from the server-rendered default
-  (page 1, date-desc, no filter) — otherwise it just seeds pagination state
-  from what's already in the DOM, avoiding a redundant fetch.
+- The filter persists to `localStorage` (the current page number resets on
+  reload); `initializeLibraryGrid()` only re-fetches on load if a restored
+  filter differs from the server-rendered default (page 1, no filter) —
+  otherwise it just seeds pagination state from what's already in the DOM,
+  avoiding a redundant fetch.
 
   > **CSS gotcha to remember**: any element whose class sets `display`
   > (`.card`, `.pagination`, `.tab-panel`, `.overlay` all set `display: flex`)
@@ -556,6 +567,16 @@ Post-MVP additions, same one-at-a-time/test-then-continue approach:
     duration-formatting logic deduplicated
 30. Starter pytest suite (auth, content API, content_query, formatting/rss
     helpers)
+31. Card titles/channel names made clickable (not just the thumbnail);
+    shelf drag-to-scroll no longer hijacked by native link/image drag;
+    Manage tab bulk import (paste a list of handles/URLs/Takeout CSV rows,
+    resolved in parallel, imported sequentially with live progress)
+32. Library's channel dropdown replaced by a debounced search box matching
+    title or channel (clicking a Home channel chip now fills this box
+    instead of picking from a dropdown of every followed channel); added a
+    "Previously played" filter; removed the sort control entirely — once
+    the search box covered "find a specific thing," alphabetical sort mostly
+    duplicated it, and oldest-first duplicated one click on "Last »"
 
 ### Verifying UI work
 

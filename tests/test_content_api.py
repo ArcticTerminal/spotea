@@ -94,11 +94,3 @@ def test_get_content_channel_filter(client, db_session):
     res = client.get("/content", params={"filter": "Nonexistent Channel"})
     assert res.status_code == 200
     assert res.json()["items"] == []
-
-
-def test_get_content_sort_title_asc(client, db_session):
-    _seed(db_session, count=5)
-
-    res = client.get("/content", params={"sort": "title-asc"})
-    titles = [item["title"] for item in res.json()["items"]]
-    assert titles == sorted(titles)

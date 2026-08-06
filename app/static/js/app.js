@@ -30,7 +30,7 @@ async function toggleSaved(contentId, button) {
     syncSavedShelf(contentId, data.is_saved);
 
     // Un-saving while the Saved filter is active should drop it from view.
-    if (document.getElementById("channel-filter")?.value === SAVED_FILTER_VALUE) {
+    if (currentChannelFilter === SAVED_FILTER_VALUE) {
       refreshGridView();
     }
   } catch (err) {
@@ -84,13 +84,25 @@ function setupContentGrid() {
   });
 }
 
-const SORT_STORAGE_KEY = "spotifrei-sort";
 const FILTER_STORAGE_KEY = "spotifrei-channel-filter";
 const FAVORITES_FILTER_VALUE = "__favorites__";
 const SAVED_FILTER_VALUE = "__saved__";
+const PLAYED_FILTER_VALUE = "__played__";
+// Mirrors CHANNEL_FILTER_PREFIX in content_query.py — an *exact* channel
+// match (picked from a suggestion or a Home chip), as opposed to the plain
+// free-text filter value, which matches title-or-channel as a substring and
+// so can't tell "the channel is Linus Tech Tips" from "the title mentions
+// Linus Tech Tips."
+const CHANNEL_FILTER_PREFIX = "__channel__:";
 
 let currentPage = 1;
 let totalPageCount = 1;
+// Single source of truth for the active Library filter — read by
+// refreshGridView()/initializeLibraryGrid() instead of either control's own
+// DOM value, since the filter can now come from two different controls (the
+// channel search box or the All/Favorites/Saved dropdown) that must stay in
+// sync with each other rather than each owning the state.
+let currentChannelFilter = "";
 
 // Mirrors published_at.strftime('%d %b %Y') in _content_card.html.
 function formatCardDate(iso) {
@@ -195,25 +207,23 @@ function updatePaginationControls(totalPages, hasItems) {
   lastBtn.disabled = currentPage >= totalPages;
 }
 
-// Bumped on every call and stamped on each request — sort/filter/page
-// changes fire in quick succession (e.g. picking a filter right after a
-// sort), and fetches don't necessarily resolve in the order they were
-// sent. Without this, a slower, now-stale response can land after a newer
-// one and silently overwrite it with the wrong page.
+// Bumped on every call and stamped on each request — filter/page changes can
+// fire in quick succession, and fetches don't necessarily resolve in the
+// order they were sent. Without this, a slower, now-stale response can land
+// after a newer one and silently overwrite it with the wrong page.
 let gridRequestSeq = 0;
 
-// The server owns sort/filter/paging — this just asks it for the current
-// page and swaps the grid, the same way renderSearchResults() does for
-// channel search.
+// The server owns filter/paging (always newest-first) — this just asks it
+// for the current page and swaps the grid, the same way renderSearchResults()
+// does for channel search.
 async function refreshGridView() {
   const grid = document.getElementById("content-grid");
   const emptyState = document.getElementById("empty-state");
   if (!grid) return;
 
-  const filterValue = document.getElementById("channel-filter")?.value || "";
-  const sortValue = document.getElementById("sort-select")?.value || "date-desc";
+  const filterValue = currentChannelFilter;
 
-  const params = new URLSearchParams({ page: String(currentPage), sort: sortValue, filter: filterValue });
+  const params = new URLSearchParams({ page: String(currentPage), filter: filterValue });
   const requestId = ++gridRequestSeq;
 
   let data;
@@ -239,11 +249,11 @@ async function refreshGridView() {
   updatePaginationControls(data.total_pages, data.items.length > 0);
 }
 
-// The Library grid's first page is already server-rendered (page 1,
-// date-desc, no filter) — only re-fetch on load if a restored localStorage
-// sort/filter preference (applied by setupSorting/setupChannelFilter, which
-// run before this) doesn't match that default. Otherwise just seed
-// pagination state from what the server already put in the DOM.
+// The Library grid's first page is already server-rendered (page 1, no
+// filter) — only re-fetch on load if a restored localStorage filter
+// preference (applied by setupChannelFilter, which runs before this) doesn't
+// match that default. Otherwise just seed pagination state from what the
+// server already put in the DOM.
 function initializeLibraryGrid() {
   const pagination = document.getElementById("pagination");
   if (pagination) {
@@ -251,10 +261,7 @@ function initializeLibraryGrid() {
     totalPageCount = Number(pagination.dataset.totalPages) || 1;
   }
 
-  const sortValue = document.getElementById("sort-select")?.value || "date-desc";
-  const filterValue = document.getElementById("channel-filter")?.value || "";
-
-  if (sortValue !== "date-desc" || filterValue !== "") {
+  if (currentChannelFilter !== "") {
     refreshGridView();
     return;
   }
@@ -263,57 +270,150 @@ function initializeLibraryGrid() {
   updatePaginationControls(totalPageCount, hasItems);
 }
 
-function setupSorting() {
-  const select = document.getElementById("sort-select");
-  if (!select) return;
+// Keeps the search box and the All/Favorites/Saved dropdown showing
+// whichever one actually matches the active filter — they're two views onto
+// the same currentChannelFilter, not independent state, so picking one
+// always clears the other rather than leaving it showing a stale value.
+function syncChannelFilterControls(value) {
+  const select = document.getElementById("channel-filter");
+  const input = document.getElementById("channel-filter-input");
+  const clearBtn = document.getElementById("channel-filter-clear");
+  const isSpecialValue =
+    value === "" || value === FAVORITES_FILTER_VALUE || value === SAVED_FILTER_VALUE || value === PLAYED_FILTER_VALUE;
+  const isExactChannel = value.startsWith(CHANNEL_FILTER_PREFIX);
 
-  const saved = localStorage.getItem(SORT_STORAGE_KEY);
-  if (saved && Array.from(select.options).some((opt) => opt.value === saved)) {
-    select.value = saved;
+  if (select) select.value = isSpecialValue ? value : "";
+  if (input) {
+    if (isSpecialValue) input.value = "";
+    // An exact-channel filter still shows as plain text in the box (just
+    // the channel name, prefix stripped) — the __channel__: encoding is an
+    // implementation detail of the filter state, not something the user
+    // should see.
+    else if (isExactChannel) input.value = value.slice(CHANNEL_FILTER_PREFIX.length);
+    else input.value = value;
+    // Once a channel is picked, the box becomes a read-only "chip" rather
+    // than editable text — editing it in place would silently downgrade an
+    // exact channel match into a substring search with no clear signal that
+    // happened. Only the × button can back out of it.
+    input.readOnly = isExactChannel;
   }
-
-  select.addEventListener("change", () => {
-    localStorage.setItem(SORT_STORAGE_KEY, select.value);
-    currentPage = 1;
-    refreshGridView();
-  });
+  if (clearBtn) clearBtn.hidden = !isExactChannel;
 }
 
-// The dropdown only lists the fixed filters (All/Favorites/Saved) — Home's
-// channel row is how a specific channel gets picked now — so filtering by
-// channel needs a one-off <option> injected for whichever channel is active,
-// rather than a static list of every followed channel.
-function setChannelFilterValue(channel) {
-  const select = document.getElementById("channel-filter");
-  if (!select) return;
+function applyChannelFilter(value) {
+  currentChannelFilter = value;
+  syncChannelFilterControls(value);
+  localStorage.setItem(FILTER_STORAGE_KEY, value);
+  currentPage = 1;
+  refreshGridView();
+}
 
-  let option = select.querySelector('option[data-dynamic="true"]');
-  if (!option) {
-    option = document.createElement("option");
-    option.dataset.dynamic = "true";
-    select.appendChild(option);
+// Every followed channel's name, read from the Home tab's chip row rather
+// than a fresh fetch — that markup already exists in the DOM (Home is just
+// CSS-hidden when another tab is active), so this is free.
+function getFollowedChannelNames() {
+  return Array.from(document.querySelectorAll("#home-channel-row .channel-chip"))
+    .map((chip) => chip.dataset.channel)
+    .filter(Boolean);
+}
+
+function renderChannelSuggestions(matches) {
+  const list = document.getElementById("channel-filter-suggestions");
+  if (!list) return;
+
+  if (!matches.length) {
+    list.hidden = true;
+    list.innerHTML = "";
+    return;
   }
-  option.value = channel;
-  option.textContent = channel;
-  select.value = channel;
+
+  list.innerHTML = matches
+    .map((name) => `<button type="button" class="channel-filter-suggestion" data-channel="${escapeHtml(name)}">${escapeHtml(name)}</button>`)
+    .join("");
+  list.hidden = false;
 }
 
 function setupChannelFilter() {
   const select = document.getElementById("channel-filter");
-  if (!select) return;
+  const input = document.getElementById("channel-filter-input");
+  const clearBtn = document.getElementById("channel-filter-clear");
+  const suggestions = document.getElementById("channel-filter-suggestions");
+  if (!select && !input) return;
 
-  const saved = localStorage.getItem(FILTER_STORAGE_KEY);
-  if (saved === FAVORITES_FILTER_VALUE || saved === SAVED_FILTER_VALUE || saved === "") {
-    select.value = saved;
-  } else if (saved) {
-    setChannelFilterValue(saved);
+  currentChannelFilter = localStorage.getItem(FILTER_STORAGE_KEY) || "";
+  syncChannelFilterControls(currentChannelFilter);
+
+  if (select) {
+    select.addEventListener("change", () => {
+      renderChannelSuggestions([]);
+      applyChannelFilter(select.value);
+    });
   }
 
-  select.addEventListener("change", () => {
-    localStorage.setItem(FILTER_STORAGE_KEY, select.value);
-    currentPage = 1;
-    refreshGridView();
-  });
+  if (input) {
+    const runFilter = debounce((value) => applyChannelFilter(value), 300);
+
+    input.addEventListener("input", () => {
+      // Read-only while an exact channel is selected (see
+      // syncChannelFilterControls) — typing shouldn't be possible then, but
+      // guard anyway in case something else dispatches an input event.
+      if (input.readOnly) return;
+
+      const value = input.value.trim();
+      runFilter(value);
+
+      // Channel suggestions are a shortcut layered on top of the plain
+      // text search above, not a replacement for it — typing keeps doing
+      // the substring search either way, this just also offers "did you
+      // mean this exact channel?" for whichever names match so far.
+      if (!value) {
+        renderChannelSuggestions([]);
+        return;
+      }
+      const lower = value.toLowerCase();
+      const matches = getFollowedChannelNames()
+        .filter((name) => name.toLowerCase().includes(lower))
+        .slice(0, 8);
+      renderChannelSuggestions(matches);
+    });
+
+    input.addEventListener("focus", () => {
+      if (input.readOnly) return;
+      const value = input.value.trim();
+      if (!value) return;
+      const lower = value.toLowerCase();
+      const matches = getFollowedChannelNames()
+        .filter((name) => name.toLowerCase().includes(lower))
+        .slice(0, 8);
+      renderChannelSuggestions(matches);
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && suggestions && !suggestions.hidden) renderChannelSuggestions([]);
+    });
+
+    document.addEventListener("click", (event) => {
+      if (suggestions && !suggestions.hidden && !event.target.closest(".channel-filter-search")) {
+        renderChannelSuggestions([]);
+      }
+    });
+  }
+
+  if (clearBtn) {
+    clearBtn.addEventListener("click", () => {
+      applyChannelFilter("");
+      input?.focus();
+    });
+  }
+
+  if (suggestions) {
+    suggestions.addEventListener("click", (event) => {
+      const btn = event.target.closest(".channel-filter-suggestion");
+      if (!btn) return;
+      renderChannelSuggestions([]);
+      applyChannelFilter(CHANNEL_FILTER_PREFIX + btn.dataset.channel);
+    });
+  }
 }
 
 function setupHomeChannels() {
@@ -324,10 +424,7 @@ function setupHomeChannels() {
     const chip = event.target.closest(".channel-chip");
     if (!chip) return;
 
-    setChannelFilterValue(chip.dataset.channel);
-    localStorage.setItem(FILTER_STORAGE_KEY, chip.dataset.channel);
-    currentPage = 1;
-    refreshGridView();
+    applyChannelFilter(CHANNEL_FILTER_PREFIX + chip.dataset.channel);
 
     // Push a new history entry for the Home state we're leaving so the back
     // button returns here — tab switches otherwise only replaceState, which
@@ -985,7 +1082,6 @@ document.addEventListener("DOMContentLoaded", () => {
   setupStorage();
   setupSettings();
   setupContentGrid();
-  setupSorting();
   setupChannelFilter();
   setupHomeChannels();
   setupHorizontalScrollers();

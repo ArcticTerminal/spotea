@@ -65,10 +65,8 @@ def _run_download(content_id: int, video_id: str, quality: str, db: Session) -> 
 
 
 @router.get("", response_model=ContentPageOut)
-def list_content(
-    page: int = 1, sort: str = "date-desc", filter: str = "", db: Session = Depends(get_db)
-) -> ContentPageOut:
-    items, page, total_pages = query_content_page(db, DEFAULT_USER_ID, page, sort, filter)
+def list_content(page: int = 1, filter: str = "", db: Session = Depends(get_db)) -> ContentPageOut:
+    items, page, total_pages = query_content_page(db, DEFAULT_USER_ID, page, filter)
     return ContentPageOut(
         items=[
             ContentOut(

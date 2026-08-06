@@ -145,14 +145,20 @@
             <option value="">All channels</option>
             <option value="__favorites__">Favorites</option>
             <option value="__saved__">Saved for later</option>
+            <option value="__played__">Previously played</option>
           </select>
-          <select id="sort-select" class="sort-select" aria-label="Sort by">
-            <option value="date-desc">Newest first</option>
-            <option value="date-asc">Oldest first</option>
-            <option value="title-asc">Title A–Z</option>
-            <option value="title-desc">Title Z–A</option>
-            <option value="channel-asc">Channel A–Z</option>
-          </select>
+          <div class="channel-filter-search">
+            <input
+              type="text"
+              id="channel-filter-input"
+              class="sort-select channel-filter-input"
+              placeholder="Search title or channel…"
+              autocomplete="off"
+              aria-label="Search by title or channel"
+            />
+            <button type="button" id="channel-filter-clear" class="channel-filter-clear" aria-label="Clear channel filter" hidden>×</button>
+            <ul id="channel-filter-suggestions" class="channel-filter-suggestions" hidden></ul>
+          </div>
         </div>
       </div>
       <div id="content-grid" class="grid">

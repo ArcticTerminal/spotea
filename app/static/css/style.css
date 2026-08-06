@@ -558,6 +558,86 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   font-size: 0.8rem;
 }
 
+.channel-filter-input {
+  width: 150px;
+  /* Room for the clear button without it overlapping the channel name once
+     a specific channel is selected (readonly state). */
+  padding-right: 1.6rem;
+}
+
+.channel-filter-input::placeholder {
+  color: #888;
+}
+
+.channel-filter-input:read-only {
+  cursor: default;
+}
+
+.channel-filter-clear {
+  position: absolute;
+  top: 50%;
+  right: 0.4rem;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: #888;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0.15rem;
+}
+
+.channel-filter-clear:hover {
+  color: #fff;
+}
+
+.channel-filter-clear[hidden] {
+  display: none;
+}
+
+.channel-filter-search {
+  position: relative;
+}
+
+.channel-filter-suggestions {
+  position: absolute;
+  top: calc(100% + 0.3rem);
+  right: 0;
+  z-index: 20;
+  list-style: none;
+  margin: 0;
+  padding: 0.3rem;
+  min-width: 200px;
+  max-height: 260px;
+  overflow-y: auto;
+  background: #232323;
+  border: 1px solid #333;
+  border-radius: 8px;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.5);
+}
+
+.channel-filter-suggestions[hidden] {
+  display: none;
+}
+
+.channel-filter-suggestion {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  color: #f5f5f5;
+  padding: 0.45rem 0.6rem;
+  border-radius: 5px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.channel-filter-suggestion:hover,
+.channel-filter-suggestion.is-active {
+  background: #2f2f2f;
+}
+
 .muted {
   color: #888;
   font-size: 0.85rem;
@@ -728,6 +808,21 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
 }
 
 .card .thumb img {
+  /* Absolutely positioned (not width/height: 100% in normal flow) so the
+     image can never influence .thumb's own size. .thumb is a flex item
+     (.card is display:flex), and a flex item's height in a column flex
+     container is partly resolved from its content's intrinsic size before
+     aspect-ratio: 16/9 is applied — with a percentage-height replaced child
+     still in flow, that content-size pass picks up the *image's own*
+     natural aspect ratio instead. Invisible for thumbnails already close to
+     16:9, but a real 4:3 thumbnail (YouTube's plain hqdefault.jpg, used for
+     RSS-sourced entries — as opposed to the already-cropped-ish thumbnail
+     yt-dlp returns for backfilled/searched entries) rendered visibly taller
+     than its 16:9 siblings. Taking the image out of flow entirely sidesteps
+     the whole interaction.
+  */
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
