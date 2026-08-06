@@ -22,10 +22,14 @@
     {% endif %}
   </a>
   <div class="card-body">
-    <h3 class="card-title" title="{{ item.title }}">{{ item.title }}</h3>
+    <h3 class="card-title" title="{{ item.title }}">
+      <a class="card-link" href="/player/{{ item.id }}">{{ item.title }}</a>
+    </h3>
     <div class="card-meta-row">
       <div class="card-meta-text">
-        <p class="card-channel">{{ item.feed.channel_title }}</p>
+        <p class="card-channel">
+          <a class="card-link" href="/player/{{ item.id }}">{{ item.feed.channel_title }}</a>
+        </p>
         {% if item.published_at %}
         <p class="card-date">{{ item.published_at.strftime('%d %b %Y') }}</p>
         {% endif %}

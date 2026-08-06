@@ -186,7 +186,10 @@
         </div>
         <ul id="channel-search-results" class="search-results"></ul>
 
-        <h2>Followed channels</h2>
+        <div class="section-heading-row">
+          <h2>Followed channels</h2>
+          <button type="button" id="open-bulk-import" class="btn-quiet">Bulk import</button>
+        </div>
         <ul id="feed-list">
           {% for feed in feeds %}
           <li class="search-result" data-feed-id="{{ feed.id }}">
@@ -284,6 +287,36 @@
       {% else %}
       <p class="muted">Nothing downloaded yet. Anything you play gets cached here.</p>
       {% endif %}
+    </div>
+  </div>
+
+  <div id="bulk-import-overlay" class="modal-overlay" hidden>
+    <div class="modal modal-bulk-import">
+      <div class="modal-header">
+        <h2>Bulk import channels</h2>
+        <button type="button" id="bulk-import-close" class="modal-close" aria-label="Close">×</button>
+      </div>
+
+      <div id="bulk-import-form-section">
+        <p class="muted">
+          One channel per line — a handle (<code>@handle</code>), a full channel URL, or a row
+          copied straight from a Google Takeout <code>subscriptions.csv</code> export.
+        </p>
+        <textarea
+          id="bulk-import-input"
+          class="bulk-import-input"
+          rows="8"
+          placeholder="@handle&#10;https://www.youtube.com/@anotherhandle"
+        ></textarea>
+        <div class="modal-actions">
+          <button type="button" id="bulk-import-start" class="btn-primary">Import</button>
+        </div>
+      </div>
+
+      <div id="bulk-import-progress-section" class="bulk-import-progress" hidden>
+        <p id="bulk-import-progress-text" class="muted"></p>
+        <ul id="bulk-import-results" class="bulk-import-results"></ul>
+      </div>
     </div>
   </div>
 

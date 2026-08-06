@@ -88,3 +88,26 @@ class SettingsOut(BaseModel):
 
 class SettingsUpdate(BaseModel):
     audio_quality: str
+
+
+class BulkImportCreate(BaseModel):
+    urls: str
+
+
+class BulkImportStartOut(BaseModel):
+    job_id: str
+    total: int
+
+
+class BulkImportResultOut(BaseModel):
+    url: str
+    status: str
+    channel_title: str | None = None
+    error: str | None = None
+
+
+class BulkImportStatusOut(BaseModel):
+    total: int
+    resolved: int
+    done: int
+    results: list[BulkImportResultOut]

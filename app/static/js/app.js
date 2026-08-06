@@ -140,10 +140,14 @@ function renderCard(item) {
         ${downloadedBadge}
       </a>
       <div class="card-body">
-        <h3 class="card-title" title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</h3>
+        <h3 class="card-title" title="${escapeHtml(item.title)}">
+          <a class="card-link" href="/player/${item.id}">${escapeHtml(item.title)}</a>
+        </h3>
         <div class="card-meta-row">
           <div class="card-meta-text">
-            <p class="card-channel">${escapeHtml(channelTitle)}</p>
+            <p class="card-channel">
+              <a class="card-link" href="/player/${item.id}">${escapeHtml(channelTitle)}</a>
+            </p>
             ${dateEl}
           </div>
           <button
@@ -355,6 +359,12 @@ function setupHorizontalScrollers() {
     };
     updateScrollable();
     new ResizeObserver(updateScrollable).observe(row);
+
+    // Links and images are natively draggable — without this, pressing down
+    // on a card's thumbnail and moving the mouse makes the browser start its
+    // own "drag this link/image out" gesture instead of firing the mousemove
+    // events below, so the custom scroll never happens.
+    row.addEventListener("dragstart", (event) => event.preventDefault());
 
     let isDown = false;
     let dragged = false;
@@ -816,11 +826,162 @@ function setupUnfollowButtons() {
   });
 }
 
+function bulkImportStatusMeta(status) {
+  if (status === "added") return { cls: "is-added", icon: "✓" };
+  if (status === "duplicate") return { cls: "is-duplicate", icon: "•" };
+  return { cls: "is-error", icon: "✗" };
+}
+
+function renderBulkImportResults(results) {
+  const list = document.getElementById("bulk-import-results");
+  if (!list) return;
+
+  list.innerHTML = results
+    .map((r) => {
+      const { cls, icon } = bulkImportStatusMeta(r.status);
+      const label = r.channel_title || r.url;
+      let detail = "";
+      if (r.status === "duplicate") detail = " — already following";
+      else if (r.status === "error" && r.error) detail = ` — ${r.error}`;
+      const full = `${label}${detail}`;
+      return `
+        <li>
+          <span class="bulk-import-status ${cls}">${icon}</span>
+          <span class="bulk-import-line" title="${escapeHtml(full)}">${escapeHtml(full)}</span>
+        </li>
+      `;
+    })
+    .join("");
+}
+
+function setupBulkImport() {
+  const overlay = document.getElementById("bulk-import-overlay");
+  const openBtn = document.getElementById("open-bulk-import");
+  const closeBtn = document.getElementById("bulk-import-close");
+  const startBtn = document.getElementById("bulk-import-start");
+  const input = document.getElementById("bulk-import-input");
+  const formSection = document.getElementById("bulk-import-form-section");
+  const progressSection = document.getElementById("bulk-import-progress-section");
+  const progressText = document.getElementById("bulk-import-progress-text");
+  const resultsList = document.getElementById("bulk-import-results");
+  if (!overlay || !openBtn) return;
+
+  // Reloading only on close (not after every poll) lets the user actually
+  // read the per-line results — including failures — before the page
+  // refreshes out from under them.
+  let addedAnyChannel = false;
+
+  const resetModal = () => {
+    input.value = "";
+    formSection.hidden = false;
+    progressSection.hidden = true;
+    resultsList.innerHTML = "";
+    progressText.textContent = "";
+    startBtn.disabled = false;
+    startBtn.textContent = "Import";
+    addedAnyChannel = false;
+  };
+
+  const open = () => {
+    resetModal();
+    overlay.hidden = false;
+  };
+
+  const close = () => {
+    overlay.hidden = true;
+    // The import job itself already ran to completion server-side by the
+    // time this can fire (the modal has no way to close mid-import except
+    // this same handler) — reload so the new channels show up everywhere
+    // (Manage's followed list, Home shelves, the Library's channel filter).
+    if (addedAnyChannel) window.location.reload();
+  };
+
+  openBtn.addEventListener("click", open);
+  closeBtn.addEventListener("click", close);
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay) close();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !overlay.hidden) close();
+  });
+
+  startBtn.addEventListener("click", async () => {
+    const urls = input.value.trim();
+    if (!urls) return;
+
+    startBtn.disabled = true;
+    startBtn.textContent = "Starting…";
+
+    let jobId;
+    let total;
+    try {
+      const res = await fetch("/feeds/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ urls }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        showToast(data.detail || "Could not start import");
+        startBtn.disabled = false;
+        startBtn.textContent = "Import";
+        return;
+      }
+      ({ job_id: jobId, total } = await res.json());
+    } catch (err) {
+      showToast("Could not start import");
+      startBtn.disabled = false;
+      startBtn.textContent = "Import";
+      return;
+    }
+
+    formSection.hidden = true;
+    progressSection.hidden = false;
+    progressText.textContent = `Resolving channels… 0/${total}`;
+
+    // Large channels' backfills run inline, one at a time, inside the same
+    // job (see _run_bulk_import) — the counter can sit still for a while on
+    // a channel with a long upload history. Polling just keeps asking, same
+    // as waitForBackfillThenReload does for a single add.
+    while (true) {
+      let data;
+      try {
+        const statusRes = await fetch(`/feeds/import/${jobId}/status`);
+        if (!statusRes.ok) throw new Error("status fetch failed");
+        data = await statusRes.json();
+      } catch (err) {
+        progressText.textContent = "Lost track of the import — check Followed channels.";
+        break;
+      }
+
+      renderBulkImportResults(data.results);
+
+      if (data.done >= data.total) {
+        const added = data.results.filter((r) => r.status === "added").length;
+        const skipped = data.total - added;
+        progressText.textContent = `Done — ${added} added${skipped ? `, ${skipped} skipped` : ""}.`;
+        addedAnyChannel = added > 0;
+        break;
+      }
+
+      // Channels resolve in parallel first (see _run_bulk_import), then get
+      // created one at a time — two distinct stages, so the counter doesn't
+      // sit at 0 for however long that whole parallel batch takes.
+      progressText.textContent =
+        data.resolved < data.total
+          ? `Resolving channels… ${data.resolved}/${data.total}`
+          : `Importing… ${data.done}/${data.total}`;
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+  });
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   setupTabs();
   setupChannelSearch();
   setupUnfollowButtons();
   setupDownloadsOverlay();
+  setupBulkImport();
   setupStorage();
   setupSettings();
   setupContentGrid();

@@ -1,4 +1,5 @@
-from concurrent.futures import ThreadPoolExecutor
+import secrets
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -25,6 +26,10 @@ from app.rss import (
 )
 from app.schemas import (
     BackfillStatusOut,
+    BulkImportCreate,
+    BulkImportResultOut,
+    BulkImportStartOut,
+    BulkImportStatusOut,
     ChannelSearchResultOut,
     FeedAddResult,
     FeedCreate,
@@ -224,25 +229,25 @@ def _apply_feed_data(db: Session, feed: Feed, result: _FeedFetchResult) -> int:
     return new_count
 
 
-@router.post("", response_model=FeedAddResult, status_code=status.HTTP_201_CREATED)
-def add_feed(
-    payload: FeedCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db)
-) -> FeedAddResult:
-    channel_url = payload.channel_url.strip()
+class FeedAlreadyExistsError(Exception):
+    def __init__(self, rss_url: str, channel_title: str | None):
+        super().__init__(rss_url)
+        self.channel_title = channel_title
 
-    try:
-        rss_url = resolve_feed_url(channel_url)
-    except ChannelResolutionError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
+def _create_feed_from_rss_url(db: Session, rss_url: str) -> tuple[Feed, int, str | None]:
+    """DB-and-remaining-fetch half of adding a feed, given an already-resolved
+    RSS URL. Split out from _add_feed_core so bulk import can resolve many
+    URLs in parallel first (see _resolve_bulk_entry) and then only run this,
+    strictly sequential, part per line. Callers decide how to run the
+    returned channel_id's backfill — deferred via BackgroundTasks for a
+    single add (keeps the response fast), inline for bulk import (which is
+    already running off the request thread)."""
     existing = db.query(Feed).filter(Feed.user_id == DEFAULT_USER_ID, Feed.rss_url == rss_url).first()
     if existing:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Feed already added")
+        raise FeedAlreadyExistsError(rss_url, existing.channel_title)
 
-    try:
-        parsed = fetch_feed(rss_url)
-    except InvalidFeedError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    parsed = fetch_feed(rss_url)
 
     feed = Feed(user_id=DEFAULT_USER_ID, rss_url=rss_url, channel_title=parsed.channel_title)
     db.add(feed)
@@ -253,10 +258,131 @@ def add_feed(
     new_count = _apply_feed_data(db, feed, result)
 
     channel_id = extract_channel_id(rss_url)
+    return feed, new_count, channel_id
+
+
+def _add_feed_core(db: Session, channel_url: str) -> tuple[Feed, int, str | None]:
+    """Resolve, validate, save a feed, and apply its first RSS parse. Shared
+    by the single-add route and bulk import so the two never diverge."""
+    rss_url = resolve_feed_url(channel_url.strip())
+    return _create_feed_from_rss_url(db, rss_url)
+
+
+@router.post("", response_model=FeedAddResult, status_code=status.HTTP_201_CREATED)
+def add_feed(
+    payload: FeedCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db)
+) -> FeedAddResult:
+    try:
+        feed, new_count, channel_id = _add_feed_core(db, payload.channel_url)
+    except FeedAlreadyExistsError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Feed already added") from exc
+    except ChannelResolutionError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except InvalidFeedError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
     if channel_id:
         background_tasks.add_task(_run_backfill, feed.id, channel_id, db)
 
     return FeedAddResult(feed=FeedOut.model_validate(feed), new_content_count=new_count)
+
+
+# In-memory only, same rationale as _backfill_progress above. Keyed by a
+# random job id (not a feed id — one job spans many feeds).
+_import_progress: dict[str, dict] = {}
+
+
+def _normalize_bulk_entry(line: str) -> str:
+    """Accepts a bare "@handle" (as pasted from a plain list) alongside
+    already-full URLs (as pasted from a browser or a Google Takeout
+    subscriptions.csv) — resolve_feed_url() needs a URL, so a bare handle
+    gets the channel URL prefix it's missing. Anything that already looks
+    like a URL is passed through untouched."""
+    if line.startswith("@") and "://" not in line and "youtube.com" not in line:
+        return f"https://www.youtube.com/{line}"
+    return line
+
+
+def _resolve_bulk_entry(line: str) -> dict:
+    """Runs in a worker thread — pure network (yt-dlp), no DB access, so it's
+    safe to fan out. For a batch of bare @handles this per-line channel
+    resolution is the dominant cost (each one is its own yt-dlp lookup), the
+    same reasoning _fetch_feed_data's docstring gives for parallelizing
+    refresh_feeds."""
+    try:
+        rss_url = resolve_feed_url(_normalize_bulk_entry(line))
+        return {"line": line, "rss_url": rss_url, "error": None}
+    except ChannelResolutionError as exc:
+        return {"line": line, "rss_url": None, "error": str(exc)}
+
+
+def _run_bulk_import(job_id: str, lines: list[str]) -> None:
+    progress = _import_progress[job_id]
+
+    # Phase 1: resolve every line in parallel (see _resolve_bulk_entry) —
+    # capped the same as _REFRESH_POOL_SIZE, for the same reason (stay polite
+    # to YouTube's unauthenticated scraping).
+    resolved_by_line: dict[str, dict] = {}
+    with ThreadPoolExecutor(max_workers=min(len(lines), _REFRESH_POOL_SIZE)) as pool:
+        futures = [pool.submit(_resolve_bulk_entry, line) for line in lines]
+        for future in as_completed(futures):
+            resolved = future.result()
+            resolved_by_line[resolved["line"]] = resolved
+            progress["resolved"] += 1
+
+    # Phase 2: create feeds and run each one's initial parse + backfill
+    # sequentially, on a single session — SQLite doesn't handle concurrent
+    # writers well, and this is also where duplicate detection naturally
+    # lives (_create_feed_from_rss_url's existence check sees every feed
+    # already committed earlier in this same batch, not just pre-existing
+    # ones). Original line order is preserved regardless of resolution order.
+    with SessionLocal() as db:
+        for raw_line in lines:
+            resolved = resolved_by_line[raw_line]
+            entry = {"url": raw_line, "status": "error", "channel_title": None, "error": resolved["error"]}
+
+            if resolved["error"] is None:
+                try:
+                    feed, _new_count, channel_id = _create_feed_from_rss_url(db, resolved["rss_url"])
+                    entry["status"] = "added"
+                    entry["error"] = None
+                    entry["channel_title"] = feed.channel_title
+                    if channel_id:
+                        _run_backfill(feed.id, channel_id, db)
+                except FeedAlreadyExistsError as exc:
+                    entry["status"] = "duplicate"
+                    entry["error"] = None
+                    entry["channel_title"] = exc.channel_title
+                except InvalidFeedError as exc:
+                    entry["error"] = str(exc)
+
+            progress["results"].append(entry)
+            progress["done"] += 1
+
+
+@router.post("/import", response_model=BulkImportStartOut, status_code=status.HTTP_202_ACCEPTED)
+def start_bulk_import(payload: BulkImportCreate, background_tasks: BackgroundTasks) -> BulkImportStartOut:
+    lines = [line.strip() for line in payload.urls.splitlines() if line.strip()]
+    if not lines:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No channels given")
+
+    job_id = secrets.token_urlsafe(8)
+    _import_progress[job_id] = {"total": len(lines), "resolved": 0, "done": 0, "results": []}
+    background_tasks.add_task(_run_bulk_import, job_id, lines)
+    return BulkImportStartOut(job_id=job_id, total=len(lines))
+
+
+@router.get("/import/{job_id}/status", response_model=BulkImportStatusOut)
+def get_bulk_import_status(job_id: str) -> BulkImportStatusOut:
+    progress = _import_progress.get(job_id)
+    if progress is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Import job not found")
+    return BulkImportStatusOut(
+        total=progress["total"],
+        resolved=progress["resolved"],
+        done=progress["done"],
+        results=[BulkImportResultOut(**r) for r in progress["results"]],
+    )
 
 
 @router.get("/search", response_model=list[ChannelSearchResultOut])
