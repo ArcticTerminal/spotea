@@ -1,6 +1,18 @@
-// Shared confirm dialog + toast. Loaded before the page-specific script on
-// every page, so `confirmDialog()` / `showToast()` are always available and
-// native window.confirm/alert are never used.
+// Shared confirm dialog + toast + duration formatting. Loaded before the
+// page-specific script on every page, so these are always available.
+
+// Mirrors format_duration() in app/formatting.py (M:SS, or H:MM:SS past an
+// hour) — used by both the player's elapsed/duration display and the
+// content cards' duration badge.
+function formatDuration(seconds) {
+  if (!isFinite(seconds) || seconds < 0) seconds = 0;
+  const total = Math.floor(seconds);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  if (h) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
 
 const CONFIRM_MARKUP = `
   <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="modal-message">

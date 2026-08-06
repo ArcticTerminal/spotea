@@ -88,21 +88,81 @@ const SORT_STORAGE_KEY = "spotifrei-sort";
 const FILTER_STORAGE_KEY = "spotifrei-channel-filter";
 const FAVORITES_FILTER_VALUE = "__favorites__";
 const SAVED_FILTER_VALUE = "__saved__";
-const PAGE_SIZE = 20;
 
 let currentPage = 1;
 let totalPageCount = 1;
 
-const SORT_COMPARATORS = {
-  "date-desc": (a, b) => (b.dataset.published || "").localeCompare(a.dataset.published || ""),
-  "date-asc": (a, b) => (a.dataset.published || "").localeCompare(b.dataset.published || ""),
-  "title-asc": (a, b) => a.dataset.title.localeCompare(b.dataset.title, undefined, { sensitivity: "base" }),
-  "title-desc": (a, b) => b.dataset.title.localeCompare(a.dataset.title, undefined, { sensitivity: "base" }),
-  "channel-asc": (a, b) =>
-    a.dataset.channel.localeCompare(b.dataset.channel, undefined, { sensitivity: "base" }),
-};
+// Mirrors published_at.strftime('%d %b %Y') in _content_card.html.
+function formatCardDate(iso) {
+  if (!iso) return "";
+  const date = new Date(iso);
+  if (isNaN(date)) return "";
+  return new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric" }).format(
+    date
+  );
+}
 
-function updatePaginationControls(totalPages, totalItems) {
+// Client-side twin of _content_card.html — the Library grid is populated by
+// fetching JSON (see refreshGridView) rather than server-rendering every
+// page, so this is the one other place that markup has to be kept in sync.
+function renderCard(item) {
+  const thumb = item.thumbnail_url
+    ? `<img src="${escapeHtml(item.thumbnail_url)}" alt="" loading="lazy" />`
+    : "";
+  const durationBadge = item.duration_seconds
+    ? `<span class="duration-badge">${formatDuration(item.duration_seconds)}</span>`
+    : "";
+  const downloadedBadge =
+    item.status === "ready"
+      ? `<span class="downloaded-badge" title="Downloaded — plays instantly">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>
+        </span>`
+      : "";
+  const dateEl = item.published_at
+    ? `<p class="card-date">${formatCardDate(item.published_at)}</p>`
+    : "";
+  const channelTitle = item.channel_title || "";
+
+  return `
+    <article
+      class="card"
+      data-content-id="${item.id}"
+      data-status="${item.status}"
+      data-title="${escapeHtml(item.title)}"
+      data-channel="${escapeHtml(channelTitle)}"
+      data-published="${item.published_at || ""}"
+      data-favorite="${item.is_favorite}"
+      data-saved="${item.is_saved}"
+    >
+      <a class="thumb" href="/player/${item.id}" aria-label="Play ${escapeHtml(item.title)}">
+        ${thumb}
+        ${durationBadge}
+        ${downloadedBadge}
+      </a>
+      <div class="card-body">
+        <h3 class="card-title" title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</h3>
+        <div class="card-meta-row">
+          <div class="card-meta-text">
+            <p class="card-channel">${escapeHtml(channelTitle)}</p>
+            ${dateEl}
+          </div>
+          <button
+            type="button"
+            class="btn-save${item.is_saved ? " is-on" : ""}"
+            data-content-id="${item.id}"
+            aria-pressed="${item.is_saved}"
+            title="${item.is_saved ? "Saved for later" : "Save for later"}"
+            aria-label="Save for later"
+          >
+            <svg viewBox="0 0 24 24" fill="${item.is_saved ? "currentColor" : "none"}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg>
+          </button>
+        </div>
+      </div>
+    </article>
+  `;
+}
+
+function updatePaginationControls(totalPages, hasItems) {
   const pagination = document.getElementById("pagination");
   const indicator = document.getElementById("page-indicator");
   const firstBtn = document.getElementById("first-page");
@@ -113,7 +173,7 @@ function updatePaginationControls(totalPages, totalItems) {
 
   totalPageCount = totalPages;
 
-  if (totalItems === 0) {
+  if (!hasItems) {
     pagination.hidden = false;
     indicator.textContent = "No matches";
     firstBtn.disabled = true;
@@ -131,36 +191,72 @@ function updatePaginationControls(totalPages, totalItems) {
   lastBtn.disabled = currentPage >= totalPages;
 }
 
-function refreshGridView() {
+// Bumped on every call and stamped on each request — sort/filter/page
+// changes fire in quick succession (e.g. picking a filter right after a
+// sort), and fetches don't necessarily resolve in the order they were
+// sent. Without this, a slower, now-stale response can land after a newer
+// one and silently overwrite it with the wrong page.
+let gridRequestSeq = 0;
+
+// The server owns sort/filter/paging — this just asks it for the current
+// page and swaps the grid, the same way renderSearchResults() does for
+// channel search.
+async function refreshGridView() {
   const grid = document.getElementById("content-grid");
+  const emptyState = document.getElementById("empty-state");
   if (!grid) return;
 
   const filterValue = document.getElementById("channel-filter")?.value || "";
   const sortValue = document.getElementById("sort-select")?.value || "date-desc";
-  const comparator = SORT_COMPARATORS[sortValue] || SORT_COMPARATORS["date-desc"];
 
-  const allCards = Array.from(grid.querySelectorAll(".card"));
-  const filtered = allCards
-    .filter((card) => {
-      if (filterValue === FAVORITES_FILTER_VALUE) return card.dataset.favorite === "true";
-      if (filterValue === SAVED_FILTER_VALUE) return card.dataset.saved === "true";
-      return !filterValue || card.dataset.channel === filterValue;
-    })
-    .sort(comparator);
+  const params = new URLSearchParams({ page: String(currentPage), sort: sortValue, filter: filterValue });
+  const requestId = ++gridRequestSeq;
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  currentPage = Math.min(Math.max(1, currentPage), totalPages);
+  let data;
+  try {
+    const res = await fetch(`/content?${params}`);
+    if (!res.ok) throw new Error("grid fetch failed");
+    data = await res.json();
+  } catch (err) {
+    if (requestId === gridRequestSeq) showToast("Could not load your library");
+    return;
+  }
 
-  const start = (currentPage - 1) * PAGE_SIZE;
-  const pageItems = filtered.slice(start, start + PAGE_SIZE);
-  const visibleIds = new Set(pageItems.map((card) => card.dataset.contentId));
+  if (requestId !== gridRequestSeq) return; // a newer request superseded this one
 
-  allCards.forEach((card) => {
-    card.hidden = !visibleIds.has(card.dataset.contentId);
-  });
-  pageItems.forEach((card) => grid.appendChild(card));
+  currentPage = data.page;
+  grid.innerHTML = data.items.map(renderCard).join("");
 
-  updatePaginationControls(totalPages, filtered.length);
+  // The "add a channel to get started" message means "you have zero content
+  // at all" — an empty *filtered* result gets pagination's "No matches"
+  // instead, not this.
+  const hasNoContentAtAll = data.items.length === 0 && filterValue === "";
+  if (emptyState) emptyState.hidden = !hasNoContentAtAll;
+  updatePaginationControls(data.total_pages, data.items.length > 0);
+}
+
+// The Library grid's first page is already server-rendered (page 1,
+// date-desc, no filter) — only re-fetch on load if a restored localStorage
+// sort/filter preference (applied by setupSorting/setupChannelFilter, which
+// run before this) doesn't match that default. Otherwise just seed
+// pagination state from what the server already put in the DOM.
+function initializeLibraryGrid() {
+  const pagination = document.getElementById("pagination");
+  if (pagination) {
+    currentPage = Number(pagination.dataset.page) || 1;
+    totalPageCount = Number(pagination.dataset.totalPages) || 1;
+  }
+
+  const sortValue = document.getElementById("sort-select")?.value || "date-desc";
+  const filterValue = document.getElementById("channel-filter")?.value || "";
+
+  if (sortValue !== "date-desc" || filterValue !== "") {
+    refreshGridView();
+    return;
+  }
+
+  const hasItems = !!document.querySelector("#content-grid .card");
+  updatePaginationControls(totalPageCount, hasItems);
 }
 
 function setupSorting() {
@@ -168,7 +264,7 @@ function setupSorting() {
   if (!select) return;
 
   const saved = localStorage.getItem(SORT_STORAGE_KEY);
-  if (saved && SORT_COMPARATORS[saved]) {
+  if (saved && Array.from(select.options).some((opt) => opt.value === saved)) {
     select.value = saved;
   }
 
@@ -734,6 +830,6 @@ document.addEventListener("DOMContentLoaded", () => {
   setupHorizontalScrollers();
   setupPagination();
   setupRefreshButton();
-  refreshGridView();
+  initializeLibraryGrid();
   maybeAutoRefresh();
 });

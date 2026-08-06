@@ -34,6 +34,12 @@ class ContentOut(BaseModel):
     is_saved: bool
 
 
+class ContentPageOut(BaseModel):
+    items: list[ContentOut]
+    page: int
+    total_pages: int
+
+
 class StatusOut(BaseModel):
     id: int
     status: str

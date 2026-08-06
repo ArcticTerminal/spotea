@@ -1,16 +1,6 @@
 const SKIP_SECONDS = 15;
 const STATUS_POLL_MS = 1500;
 
-function formatTime(seconds) {
-  if (!isFinite(seconds) || seconds < 0) seconds = 0;
-  const total = Math.floor(seconds);
-  const h = Math.floor(total / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  const s = total % 60;
-  if (h) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-  return `${m}:${String(s).padStart(2, "0")}`;
-}
-
 // Range inputs can't style their "already played" portion natively, so paint it
 // with a gradient that tracks the current value.
 function paintRange(input) {
@@ -75,14 +65,14 @@ function setupPlayer() {
 
   audio.addEventListener("loadedmetadata", () => {
     seek.max = audio.duration || 0;
-    durationEl.textContent = formatTime(audio.duration);
+    durationEl.textContent = formatDuration(audio.duration);
     paintRange(seek);
   });
 
   audio.addEventListener("timeupdate", () => {
     if (scrubbing) return;
     seek.value = audio.currentTime;
-    currentTimeEl.textContent = formatTime(audio.currentTime);
+    currentTimeEl.textContent = formatDuration(audio.currentTime);
     paintRange(seek);
   });
 
@@ -90,7 +80,7 @@ function setupPlayer() {
 
   seek.addEventListener("input", () => {
     scrubbing = true;
-    currentTimeEl.textContent = formatTime(Number(seek.value));
+    currentTimeEl.textContent = formatDuration(Number(seek.value));
     paintRange(seek);
   });
   seek.addEventListener("change", () => {

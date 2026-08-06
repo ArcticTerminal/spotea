@@ -160,7 +160,13 @@
         {% include "_content_card.html" %}
         {% endfor %}
       </div>
-      <div id="pagination" class="pagination" hidden>
+      <div
+        id="pagination"
+        class="pagination"
+        data-page="{{ library_page }}"
+        data-total-pages="{{ library_total_pages }}"
+        {% if library_total_pages <= 1 %}hidden{% endif %}
+      >
         <button type="button" id="first-page" class="btn-ghost" aria-label="First page">« First</button>
         <button type="button" id="prev-page" class="btn-ghost">‹ Prev</button>
         <span id="page-indicator" class="muted"></span>

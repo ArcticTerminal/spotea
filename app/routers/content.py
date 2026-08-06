@@ -3,14 +3,15 @@ from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from fastapi.responses import FileResponse
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session
 
+from app.content_query import query_content_page
 from app.deps import get_db, require_login
 from app.downloader import DownloadError, download_audio
 from app.formatting import safe_filename
 from app.models import Content, User
 from app.rss import VIDEO_ID_RE
-from app.schemas import ContentOut, FavoriteOut, SavedOut, StatusOut
+from app.schemas import ContentOut, ContentPageOut, FavoriteOut, SavedOut, StatusOut
 
 router = APIRouter(prefix="/content", tags=["content"], dependencies=[Depends(require_login)])
 
@@ -63,32 +64,32 @@ def _run_download(content_id: int, video_id: str, quality: str, db: Session) -> 
         db.commit()
 
 
-@router.get("", response_model=list[ContentOut])
-def list_content(db: Session = Depends(get_db)) -> list[ContentOut]:
-    rows = (
-        db.query(Content)
-        .options(joinedload(Content.feed))
-        .filter(Content.user_id == DEFAULT_USER_ID)
-        .order_by(Content.published_at.desc())
-        .all()
+@router.get("", response_model=ContentPageOut)
+def list_content(
+    page: int = 1, sort: str = "date-desc", filter: str = "", db: Session = Depends(get_db)
+) -> ContentPageOut:
+    items, page, total_pages = query_content_page(db, DEFAULT_USER_ID, page, sort, filter)
+    return ContentPageOut(
+        items=[
+            ContentOut(
+                id=c.id,
+                feed_id=c.feed_id,
+                channel_title=c.feed.channel_title,
+                video_id=c.video_id,
+                title=c.title,
+                thumbnail_url=c.thumbnail_url,
+                duration_seconds=c.duration_seconds,
+                published_at=c.published_at,
+                status=c.status,
+                added_at=c.added_at,
+                is_favorite=c.is_favorite,
+                is_saved=c.is_saved,
+            )
+            for c in items
+        ],
+        page=page,
+        total_pages=total_pages,
     )
-    return [
-        ContentOut(
-            id=c.id,
-            feed_id=c.feed_id,
-            channel_title=c.feed.channel_title,
-            video_id=c.video_id,
-            title=c.title,
-            thumbnail_url=c.thumbnail_url,
-            duration_seconds=c.duration_seconds,
-            published_at=c.published_at,
-            status=c.status,
-            added_at=c.added_at,
-            is_favorite=c.is_favorite,
-            is_saved=c.is_saved,
-        )
-        for c in rows
-    ]
 
 
 @router.post("/{content_id}/download", response_model=StatusOut)
