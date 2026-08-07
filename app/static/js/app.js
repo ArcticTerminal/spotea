@@ -4,40 +4,6 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
-async function toggleSaved(contentId, button) {
-  // The same item can appear in several shelves on Home plus the Library
-  // grid at once, so every instance's state has to be kept in sync, not
-  // just the one the click happened in.
-  const cards = document.querySelectorAll(`.card[data-content-id="${contentId}"]`);
-  const isSaved = button?.closest(".card")?.dataset.saved === "true";
-
-  try {
-    const res = await fetch(`/content/${contentId}/save`, {
-      method: isSaved ? "DELETE" : "POST",
-    });
-    if (!res.ok) {
-      showToast("Could not update saved items");
-      return;
-    }
-    const data = await res.json();
-
-    cards.forEach((card) => {
-      card.dataset.saved = String(data.is_saved);
-      const saveBtn = card.querySelector(".btn-save");
-      if (saveBtn) applySavedState(saveBtn, data.is_saved);
-    });
-
-    syncSavedShelf(contentId, data.is_saved);
-
-    // Un-saving while the Saved filter is active should drop it from view.
-    if (currentChannelFilter === SAVED_FILTER_VALUE) {
-      refreshGridView();
-    }
-  } catch (err) {
-    showToast("Could not update saved items");
-  }
-}
-
 // Home's "Saved for later" shelf is only populated at page render, so a
 // save/un-save needs to patch it in live or it wouldn't show up until the
 // next full reload. The whole shelf (title included) stays hidden while empty.
@@ -62,360 +28,6 @@ function syncSavedShelf(contentId, isSaved) {
   shelf.hidden = row.children.length === 0;
 }
 
-function applySavedState(button, isSaved) {
-  button.classList.toggle("is-on", isSaved);
-  button.setAttribute("aria-pressed", String(isSaved));
-  button.title = isSaved ? "Saved for later" : "Save for later";
-  const svg = button.querySelector("svg");
-  if (svg) svg.setAttribute("fill", isSaved ? "currentColor" : "none");
-}
-
-function setupContentGrid() {
-  // Bound on .layout rather than #content-grid so save toggles also work on
-  // Home's shelves, not just the Library grid.
-  const layout = document.querySelector(".layout");
-  if (!layout) return;
-
-  // Downloading is no longer a card-level action — playing something is what
-  // fetches it — so the only interactive control left here is the save toggle.
-  layout.addEventListener("click", (event) => {
-    const saveBtn = event.target.closest(".btn-save");
-    if (saveBtn) toggleSaved(saveBtn.dataset.contentId, saveBtn);
-  });
-}
-
-const FILTER_STORAGE_KEY = "spotifrei-channel-filter";
-const FAVORITES_FILTER_VALUE = "__favorites__";
-const SAVED_FILTER_VALUE = "__saved__";
-const PLAYED_FILTER_VALUE = "__played__";
-// Mirrors CHANNEL_FILTER_PREFIX in content_query.py — an *exact* channel
-// match (picked from a suggestion or a Home chip), as opposed to the plain
-// free-text filter value, which matches title-or-channel as a substring and
-// so can't tell "the channel is Linus Tech Tips" from "the title mentions
-// Linus Tech Tips."
-const CHANNEL_FILTER_PREFIX = "__channel__:";
-
-let currentPage = 1;
-let totalPageCount = 1;
-// Single source of truth for the active Library filter — read by
-// refreshGridView()/initializeLibraryGrid() instead of either control's own
-// DOM value, since the filter can now come from two different controls (the
-// channel search box or the All/Favorites/Saved dropdown) that must stay in
-// sync with each other rather than each owning the state.
-let currentChannelFilter = "";
-
-// Mirrors published_at.strftime('%d %b %Y') in _content_card.html.
-function formatCardDate(iso) {
-  if (!iso) return "";
-  const date = new Date(iso);
-  if (isNaN(date)) return "";
-  return new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric" }).format(
-    date
-  );
-}
-
-// Client-side twin of _content_card.html — the Library grid is populated by
-// fetching JSON (see refreshGridView) rather than server-rendering every
-// page, so this is the one other place that markup has to be kept in sync.
-function renderCard(item) {
-  const thumb = item.thumbnail_url
-    ? `<img src="${escapeHtml(item.thumbnail_url)}" alt="" loading="lazy" />`
-    : "";
-  const durationBadge = item.duration_seconds
-    ? `<span class="duration-badge">${formatDuration(item.duration_seconds)}</span>`
-    : "";
-  const downloadedBadge =
-    item.status === "ready"
-      ? `<span class="downloaded-badge" title="Downloaded — plays instantly">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>
-        </span>`
-      : "";
-  const dateEl = item.published_at
-    ? `<p class="card-date">${formatCardDate(item.published_at)}</p>`
-    : "";
-  const channelTitle = item.channel_title || "";
-
-  return `
-    <article
-      class="card"
-      data-content-id="${item.id}"
-      data-status="${item.status}"
-      data-title="${escapeHtml(item.title)}"
-      data-channel="${escapeHtml(channelTitle)}"
-      data-published="${item.published_at || ""}"
-      data-favorite="${item.is_favorite}"
-      data-saved="${item.is_saved}"
-    >
-      <a class="thumb" href="/player/${item.id}" aria-label="Play ${escapeHtml(item.title)}">
-        ${thumb}
-        ${durationBadge}
-        ${downloadedBadge}
-      </a>
-      <div class="card-body">
-        <h3 class="card-title" title="${escapeHtml(item.title)}">
-          <a class="card-link" href="/player/${item.id}">${escapeHtml(item.title)}</a>
-        </h3>
-        <div class="card-meta-row">
-          <div class="card-meta-text">
-            <p class="card-channel">
-              <a class="card-link" href="/player/${item.id}">${escapeHtml(channelTitle)}</a>
-            </p>
-            ${dateEl}
-          </div>
-          <button
-            type="button"
-            class="btn-save${item.is_saved ? " is-on" : ""}"
-            data-content-id="${item.id}"
-            aria-pressed="${item.is_saved}"
-            title="${item.is_saved ? "Saved for later" : "Save for later"}"
-            aria-label="Save for later"
-          >
-            <svg viewBox="0 0 24 24" fill="${item.is_saved ? "currentColor" : "none"}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg>
-          </button>
-        </div>
-      </div>
-    </article>
-  `;
-}
-
-function updatePaginationControls(totalPages, hasItems) {
-  const pagination = document.getElementById("pagination");
-  const indicator = document.getElementById("page-indicator");
-  const firstBtn = document.getElementById("first-page");
-  const prevBtn = document.getElementById("prev-page");
-  const nextBtn = document.getElementById("next-page");
-  const lastBtn = document.getElementById("last-page");
-  if (!pagination || !indicator || !firstBtn || !prevBtn || !nextBtn || !lastBtn) return;
-
-  totalPageCount = totalPages;
-
-  if (!hasItems) {
-    pagination.hidden = false;
-    indicator.textContent = "No matches";
-    firstBtn.disabled = true;
-    prevBtn.disabled = true;
-    nextBtn.disabled = true;
-    lastBtn.disabled = true;
-    return;
-  }
-
-  pagination.hidden = totalPages <= 1;
-  indicator.textContent = `Page ${currentPage} of ${totalPages}`;
-  firstBtn.disabled = currentPage <= 1;
-  prevBtn.disabled = currentPage <= 1;
-  nextBtn.disabled = currentPage >= totalPages;
-  lastBtn.disabled = currentPage >= totalPages;
-}
-
-// Bumped on every call and stamped on each request — filter/page changes can
-// fire in quick succession, and fetches don't necessarily resolve in the
-// order they were sent. Without this, a slower, now-stale response can land
-// after a newer one and silently overwrite it with the wrong page.
-let gridRequestSeq = 0;
-
-// The server owns filter/paging (always newest-first) — this just asks it
-// for the current page and swaps the grid, the same way renderSearchResults()
-// does for channel search.
-async function refreshGridView() {
-  const grid = document.getElementById("content-grid");
-  const emptyState = document.getElementById("empty-state");
-  if (!grid) return;
-
-  const filterValue = currentChannelFilter;
-
-  const params = new URLSearchParams({ page: String(currentPage), filter: filterValue });
-  const requestId = ++gridRequestSeq;
-
-  let data;
-  try {
-    const res = await fetch(`/content?${params}`);
-    if (!res.ok) throw new Error("grid fetch failed");
-    data = await res.json();
-  } catch (err) {
-    if (requestId === gridRequestSeq) showToast("Could not load your library");
-    return;
-  }
-
-  if (requestId !== gridRequestSeq) return; // a newer request superseded this one
-
-  currentPage = data.page;
-  grid.innerHTML = data.items.map(renderCard).join("");
-
-  // The "add a channel to get started" message means "you have zero content
-  // at all" — an empty *filtered* result gets pagination's "No matches"
-  // instead, not this.
-  const hasNoContentAtAll = data.items.length === 0 && filterValue === "";
-  if (emptyState) emptyState.hidden = !hasNoContentAtAll;
-  updatePaginationControls(data.total_pages, data.items.length > 0);
-}
-
-// The Library grid's first page is already server-rendered (page 1, no
-// filter) — only re-fetch on load if a restored localStorage filter
-// preference (applied by setupChannelFilter, which runs before this) doesn't
-// match that default. Otherwise just seed pagination state from what the
-// server already put in the DOM.
-function initializeLibraryGrid() {
-  const pagination = document.getElementById("pagination");
-  if (pagination) {
-    currentPage = Number(pagination.dataset.page) || 1;
-    totalPageCount = Number(pagination.dataset.totalPages) || 1;
-  }
-
-  if (currentChannelFilter !== "") {
-    refreshGridView();
-    return;
-  }
-
-  const hasItems = !!document.querySelector("#content-grid .card");
-  updatePaginationControls(totalPageCount, hasItems);
-}
-
-// Keeps the search box and the All/Favorites/Saved dropdown showing
-// whichever one actually matches the active filter — they're two views onto
-// the same currentChannelFilter, not independent state, so picking one
-// always clears the other rather than leaving it showing a stale value.
-function syncChannelFilterControls(value) {
-  const select = document.getElementById("channel-filter");
-  const input = document.getElementById("channel-filter-input");
-  const clearBtn = document.getElementById("channel-filter-clear");
-  const isSpecialValue =
-    value === "" || value === FAVORITES_FILTER_VALUE || value === SAVED_FILTER_VALUE || value === PLAYED_FILTER_VALUE;
-  const isExactChannel = value.startsWith(CHANNEL_FILTER_PREFIX);
-
-  if (select) select.value = isSpecialValue ? value : "";
-  if (input) {
-    if (isSpecialValue) input.value = "";
-    // An exact-channel filter still shows as plain text in the box (just
-    // the channel name, prefix stripped) — the __channel__: encoding is an
-    // implementation detail of the filter state, not something the user
-    // should see.
-    else if (isExactChannel) input.value = value.slice(CHANNEL_FILTER_PREFIX.length);
-    else input.value = value;
-    // Once a channel is picked, the box becomes a read-only "chip" rather
-    // than editable text — editing it in place would silently downgrade an
-    // exact channel match into a substring search with no clear signal that
-    // happened. Only the × button can back out of it.
-    input.readOnly = isExactChannel;
-  }
-  if (clearBtn) clearBtn.hidden = !isExactChannel;
-}
-
-function applyChannelFilter(value) {
-  currentChannelFilter = value;
-  syncChannelFilterControls(value);
-  localStorage.setItem(FILTER_STORAGE_KEY, value);
-  currentPage = 1;
-  refreshGridView();
-}
-
-// Every followed channel's name, read from the Home tab's chip row rather
-// than a fresh fetch — that markup already exists in the DOM (Home is just
-// CSS-hidden when another tab is active), so this is free.
-function getFollowedChannelNames() {
-  return Array.from(document.querySelectorAll("#home-channel-row .channel-chip"))
-    .map((chip) => chip.dataset.channel)
-    .filter(Boolean);
-}
-
-function renderChannelSuggestions(matches) {
-  const list = document.getElementById("channel-filter-suggestions");
-  if (!list) return;
-
-  if (!matches.length) {
-    list.hidden = true;
-    list.innerHTML = "";
-    return;
-  }
-
-  list.innerHTML = matches
-    .map((name) => `<button type="button" class="channel-filter-suggestion" data-channel="${escapeHtml(name)}">${escapeHtml(name)}</button>`)
-    .join("");
-  list.hidden = false;
-}
-
-function setupChannelFilter() {
-  const select = document.getElementById("channel-filter");
-  const input = document.getElementById("channel-filter-input");
-  const clearBtn = document.getElementById("channel-filter-clear");
-  const suggestions = document.getElementById("channel-filter-suggestions");
-  if (!select && !input) return;
-
-  currentChannelFilter = localStorage.getItem(FILTER_STORAGE_KEY) || "";
-  syncChannelFilterControls(currentChannelFilter);
-
-  if (select) {
-    select.addEventListener("change", () => {
-      renderChannelSuggestions([]);
-      applyChannelFilter(select.value);
-    });
-  }
-
-  if (input) {
-    const runFilter = debounce((value) => applyChannelFilter(value), 300);
-
-    input.addEventListener("input", () => {
-      // Read-only while an exact channel is selected (see
-      // syncChannelFilterControls) — typing shouldn't be possible then, but
-      // guard anyway in case something else dispatches an input event.
-      if (input.readOnly) return;
-
-      const value = input.value.trim();
-      runFilter(value);
-
-      // Channel suggestions are a shortcut layered on top of the plain
-      // text search above, not a replacement for it — typing keeps doing
-      // the substring search either way, this just also offers "did you
-      // mean this exact channel?" for whichever names match so far.
-      if (!value) {
-        renderChannelSuggestions([]);
-        return;
-      }
-      const lower = value.toLowerCase();
-      const matches = getFollowedChannelNames()
-        .filter((name) => name.toLowerCase().includes(lower))
-        .slice(0, 8);
-      renderChannelSuggestions(matches);
-    });
-
-    input.addEventListener("focus", () => {
-      if (input.readOnly) return;
-      const value = input.value.trim();
-      if (!value) return;
-      const lower = value.toLowerCase();
-      const matches = getFollowedChannelNames()
-        .filter((name) => name.toLowerCase().includes(lower))
-        .slice(0, 8);
-      renderChannelSuggestions(matches);
-    });
-
-    document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape" && suggestions && !suggestions.hidden) renderChannelSuggestions([]);
-    });
-
-    document.addEventListener("click", (event) => {
-      if (suggestions && !suggestions.hidden && !event.target.closest(".channel-filter-search")) {
-        renderChannelSuggestions([]);
-      }
-    });
-  }
-
-  if (clearBtn) {
-    clearBtn.addEventListener("click", () => {
-      applyChannelFilter("");
-      input?.focus();
-    });
-  }
-
-  if (suggestions) {
-    suggestions.addEventListener("click", (event) => {
-      const btn = event.target.closest(".channel-filter-suggestion");
-      if (!btn) return;
-      renderChannelSuggestions([]);
-      applyChannelFilter(CHANNEL_FILTER_PREFIX + btn.dataset.channel);
-    });
-  }
-}
-
 function setupHomeChannels() {
   const row = document.getElementById("home-channel-row");
   if (!row) return;
@@ -423,16 +35,33 @@ function setupHomeChannels() {
   row.addEventListener("click", (event) => {
     const chip = event.target.closest(".channel-chip");
     if (!chip) return;
+    window.location.href = `/channel/${chip.dataset.feedId}`;
+  });
+}
 
-    applyChannelFilter(CHANNEL_FILTER_PREFIX + chip.dataset.channel);
+// Every card (including the pinned Favorites/Saved tiles) is already
+// server-rendered in the DOM, so filtering is just a show/hide over what's
+// there — no round trip needed the way the old video-grid search had one.
+function setupLibrarySearch() {
+  const input = document.getElementById("library-search-input");
+  const grid = document.querySelector("#tab-library .channel-grid");
+  const emptyState = document.getElementById("channel-search-empty");
+  if (!input || !grid) return;
 
-    // Push a new history entry for the Home state we're leaving so the back
-    // button returns here — tab switches otherwise only replaceState, which
-    // would make back skip straight past Home to whatever real page (e.g. a
-    // player) was open before it.
-    history.pushState(null, "", location.pathname + location.search + "#home");
-    document.querySelector('.tab-btn[data-tab="library"]')?.click();
-    window.scrollTo(0, 0);
+  const cards = Array.from(grid.querySelectorAll(".channel-card"));
+
+  input.addEventListener("input", () => {
+    const query = input.value.trim().toLowerCase();
+    let visibleCount = 0;
+
+    cards.forEach((card) => {
+      const title = card.querySelector(".channel-card-title")?.textContent.toLowerCase() ?? "";
+      const matches = !query || title.includes(query);
+      card.hidden = !matches;
+      if (matches) visibleCount++;
+    });
+
+    if (emptyState) emptyState.hidden = visibleCount > 0;
   });
 }
 
@@ -510,25 +139,6 @@ function setupHorizontalScrollers() {
   });
 }
 
-function setupPagination() {
-  const firstBtn = document.getElementById("first-page");
-  const prevBtn = document.getElementById("prev-page");
-  const nextBtn = document.getElementById("next-page");
-  const lastBtn = document.getElementById("last-page");
-  if (!firstBtn || !prevBtn || !nextBtn || !lastBtn) return;
-
-  const goTo = (page) => {
-    currentPage = page;
-    refreshGridView();
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  };
-
-  firstBtn.addEventListener("click", () => goTo(1));
-  prevBtn.addEventListener("click", () => goTo(currentPage - 1));
-  nextBtn.addEventListener("click", () => goTo(currentPage + 1));
-  lastBtn.addEventListener("click", () => goTo(totalPageCount));
-}
-
 async function refreshFeeds() {
   const overlay = document.getElementById("refresh-overlay");
   const btn = document.getElementById("refresh-feeds-btn");
@@ -560,7 +170,7 @@ async function refreshFeeds() {
 // Refreshing every followed channel's RSS is several network calls per channel,
 // so it's only worth doing once when the app is first opened in a browser
 // session — not on every reload. A manual button covers everything else.
-const SESSION_REFRESH_KEY = "spotifrei-session-refreshed";
+const SESSION_REFRESH_KEY = "spotea-session-refreshed";
 
 function maybeAutoRefresh() {
   if (sessionStorage.getItem(SESSION_REFRESH_KEY)) return;
@@ -698,7 +308,7 @@ function setupChannelSearch() {
   });
 }
 
-const TAB_STORAGE_KEY = "spotifrei-active-tab";
+const TAB_STORAGE_KEY = "spotea-active-tab";
 
 function setupTabs() {
   const tabButtons = document.querySelectorAll(".tab-btn");
@@ -776,6 +386,21 @@ function setupStorage() {
       const res = await fetch("/storage", { method: "DELETE" });
       if (res.ok) window.location.reload();
       else showToast("Could not clear downloads");
+    });
+  }
+
+  const clearPlayedBtn = document.getElementById("clear-recently-played");
+  if (clearPlayedBtn) {
+    clearPlayedBtn.addEventListener("click", async () => {
+      const confirmed = await confirmDialog(
+        "Clear your recently played history? This only affects the Home shelf — nothing gets deleted.",
+        "Clear"
+      );
+      if (!confirmed) return;
+
+      const res = await fetch("/content/recently-played", { method: "DELETE" });
+      if (res.ok) window.location.reload();
+      else showToast("Could not clear recently played");
     });
   }
 
@@ -893,36 +518,6 @@ async function waitForBackfillThenReload(feedId, title) {
   window.location.reload();
 }
 
-function setupUnfollowButtons() {
-  document.querySelectorAll(".unfollow").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const confirmed = await confirmDialog(
-        "Unfollow this channel? Its videos will be removed from your library.",
-        "Unfollow"
-      );
-      if (!confirmed) return;
-
-      // Shown the instant the dialog closes: without it, the confirm modal
-      // disappears and the channel briefly flashes back in the list while
-      // the DELETE request is still in flight, right before the reload.
-      const overlay = document.getElementById("refresh-overlay");
-      if (overlay) overlay.hidden = false;
-
-      try {
-        const res = await fetch(`/feeds/${btn.dataset.feedId}`, { method: "DELETE" });
-        if (res.ok) {
-          window.location.reload();
-          return; // stay covered by the overlay through to the reload
-        }
-        showToast("Could not unfollow this channel");
-      } catch (err) {
-        showToast("Could not unfollow this channel");
-      }
-      if (overlay) overlay.hidden = true;
-    });
-  });
-}
-
 function bulkImportStatusMeta(status) {
   if (status === "added") return { cls: "is-added", icon: "✓" };
   if (status === "duplicate") return { cls: "is-duplicate", icon: "•" };
@@ -951,24 +546,25 @@ function renderBulkImportResults(results) {
     .join("");
 }
 
+// Inline on the Manage tab now (was a modal) — Search channels and Bulk
+// import sit on the page together instead of the latter hiding behind a
+// button, which also means there's no "close" moment to hang a reload off
+// of. Reload is instead an explicit "Refresh page" button once an import
+// finishes with at least one channel actually added, so the user still gets
+// to read the per-line results (including failures) before anything
+// refreshes out from under them.
 function setupBulkImport() {
-  const overlay = document.getElementById("bulk-import-overlay");
-  const openBtn = document.getElementById("open-bulk-import");
-  const closeBtn = document.getElementById("bulk-import-close");
   const startBtn = document.getElementById("bulk-import-start");
+  const againBtn = document.getElementById("bulk-import-again");
+  const reloadBtn = document.getElementById("bulk-import-reload");
   const input = document.getElementById("bulk-import-input");
   const formSection = document.getElementById("bulk-import-form-section");
   const progressSection = document.getElementById("bulk-import-progress-section");
   const progressText = document.getElementById("bulk-import-progress-text");
   const resultsList = document.getElementById("bulk-import-results");
-  if (!overlay || !openBtn) return;
+  if (!startBtn || !input) return;
 
-  // Reloading only on close (not after every poll) lets the user actually
-  // read the per-line results — including failures — before the page
-  // refreshes out from under them.
-  let addedAnyChannel = false;
-
-  const resetModal = () => {
+  const resetForm = () => {
     input.value = "";
     formSection.hidden = false;
     progressSection.hidden = true;
@@ -976,31 +572,12 @@ function setupBulkImport() {
     progressText.textContent = "";
     startBtn.disabled = false;
     startBtn.textContent = "Import";
-    addedAnyChannel = false;
+    againBtn.hidden = true;
+    reloadBtn.hidden = true;
   };
 
-  const open = () => {
-    resetModal();
-    overlay.hidden = false;
-  };
-
-  const close = () => {
-    overlay.hidden = true;
-    // The import job itself already ran to completion server-side by the
-    // time this can fire (the modal has no way to close mid-import except
-    // this same handler) — reload so the new channels show up everywhere
-    // (Manage's followed list, Home shelves, the Library's channel filter).
-    if (addedAnyChannel) window.location.reload();
-  };
-
-  openBtn.addEventListener("click", open);
-  closeBtn.addEventListener("click", close);
-  overlay.addEventListener("click", (event) => {
-    if (event.target === overlay) close();
-  });
-  document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && !overlay.hidden) close();
-  });
+  againBtn.addEventListener("click", resetForm);
+  reloadBtn.addEventListener("click", () => window.location.reload());
 
   startBtn.addEventListener("click", async () => {
     const urls = input.value.trim();
@@ -1057,7 +634,8 @@ function setupBulkImport() {
         const added = data.results.filter((r) => r.status === "added").length;
         const skipped = data.total - added;
         progressText.textContent = `Done — ${added} added${skipped ? `, ${skipped} skipped` : ""}.`;
-        addedAnyChannel = added > 0;
+        againBtn.hidden = false;
+        reloadBtn.hidden = added === 0;
         break;
       }
 
@@ -1076,17 +654,13 @@ function setupBulkImport() {
 document.addEventListener("DOMContentLoaded", () => {
   setupTabs();
   setupChannelSearch();
-  setupUnfollowButtons();
   setupDownloadsOverlay();
   setupBulkImport();
   setupStorage();
   setupSettings();
-  setupContentGrid();
-  setupChannelFilter();
   setupHomeChannels();
+  setupLibrarySearch();
   setupHorizontalScrollers();
-  setupPagination();
   setupRefreshButton();
-  initializeLibraryGrid();
   maybeAutoRefresh();
 });

@@ -35,12 +35,12 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="spotifrei", lifespan=lifespan)
+app = FastAPI(title="Spotea", lifespan=lifespan)
 
 app.add_middleware(
     SessionMiddleware,
     secret_key=settings.secret_key,
-    session_cookie="spotifrei_session",
+    session_cookie="spotea_session",
     same_site="lax",
 )
 

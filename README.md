@@ -1,4 +1,4 @@
-# spotifrei
+# Spotea
 
 A self-hosted app for following YouTube channels via RSS, downloading
 selected videos as audio, and listening to them from your browser — like a
@@ -77,7 +77,7 @@ pip install -r requirements.txt
 
 cp .env.example .env
 # edit .env — for local dev, relative paths work well, e.g.:
-#   DATABASE_URL=sqlite:///./data/spotifrei.db
+#   DATABASE_URL=sqlite:///./data/spotea.db
 #   STORAGE_DIR=./data/storage
 
 uvicorn app.main:app --reload
@@ -91,7 +91,7 @@ All configuration is via environment variables (see `.env.example`):
 |---|---|---|---|
 | `APP_PASSWORD` | yes | — | Shared login password for the instance |
 | `SECRET_KEY` | yes | — | Random key used to sign session cookies |
-| `DATABASE_URL` | no | `sqlite:////app/data/spotifrei.db` | SQLAlchemy database URL |
+| `DATABASE_URL` | no | `sqlite:////app/data/spotea.db` | SQLAlchemy database URL |
 | `STORAGE_DIR` | no | `/app/data/storage` | Where downloaded audio files are stored |
 | `AUDIO_FORMAT` | no | `mp3` | Audio format yt-dlp extracts to |
 | `HOST_PORT` | no | `8000` | Host port docker-compose publishes the app on (Docker only) |

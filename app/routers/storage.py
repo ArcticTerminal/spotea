@@ -58,5 +58,5 @@ def export_all(db: Session = Depends(get_db)) -> StreamingResponse:
     return StreamingResponse(
         buffer,
         media_type="application/zip",
-        headers={"Content-Disposition": 'attachment; filename="spotifrei-downloads.zip"'},
+        headers={"Content-Disposition": 'attachment; filename="spotea-downloads.zip"'},
     )

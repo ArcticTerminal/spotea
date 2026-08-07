@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en" style="background: #121212">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{ feed.channel_title or feed.rss_url }} — Spotea</title>
+  <link rel="icon" href="/static/img/favicon.ico" />
+  <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+<body>
+  <main class="layout">
+    <a class="back-link" href="/#library">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5"></path><path d="M12 19l-7-7 7-7"></path></svg>
+      Library
+    </a>
+
+    <div class="channel-hero">
+      {% if feed.avatar_url %}
+      <img class="channel-hero-avatar" src="{{ feed.avatar_url }}" alt="" />
+      {% else %}
+      <span class="channel-hero-avatar"></span>
+      {% endif %}
+      <div class="channel-hero-info">
+        <h1 class="channel-hero-title">{{ feed.channel_title or feed.rss_url }}</h1>
+        <p class="muted">{{ video_count }} video{{ '' if video_count == 1 else 's' }}</p>
+      </div>
+      <button type="button" id="unfollow-channel-btn" class="btn-quiet channel-hero-unfollow" data-feed-id="{{ feed.id }}">
+        Unfollow
+      </button>
+    </div>
+
+    {% if content %}
+    <div class="track-list">
+      {% for item in content %}
+      {% set index = start_index + loop.index0 %}
+      {% include "_content_row.html" %}
+      {% endfor %}
+    </div>
+
+    {% set base_url = "/channel/" ~ feed.id %}
+    {% include "_pagination.html" %}
+
+    {% else %}
+    <p class="muted">No videos from this channel yet.</p>
+    {% endif %}
+  </main>
+
+  <script src="/static/js/ui.js"></script>
+  <script src="/static/js/channel.js"></script>
+</body>
+</html>

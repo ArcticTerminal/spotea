@@ -1,3 +1,63 @@
+/* Design tokens — every color in this file is one of these variables, never
+   a literal hex/rgb again. Change the look (e.g. swap the accent green) by
+   editing a value here once, instead of hunting down every place it's used.
+   Values are unchanged from what they replaced — this block introduces the
+   tokens without altering how anything renders.
+
+   Shadow/overlay rgba() values (box-shadow depth, fullscreen overlay dimming)
+   are intentionally left as plain literals — those are one-off depth effects
+   rather than reusable palette colors, so a token would just add indirection
+   without giving anything a second caller. */
+:root {
+  /* Neutrals */
+  --black: #000;
+  --white: #fff;
+
+  /* Surfaces (backgrounds), darkest to lightest */
+  --bg-page: #121212;
+  --bg-page-glow: #1f1f1f; /* radial-gradient center on the standalone player page */
+  --bg-sunken: #181818; /* channel card */
+  --bg-base: #1a1a1a; /* content cards, chips, list rows */
+  --bg-raised: #1e1e1e; /* login card, search results, summary panels */
+  --bg-elevated: #232323; /* modals, hover states */
+  --bg-input: #2a2a2a; /* form inputs, avatar/thumbnail placeholders */
+  --bg-toast: #2f2f2f;
+  --bg-hover-strong: #3a3a3a;
+
+  /* Borders */
+  --border-subtle: #222;
+  --border-default: #333;
+  --border-strong: #666; /* ghost/icon button hover */
+
+  /* Text — roughly high to low emphasis. text-muted/text-subtle/text-faint*
+     are near-duplicate grays that drifted in separately over time rather
+     than a deliberate 4-step scale; kept distinct here (not merged into one)
+     so this pass stays a pure refactor with no visual change. */
+  --text-primary: #f5f5f5;
+  --text-secondary: #b3b3b3;
+  --text-hover: #ccc; /* tab label hover, between secondary and bright */
+  --text-muted: #888;
+  --text-subtle: #777;
+  --text-faint: #7a7a7a;
+  --text-faint-alt: #a7a7a7;
+  --text-disabled: #444;
+
+  /* Accent (warm orange) */
+  --accent: #f97316;
+  --accent-hover: #fb923c;
+  --accent-tint: rgba(249, 115, 22, 0.08);
+
+  /* Danger / destructive actions */
+  --danger: #f15e6c;
+  --danger-hover: #ff7482;
+
+  /* Pinned "Favorites" tile */
+  --favorite: #e0245e;
+
+  /* Seek/volume slider's unfilled track */
+  --track-empty: #4d4d4d;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -5,8 +65,8 @@
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  background: #121212;
-  color: #f5f5f5;
+  background: var(--bg-page);
+  color: var(--text-primary);
 }
 
 .login-body {
@@ -17,7 +77,7 @@ body {
 }
 
 .login-card {
-  background: #1e1e1e;
+  background: var(--bg-raised);
   padding: 2.5rem;
   border-radius: 12px;
   width: 100%;
@@ -39,15 +99,15 @@ body {
 
 .login-card label {
   font-size: 0.85rem;
-  color: #b3b3b3;
+  color: var(--text-secondary);
 }
 
 .login-card input {
   padding: 0.6rem 0.75rem;
   border-radius: 6px;
-  border: 1px solid #333;
-  background: #2a2a2a;
-  color: #f5f5f5;
+  border: 1px solid var(--border-default);
+  background: var(--bg-input);
+  color: var(--text-primary);
   font-size: 1rem;
 }
 
@@ -56,18 +116,18 @@ body {
   padding: 0.6rem;
   border: none;
   border-radius: 999px;
-  background: #1db954;
-  color: #000;
+  background: var(--accent);
+  color: var(--black);
   font-weight: 600;
   cursor: pointer;
 }
 
 .login-card button:hover {
-  background: #1ed760;
+  background: var(--accent-hover);
 }
 
 .login-card .error {
-  color: #f15e6c;
+  color: var(--danger);
   font-size: 0.85rem;
   text-align: center;
   margin: 0 0 1rem;
@@ -76,7 +136,7 @@ body {
 /* App shell */
 
 .topbar {
-  border-bottom: 1px solid #222;
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 /* Matches .layout's max-width/centering so the header and tabs line up with
@@ -120,8 +180,8 @@ body {
 
 .btn-icon {
   background: none;
-  border: 1px solid #333;
-  color: #b3b3b3;
+  border: 1px solid var(--border-default);
+  color: var(--text-secondary);
   border-radius: 999px;
   width: 34px;
   height: 34px;
@@ -137,8 +197,8 @@ body {
 }
 
 .btn-icon:hover {
-  border-color: #666;
-  color: #fff;
+  border-color: var(--border-strong);
+  color: var(--white);
 }
 
 .btn-icon:disabled {
@@ -152,16 +212,16 @@ body {
 
 .btn-ghost {
   background: none;
-  border: 1px solid #333;
-  color: #b3b3b3;
+  border: 1px solid var(--border-default);
+  color: var(--text-secondary);
   border-radius: 999px;
   padding: 0.4rem 0.9rem;
   cursor: pointer;
 }
 
 .btn-ghost:hover {
-  border-color: #666;
-  color: #fff;
+  border-color: var(--border-strong);
+  color: var(--white);
 }
 
 .btn-ghost:disabled {
@@ -170,12 +230,12 @@ body {
 }
 
 .btn-ghost:disabled:hover {
-  border-color: #333;
-  color: #b3b3b3;
+  border-color: var(--border-default);
+  color: var(--text-secondary);
 }
 
 .tabs {
-  border-bottom: 1px solid #222;
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .tabs-inner {
@@ -190,7 +250,7 @@ body {
   background: none;
   border: none;
   border-bottom: 2px solid transparent;
-  color: #888;
+  color: var(--text-muted);
   font-size: 0.9rem;
   font-weight: 600;
   padding: 0.75rem 0.1rem;
@@ -198,12 +258,12 @@ body {
 }
 
 .tab-btn:hover {
-  color: #ccc;
+  color: var(--text-hover);
 }
 
 .tab-btn.active {
-  color: #fff;
-  border-bottom-color: #1db954;
+  color: var(--white);
+  border-bottom-color: var(--accent);
 }
 
 /* Same data-active-tab trick as the panels: the JS-toggled .active class
@@ -216,8 +276,8 @@ html[data-active-tab="home"] .tab-btn[data-tab="home"],
 html[data-active-tab="library"] .tab-btn[data-tab="library"],
 html[data-active-tab="manage"] .tab-btn[data-tab="manage"],
 html[data-active-tab="settings"] .tab-btn[data-tab="settings"] {
-  color: #fff;
-  border-bottom-color: #1db954;
+  color: var(--white);
+  border-bottom-color: var(--accent);
 }
 
 .layout {
@@ -252,7 +312,7 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
 
 .channels-panel-inner h2 {
   font-size: 1rem;
-  color: #b3b3b3;
+  color: var(--text-secondary);
   margin: 1.75rem 0 0.75rem;
 }
 
@@ -272,18 +332,18 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   align-items: center;
   gap: 0.75rem;
   padding: 0.9rem 1rem;
-  border: 1px solid #2a2a2a;
+  border: 1px solid var(--bg-input);
   border-radius: 10px;
   cursor: pointer;
 }
 
 .quality-option:has(input:checked) {
-  border-color: #1db954;
-  background: rgba(29, 185, 84, 0.08);
+  border-color: var(--accent);
+  background: var(--accent-tint);
 }
 
 .quality-option input {
-  accent-color: #1db954;
+  accent-color: var(--accent);
   flex-shrink: 0;
 }
 
@@ -299,7 +359,7 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
 
 .quality-option-desc {
   font-size: 0.8rem;
-  color: #888;
+  color: var(--text-muted);
 }
 
 @media (min-width: 700px) {
@@ -316,41 +376,13 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   }
 }
 
-#feed-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-}
-
-#feed-list .unfollow {
-  background: none;
-  border: none;
-  color: #888;
-  cursor: pointer;
-  padding: 0.3rem;
-  display: inline-flex;
-  flex-shrink: 0;
-}
-
-#feed-list .unfollow svg {
-  width: 16px;
-  height: 16px;
-}
-
-#feed-list .unfollow:hover {
-  color: #f15e6c;
-}
-
 .channel-search input {
   width: 100%;
   padding: 0.5rem 0.6rem;
   border-radius: 6px;
-  border: 1px solid #333;
-  background: #2a2a2a;
-  color: #f5f5f5;
+  border: 1px solid var(--border-default);
+  background: var(--bg-input);
+  color: var(--text-primary);
   margin-bottom: 0.75rem;
 }
 
@@ -372,7 +404,7 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   align-items: center;
   gap: 0.6rem;
   padding: 0.4rem 0.6rem;
-  background: #1e1e1e;
+  background: var(--bg-raised);
   border-radius: 6px;
 }
 
@@ -382,7 +414,7 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   border-radius: 50%;
   object-fit: cover;
   flex-shrink: 0;
-  background: #2a2a2a;
+  background: var(--bg-input);
   display: block;
 }
 
@@ -402,12 +434,12 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
 
 .search-result-subs {
   font-size: 0.75rem;
-  color: #888;
+  color: var(--text-muted);
 }
 
 .search-empty {
   font-size: 0.85rem;
-  color: #888;
+  color: var(--text-muted);
   padding: 0.4rem 0.6rem;
 }
 
@@ -417,14 +449,14 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   padding: 0.3rem 0.7rem;
   font-size: 0.75rem;
   font-weight: 600;
-  background: #2a2a2a;
-  color: #f5f5f5;
+  background: var(--bg-input);
+  color: var(--text-primary);
   cursor: pointer;
   flex-shrink: 0;
 }
 
 .btn-add-channel:hover {
-  background: #3a3a3a;
+  background: var(--bg-hover-strong);
 }
 
 .btn-add-channel:disabled {
@@ -441,7 +473,7 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   gap: 1rem;
   flex-wrap: wrap;
   padding: 0.9rem 1rem;
-  background: #1e1e1e;
+  background: var(--bg-raised);
   border-radius: 8px;
   margin-bottom: 1rem;
   flex-shrink: 0;
@@ -480,7 +512,7 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   align-items: center;
   gap: 0.75rem;
   padding: 0.55rem 0.75rem;
-  background: #1a1a1a;
+  background: var(--bg-base);
   border-radius: 6px;
 }
 
@@ -501,14 +533,14 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
 
 .storage-item-meta {
   font-size: 0.72rem;
-  color: #888;
+  color: var(--text-muted);
 }
 
 .storage-export,
 .storage-remove {
   background: none;
   border: none;
-  color: #888;
+  color: var(--text-muted);
   cursor: pointer;
   padding: 0.3rem;
   display: inline-flex;
@@ -522,11 +554,11 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
 }
 
 .storage-export:hover {
-  color: #1db954;
+  color: var(--accent);
 }
 
 .storage-remove:hover {
-  color: #f15e6c;
+  color: var(--danger);
 }
 
 .content-header {
@@ -549,97 +581,8 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   gap: 0.6rem;
 }
 
-.sort-select {
-  background: #2a2a2a;
-  color: #f5f5f5;
-  border: 1px solid #333;
-  border-radius: 6px;
-  padding: 0.35rem 0.5rem;
-  font-size: 0.8rem;
-}
-
-.channel-filter-input {
-  width: 150px;
-  /* Room for the clear button without it overlapping the channel name once
-     a specific channel is selected (readonly state). */
-  padding-right: 1.6rem;
-}
-
-.channel-filter-input::placeholder {
-  color: #888;
-}
-
-.channel-filter-input:read-only {
-  cursor: default;
-}
-
-.channel-filter-clear {
-  position: absolute;
-  top: 50%;
-  right: 0.4rem;
-  transform: translateY(-50%);
-  background: none;
-  border: none;
-  color: #888;
-  cursor: pointer;
-  font-size: 1rem;
-  line-height: 1;
-  padding: 0.15rem;
-}
-
-.channel-filter-clear:hover {
-  color: #fff;
-}
-
-.channel-filter-clear[hidden] {
-  display: none;
-}
-
-.channel-filter-search {
-  position: relative;
-}
-
-.channel-filter-suggestions {
-  position: absolute;
-  top: calc(100% + 0.3rem);
-  right: 0;
-  z-index: 20;
-  list-style: none;
-  margin: 0;
-  padding: 0.3rem;
-  min-width: 200px;
-  max-height: 260px;
-  overflow-y: auto;
-  background: #232323;
-  border: 1px solid #333;
-  border-radius: 8px;
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.5);
-}
-
-.channel-filter-suggestions[hidden] {
-  display: none;
-}
-
-.channel-filter-suggestion {
-  display: block;
-  width: 100%;
-  text-align: left;
-  background: none;
-  border: none;
-  color: #f5f5f5;
-  padding: 0.45rem 0.6rem;
-  border-radius: 5px;
-  font-size: 0.85rem;
-  cursor: pointer;
-}
-
-.channel-filter-suggestion:hover,
-.channel-filter-suggestion.is-active {
-  background: #2f2f2f;
-}
-
 .muted {
-  color: #888;
+  color: var(--text-muted);
   font-size: 0.85rem;
 }
 
@@ -739,9 +682,9 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   display: inline-flex;
   align-items: center;
   gap: 0.55rem;
-  background: #1a1a1a;
-  border: 1px solid #333;
-  color: #f5f5f5;
+  background: var(--bg-base);
+  border: 1px solid var(--border-default);
+  color: var(--text-primary);
   border-radius: 999px;
   padding: 0.5rem 1rem;
   font-size: 0.85rem;
@@ -763,8 +706,8 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
 }
 
 .channel-chip:hover {
-  border-color: #1db954;
-  color: #1db954;
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .pagination {
@@ -772,7 +715,7 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   align-items: center;
   justify-content: center;
   flex-wrap: wrap;
-  gap: 1rem;
+  gap: 0.4rem;
   margin-top: 1.5rem;
 }
 
@@ -780,8 +723,285 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   display: none;
 }
 
+.pagination-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  color: var(--text-secondary);
+  text-decoration: none;
+}
+
+.pagination-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+.pagination-btn:hover {
+  background: var(--bg-elevated);
+  color: var(--white);
+}
+
+.pagination-btn.is-disabled {
+  color: var(--text-disabled);
+  pointer-events: none;
+}
+
+.pagination-indicator {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  min-width: 6.5rem;
+  text-align: center;
+}
+
+.channel-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.6rem;
+}
+
+@media (min-width: 420px) {
+  .channel-grid {
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 0.75rem;
+  }
+}
+
+.channel-card {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.6rem;
+  /* min-width: 0 stops the grid track from growing to fit an unbroken long
+     channel title (grid items default to min-width: auto) — without it a
+     long title blows the card past its column and the grid overflows the
+     viewport on mobile instead of the title truncating inside it. */
+  min-width: 0;
+  padding: 0.5rem 0.65rem;
+  background: var(--bg-sunken);
+  border-radius: 8px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.channel-card:hover {
+  background: var(--bg-elevated);
+}
+
+.channel-card[hidden] {
+  display: none;
+}
+
+.library-search-input {
+  width: 150px;
+  max-width: 100%;
+  padding: 0.3rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-default);
+  background: var(--bg-raised);
+  color: var(--text-primary);
+  font-size: 0.8rem;
+}
+
+.library-search-input::placeholder {
+  color: var(--text-muted);
+}
+
+.library-search-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.channel-card-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--bg-input);
+  flex: 0 0 auto;
+}
+
+/* Favorites/Saved for later are pinned "virtual channels" — same tile shape
+   as a real channel's avatar, but a solid-color icon badge instead of an
+   image, so they read as a matched pair (Spotify's Liked Songs) rather than
+   channels with a missing avatar. */
+.channel-card-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.channel-card-icon svg {
+  width: 20px;
+  height: 20px;
+  color: var(--white);
+}
+
+.channel-card-icon.is-favorites {
+  background: var(--favorite);
+}
+
+.channel-card-icon.is-saved {
+  background: var(--accent);
+}
+
+.channel-hero-avatar.channel-card-icon svg {
+  width: 40px;
+  height: 40px;
+}
+
+.channel-card-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.channel-card-title {
+  font-weight: 600;
+  font-size: 0.82rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.channel-card-count {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+
+.channel-hero {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+  margin-bottom: 1.75rem;
+}
+
+.channel-hero-unfollow {
+  margin-left: auto;
+  flex-shrink: 0;
+  border: 1px solid var(--border-default);
+}
+
+.channel-hero-unfollow:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.channel-hero-avatar {
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--bg-input);
+  flex: 0 0 auto;
+}
+
+.channel-hero-title {
+  margin: 0 0 0.3rem;
+  font-size: 1.4rem;
+}
+
+/* A minimal, Spotify-playlist-style tracklist for the channel page — plain
+   rows rather than the thumbnail-grid .card layout Home/the old Library grid
+   use, since a channel can be thousands of videos long and a grid of big
+   thumbnails reads like browsing YouTube itself, not listening to a playlist. */
+.track-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.track-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.4rem 0.5rem;
+  border-radius: 6px;
+}
+
+.track-row:hover {
+  background: var(--bg-base);
+}
+
+.track-link {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex: 1 1 auto;
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+}
+
+.track-index {
+  flex: 0 0 1.5rem;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.track-thumb {
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--bg-input);
+}
+
+.track-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.track-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.track-title {
+  font-size: 0.88rem;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.track-date {
+  color: var(--text-muted);
+  font-size: 0.76rem;
+}
+
+.track-duration {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.track-downloaded {
+  width: 13px;
+  height: 13px;
+  color: var(--accent);
+}
+
+.track-row .btn-save {
+  flex: 0 0 auto;
+}
+
 .card {
-  background: #1a1a1a;
+  background: var(--bg-base);
   border-radius: 10px;
   overflow: hidden;
   display: flex;
@@ -797,7 +1017,7 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   display: block;
   width: 100%;
   aspect-ratio: 16 / 9;
-  background: #2a2a2a;
+  background: var(--bg-input);
   border: none;
   padding: 0;
   margin: 0;
@@ -834,7 +1054,7 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   bottom: 0.4rem;
   left: 0.4rem;
   background: rgba(0, 0, 0, 0.75);
-  color: #fff;
+  color: var(--white);
   font-size: 0.7rem;
   font-weight: 600;
   padding: 0.1rem 0.35rem;
@@ -851,8 +1071,8 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  background: #1db954;
-  color: #000;
+  background: var(--accent);
+  color: var(--black);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -869,7 +1089,7 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   flex-shrink: 0;
   background: none;
   border: none;
-  color: #7a7a7a;
+  color: var(--text-faint);
   cursor: pointer;
   padding: 0.3rem;
   display: inline-flex;
@@ -884,11 +1104,11 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
 }
 
 .btn-save:hover {
-  color: #fff;
+  color: var(--white);
 }
 
 .btn-save.is-on {
-  color: #1db954;
+  color: var(--accent);
 }
 
 .card-body {
@@ -923,7 +1143,7 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
 .card-channel {
   margin: 0;
   font-size: 0.8rem;
-  color: #b3b3b3;
+  color: var(--text-secondary);
 }
 
 .card-link {
@@ -934,13 +1154,13 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
 .card-date {
   margin: 0;
   font-size: 0.75rem;
-  color: #777;
+  color: var(--text-subtle);
 }
 
 .btn-delete {
   background: none;
   border: none;
-  color: #f5f5f5;
+  color: var(--text-primary);
   cursor: pointer;
   padding: 0.3rem;
   line-height: 1;
@@ -955,15 +1175,15 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
 }
 
 .btn-delete:hover {
-  color: #f15e6c;
+  color: var(--danger);
 }
 
 .spinner {
   display: inline-block;
   width: 18px;
   height: 18px;
-  border: 2px solid #333;
-  border-top-color: #1db954;
+  border: 2px solid var(--border-default);
+  border-top-color: var(--accent);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
@@ -1010,7 +1230,7 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
 }
 
 #backfill-overlay-title {
-  color: #f5f5f5;
+  color: var(--text-primary);
   font-size: 0.95rem;
   line-height: 1.4;
   margin: 0;
@@ -1025,7 +1245,7 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   /* A separate line (not just appended text) specifically so a number like
      "page 7" or "412/1037" is never split mid-phrase by the title's own
      line wrap — nowrap keeps it atomic since it's always short. */
-  color: #b3b3b3;
+  color: var(--text-secondary);
   font-size: 0.85rem;
   line-height: 1.4;
   margin: 0;
@@ -1051,7 +1271,7 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
 }
 
 .modal {
-  background: #232323;
+  background: var(--bg-elevated);
   border-radius: 12px;
   padding: 1.5rem;
   width: 100%;
@@ -1095,7 +1315,7 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
 .modal-close {
   background: none;
   border: none;
-  color: #888;
+  color: var(--text-muted);
   font-size: 1.4rem;
   line-height: 1;
   cursor: pointer;
@@ -1104,13 +1324,13 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
 }
 
 .modal-close:hover {
-  color: #f5f5f5;
+  color: var(--text-primary);
 }
 
 .btn-quiet {
   background: none;
   border: none;
-  color: #b3b3b3;
+  color: var(--text-secondary);
   border-radius: 999px;
   padding: 0.5rem 1rem;
   font-size: 0.85rem;
@@ -1121,13 +1341,13 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
 }
 
 .btn-quiet:hover {
-  color: #fff;
+  color: var(--white);
 }
 
 .btn-danger {
-  background: #f15e6c;
+  background: var(--danger);
   border: none;
-  color: #000;
+  color: var(--black);
   border-radius: 999px;
   padding: 0.5rem 1.15rem;
   font-size: 0.85rem;
@@ -1136,13 +1356,13 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
 }
 
 .btn-danger:hover {
-  background: #ff7482;
+  background: var(--danger-hover);
 }
 
 .btn-primary {
-  background: #1db954;
+  background: var(--accent);
   border: none;
-  color: #000;
+  color: var(--black);
   border-radius: 999px;
   padding: 0.5rem 1.15rem;
   font-size: 0.85rem;
@@ -1151,7 +1371,7 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
 }
 
 .btn-primary:hover {
-  background: #1ed760;
+  background: var(--accent-hover);
 }
 
 .btn-primary:disabled {
@@ -1159,38 +1379,15 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   cursor: default;
 }
 
-.section-heading-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  margin: 1.75rem 0 0.75rem;
-}
-
-/* .channels-panel-inner h2's own margin would otherwise fight this row's
-   align-items: center — flexbox centers by margin box, and that h2's large
-   asymmetric top margin (spacing meant for a standalone heading) throws the
-   centering off, which is what visibly misaligned "Bulk import" against
-   "Followed channels". The row now owns that spacing instead. */
-.section-heading-row h2 {
-  margin: 0;
-}
-
-.modal-bulk-import {
-  max-width: 480px;
-  max-height: 80vh;
-  display: flex;
-  flex-direction: column;
-}
 
 .bulk-import-input {
   width: 100%;
   resize: vertical;
   padding: 0.6rem 0.75rem;
   border-radius: 6px;
-  border: 1px solid #333;
-  background: #2a2a2a;
-  color: #f5f5f5;
+  border: 1px solid var(--border-default);
+  background: var(--bg-input);
+  color: var(--text-primary);
   font: inherit;
   font-size: 0.85rem;
   margin-bottom: 1rem;
@@ -1201,6 +1398,10 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   min-height: 0;
   display: flex;
   flex-direction: column;
+}
+
+.bulk-import-progress[hidden] {
+  display: none;
 }
 
 .bulk-import-results {
@@ -1224,7 +1425,7 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   align-items: baseline;
   gap: 0.5rem;
   padding: 0.5rem 0.65rem;
-  background: #1a1a1a;
+  background: var(--bg-base);
   border-radius: 6px;
   font-size: 0.82rem;
 }
@@ -1235,15 +1436,15 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
 }
 
 .bulk-import-status.is-added {
-  color: #1db954;
+  color: var(--accent);
 }
 
 .bulk-import-status.is-duplicate {
-  color: #888;
+  color: var(--text-muted);
 }
 
 .bulk-import-status.is-error {
-  color: #f15e6c;
+  color: var(--danger);
 }
 
 .bulk-import-line {
@@ -1254,7 +1455,7 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
 }
 
 .modal button:focus-visible {
-  outline: 2px solid #fff;
+  outline: 2px solid var(--white);
   outline-offset: 2px;
 }
 
@@ -1275,9 +1476,9 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
 }
 
 .toast {
-  background: #2f2f2f;
-  color: #f5f5f5;
-  border-left: 3px solid #f15e6c;
+  background: var(--bg-toast);
+  color: var(--text-primary);
+  border-left: 3px solid var(--danger);
   border-radius: 8px;
   padding: 0.65rem 1rem;
   font-size: 0.85rem;
@@ -1299,7 +1500,7 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   justify-content: center;
   min-height: 100vh;
   padding: 1.5rem;
-  background: radial-gradient(circle at 50% 0%, #1f1f1f 0%, #121212 60%);
+  background: radial-gradient(circle at 50% 0%, var(--bg-page-glow) 0%, var(--bg-page) 60%);
 }
 
 .player-card {
@@ -1314,7 +1515,7 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   background: none;
   border: none;
   padding: 0;
-  color: #b3b3b3;
+  color: var(--text-secondary);
   text-decoration: none;
   font-size: 0.85rem;
   font-weight: 600;
@@ -1328,14 +1529,14 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
 }
 
 .back-link:hover {
-  color: #fff;
+  color: var(--white);
 }
 
 .player-art {
   border-radius: 8px;
   overflow: hidden;
   aspect-ratio: 16 / 9;
-  background: #2a2a2a;
+  background: var(--bg-input);
   margin-bottom: 1.75rem;
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
 }
@@ -1359,7 +1560,7 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
 }
 
 .player-channel {
-  color: #b3b3b3;
+  color: var(--text-secondary);
   font-size: 0.9rem;
   margin: 0;
 }
@@ -1377,7 +1578,7 @@ audio {
   width: 100%;
   height: 4px;
   border-radius: 999px;
-  background: linear-gradient(to right, #fff var(--fill, 0%), #4d4d4d var(--fill, 0%));
+  background: linear-gradient(to right, var(--white) var(--fill, 0%), var(--track-empty) var(--fill, 0%));
   cursor: pointer;
   outline: none;
 }
@@ -1388,7 +1589,7 @@ audio {
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  background: #fff;
+  background: var(--white);
   border: none;
   opacity: 0;
   transition: opacity 0.15s ease;
@@ -1403,12 +1604,12 @@ audio {
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  background: #fff;
+  background: var(--white);
   border: none;
 }
 
 .range:hover {
-  background: linear-gradient(to right, #1db954 var(--fill, 0%), #4d4d4d var(--fill, 0%));
+  background: linear-gradient(to right, var(--accent) var(--fill, 0%), var(--track-empty) var(--fill, 0%));
 }
 
 .prepare-state {
@@ -1418,7 +1619,7 @@ audio {
   gap: 0.6rem;
   margin-bottom: 1.25rem;
   font-size: 0.85rem;
-  color: #b3b3b3;
+  color: var(--text-secondary);
 }
 
 .prepare-state[hidden] {
@@ -1426,7 +1627,7 @@ audio {
 }
 
 .prepare-state.is-error {
-  color: #f15e6c;
+  color: var(--danger);
 }
 
 .prepare-state .spinner[hidden] {
@@ -1447,7 +1648,7 @@ audio {
   justify-content: space-between;
   margin-top: 0.5rem;
   font-size: 0.7rem;
-  color: #a7a7a7;
+  color: var(--text-faint-alt);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1463,7 +1664,7 @@ audio {
   position: relative;
   background: none;
   border: none;
-  color: #b3b3b3;
+  color: var(--text-secondary);
   cursor: pointer;
   padding: 0.25rem;
   display: flex;
@@ -1472,7 +1673,7 @@ audio {
 }
 
 .btn-transport:hover {
-  color: #fff;
+  color: var(--white);
 }
 
 .btn-transport svg {
@@ -1496,8 +1697,8 @@ audio {
   height: 60px;
   border-radius: 50%;
   border: none;
-  background: #fff;
-  color: #000;
+  background: var(--white);
+  color: var(--black);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1507,7 +1708,7 @@ audio {
 
 .btn-play-main:hover {
   transform: scale(1.06);
-  background: #1ed760;
+  background: var(--accent-hover);
 }
 
 .btn-play-main svg {
@@ -1541,7 +1742,7 @@ audio {
 .btn-quiet-icon {
   background: none;
   border: none;
-  color: #b3b3b3;
+  color: var(--text-secondary);
   cursor: pointer;
   padding: 0;
   display: flex;
@@ -1551,7 +1752,7 @@ audio {
 }
 
 .btn-quiet-icon:hover {
-  color: #fff;
+  color: var(--white);
 }
 
 .btn-quiet-icon svg {
@@ -1566,7 +1767,7 @@ audio {
 .btn-fav {
   background: none;
   border: none;
-  color: #b3b3b3;
+  color: var(--text-secondary);
   cursor: pointer;
   padding: 0.25rem;
   display: flex;
@@ -1581,12 +1782,12 @@ audio {
 }
 
 .btn-fav:hover {
-  color: #fff;
+  color: var(--white);
   transform: scale(1.08);
 }
 
 .btn-fav.is-on {
-  color: #1db954;
+  color: var(--accent);
 }
 
 .btn-fav:disabled {

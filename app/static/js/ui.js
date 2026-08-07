@@ -74,6 +74,81 @@ function confirmDialog(message, confirmLabel) {
   });
 }
 
+function applySavedState(button, isSaved) {
+  button.classList.toggle("is-on", isSaved);
+  button.setAttribute("aria-pressed", String(isSaved));
+  button.title = isSaved ? "Saved for later" : "Save for later";
+  const svg = button.querySelector("svg");
+  if (svg) svg.setAttribute("fill", isSaved ? "currentColor" : "none");
+}
+
+async function toggleSaved(contentId, button) {
+  // The same item can appear in several shelves on Home plus a channel
+  // page's track list at once, so every instance's state has to be kept in
+  // sync, not just the one the click happened in. Matched by attribute
+  // rather than a specific class (.card vs .track-row) since both item
+  // containers carry data-content-id/data-saved.
+  const cards = document.querySelectorAll(`[data-content-id="${contentId}"][data-saved]`);
+  const isSaved = button?.closest("[data-saved]")?.dataset.saved === "true";
+
+  try {
+    const res = await fetch(`/content/${contentId}/save`, {
+      method: isSaved ? "DELETE" : "POST",
+    });
+    if (!res.ok) {
+      showToast("Could not update saved items");
+      return;
+    }
+    const data = await res.json();
+
+    cards.forEach((card) => {
+      card.dataset.saved = String(data.is_saved);
+      const saveBtn = card.querySelector(".btn-save");
+      if (saveBtn) applySavedState(saveBtn, data.is_saved);
+    });
+
+    // Only defined on index.html (Home's "Saved for later" shelf) — the
+    // channel page has no such shelf to patch.
+    if (typeof syncSavedShelf === "function") syncSavedShelf(contentId, data.is_saved);
+  } catch (err) {
+    showToast("Could not update saved items");
+  }
+}
+
+// Shared by Manage's "Remove a channel" search results and the channel
+// page's own Unfollow button — confirm + DELETE + error toast are identical
+// either way, only what happens after success differs (reload in place vs.
+// navigate away from a channel page that no longer exists), so that part is
+// left to the caller via onConfirmed (fires right after the user confirms,
+// before the request — e.g. to show a covering overlay) and the boolean
+// return value.
+async function unfollowChannel(feedId, onConfirmed) {
+  const confirmed = await confirmDialog(
+    "Unfollow this channel? Its videos will be removed from your library.",
+    "Unfollow"
+  );
+  if (!confirmed) return false;
+
+  if (onConfirmed) onConfirmed();
+
+  try {
+    const res = await fetch(`/feeds/${feedId}`, { method: "DELETE" });
+    if (res.ok) return true;
+    showToast("Could not unfollow this channel");
+    return false;
+  } catch (err) {
+    showToast("Could not unfollow this channel");
+    return false;
+  }
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  document.addEventListener("click", (event) => {
+    const saveBtn = event.target.closest(".btn-save");
+    if (saveBtn) toggleSaved(saveBtn.dataset.contentId, saveBtn);
+  });
+});
+
 function showToast(message) {
   let container = document.getElementById("toast-container");
   if (!container) {

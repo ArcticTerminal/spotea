@@ -1,4 +1,4 @@
-# spotifrei — Architecture
+# Spotea — Architecture
 
 A self-hosted, open-source tool for archiving and listening to content from
 YouTube channels via RSS. Users add RSS feeds of YouTube channels they follow,
@@ -22,7 +22,7 @@ SQLite    yt-dlp (thread   feedparser
    ▼
 data/storage/{video_id}.{fmt} (Docker volume)
 data/avatars/{channel_id}.jpg (Docker volume)
-data/spotifrei.db             (Docker volume)
+data/spotea.db                (Docker volume)
 ```
 
 ## 2. Project structure
@@ -70,7 +70,7 @@ spotifrei/
     storage/{video_id}.{AUDIO_FORMAT}
     avatars/{channel_id}.jpg              # cached channel avatars, re-served via
                                            # GET /avatars/{filename}
-    spotifrei.db
+    spotea.db
   Dockerfile
   docker-compose.yml
   .dockerignore
@@ -436,7 +436,7 @@ comes back just by playing it again. Confirmed through the shared modal, not
 Environment variables (`.env`, documented in `.env.example`):
 - `APP_PASSWORD` — shared login password (required)
 - `SECRET_KEY` — session signing key (required)
-- `DATABASE_URL` — default `sqlite:////app/data/spotifrei.db`
+- `DATABASE_URL` — default `sqlite:////app/data/spotea.db`
 - `STORAGE_DIR` — default `/app/data/storage`
 - `AUDIO_FORMAT` — default `m4a` (the `high`/`low` audio-quality tiers'
   extraction target; matches YouTube's native audio stream for almost every

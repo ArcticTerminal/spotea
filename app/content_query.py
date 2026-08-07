@@ -19,6 +19,7 @@ def query_content_page(
     page: int = 1,
     filter: str = "",
     page_size: int = DEFAULT_PAGE_SIZE,
+    feed_id: int | None = None,
 ) -> tuple[list[Content], int, int]:
     """A page of a user's content, newest first, optionally filtered. Shared
     by the Library grid's server-rendered first page (pages.py) and the AJAX
@@ -26,9 +27,15 @@ def query_content_page(
     (routers/content.py), so the two never disagree on what "page 1, no
     filter" actually contains.
 
+    feed_id restricts to a single channel — used by the channel detail page,
+    which has no other filter UI, so it's applied independently of `filter`.
+
     Returns (items, clamped page, total_pages).
     """
     query = db.query(Content).options(joinedload(Content.feed)).filter(Content.user_id == user_id)
+
+    if feed_id is not None:
+        query = query.filter(Content.feed_id == feed_id)
 
     needs_feed_join = filter not in ("", "__favorites__", "__saved__", "__played__")
     if needs_feed_join:

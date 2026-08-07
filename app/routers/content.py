@@ -90,6 +90,22 @@ def list_content(page: int = 1, filter: str = "", db: Session = Depends(get_db))
     )
 
 
+# Registered ahead of the /{content_id}/... routes below — a literal segment
+# placed after them would otherwise be swallowed by /{content_id} (Starlette
+# matches path structure first and only fails int conversion once the
+# request is already committed to that route), and no request would ever
+# reach this one.
+@router.delete("/recently-played")
+def clear_recently_played(db: Session = Depends(get_db)) -> dict[str, int]:
+    cleared = (
+        db.query(Content)
+        .filter(Content.user_id == DEFAULT_USER_ID, Content.last_played_at.isnot(None))
+        .update({"last_played_at": None}, synchronize_session=False)
+    )
+    db.commit()
+    return {"cleared": cleared}
+
+
 @router.post("/{content_id}/download", response_model=StatusOut)
 def start_download(
     content_id: int, background_tasks: BackgroundTasks, db: Session = Depends(get_db)

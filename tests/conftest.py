@@ -3,7 +3,7 @@
 Isolation from the real database is the whole point of this file: the app
 was already hit by an accidental full data loss once (empty `content`/
 `feeds` tables, no backup) — a test run must never be able to touch
-`data/spotifrei.db` or `data/storage`/`data/avatars`, even indirectly.
+`data/spotea.db` or `data/storage`/`data/avatars`, even indirectly.
 
 `app/config.py`'s `Settings()` is a module-level singleton instantiated the
 first time `app.config` is imported, so the env vars below MUST be set
@@ -16,7 +16,7 @@ import os
 import tempfile
 from pathlib import Path
 
-_TEST_DIR = Path(tempfile.mkdtemp(prefix="spotifrei-test-"))
+_TEST_DIR = Path(tempfile.mkdtemp(prefix="spotea-test-"))
 
 os.environ["DATABASE_URL"] = f"sqlite:///{_TEST_DIR / 'test.db'}"
 os.environ["STORAGE_DIR"] = str(_TEST_DIR / "storage")

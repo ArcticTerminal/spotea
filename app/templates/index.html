@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>spotifrei</title>
+  <title>Spotea</title>
   <link rel="icon" href="/static/img/favicon.ico" />
   <link rel="stylesheet" href="/static/css/style.css" />
   <script>
@@ -15,7 +15,7 @@
     (function () {
       var VALID_TABS = ["home", "library", "manage", "settings"];
       var fromHash = location.hash.slice(1);
-      var fromStorage = localStorage.getItem("spotifrei-active-tab");
+      var fromStorage = localStorage.getItem("spotea-active-tab");
       var tab =
         VALID_TABS.indexOf(fromHash) !== -1
           ? fromHash
@@ -38,14 +38,14 @@
     // but the session's one-time auto-refresh hasn't started yet, so a user
     // can end up tapping a library item right as content shifts under them.
     // Keep the key below in sync with SESSION_REFRESH_KEY in app.js.
-    if (!sessionStorage.getItem("spotifrei-session-refreshed")) {
+    if (!sessionStorage.getItem("spotea-session-refreshed")) {
       document.getElementById("refresh-overlay").hidden = false;
     }
   </script>
 
   <header class="topbar">
     <div class="topbar-inner">
-      <h1 class="brand"><img src="/static/img/logo.png" alt="" class="brand-logo" />Spotifrei</h1>
+      <h1 class="brand"><img src="/static/img/logo.svg" alt="" class="brand-logo" />Spotea</h1>
       <div class="topbar-actions">
         <button type="button" id="refresh-feeds-btn" class="btn-icon" aria-label="Refresh feeds" title="Refresh feeds">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -72,12 +72,12 @@
 
   <main class="layout">
     <section id="tab-home" class="tab-panel" data-tab-panel="home">
-      {% if feeds %}
+      {% if home_recent_channels %}
       <div class="shelf">
-        <h2 class="shelf-title">Followed channels</h2>
+        <h2 class="shelf-title">Recently followed</h2>
         <div class="channel-row" id="home-channel-row">
-          {% for feed in feeds %}
-          <button type="button" class="channel-chip{{ ' has-avatar' if feed.avatar_url else '' }}" data-channel="{{ feed.channel_title or '' }}">
+          {% for feed in home_recent_channels %}
+          <button type="button" class="channel-chip{{ ' has-avatar' if feed.avatar_url else '' }}" data-feed-id="{{ feed.id }}">
             {% if feed.avatar_url %}<img class="channel-chip-avatar" src="{{ feed.avatar_url }}" alt="" />{% endif %}
             <span>{{ feed.channel_title or feed.rss_url }}</span>
           </button>
@@ -86,7 +86,7 @@
       </div>
       {% endif %}
 
-      {% if not content %}
+      {% if not channel_video_counts %}
       <p class="muted">No content yet — add a channel in the Manage tab to get started.</p>
       {% else %}
 
@@ -139,49 +139,57 @@
 
     <section id="tab-library" class="tab-panel" data-tab-panel="library">
       <div class="content-header">
-        <h2>Latest</h2>
-        <div class="content-header-actions">
-          <select id="channel-filter" class="sort-select" aria-label="Filter">
-            <option value="">All channels</option>
-            <option value="__favorites__">Favorites</option>
-            <option value="__saved__">Saved for later</option>
-            <option value="__played__">Previously played</option>
-          </select>
-          <div class="channel-filter-search">
-            <input
-              type="text"
-              id="channel-filter-input"
-              class="sort-select channel-filter-input"
-              placeholder="Search title or channel…"
-              autocomplete="off"
-              aria-label="Search by title or channel"
-            />
-            <button type="button" id="channel-filter-clear" class="channel-filter-clear" aria-label="Clear channel filter" hidden>×</button>
-            <ul id="channel-filter-suggestions" class="channel-filter-suggestions" hidden></ul>
-          </div>
-        </div>
+        <h2>Your channels</h2>
+        {% if feeds %}
+        <input
+          type="text"
+          id="library-search-input"
+          class="library-search-input"
+          placeholder="Search channels…"
+          autocomplete="off"
+          aria-label="Search channels"
+        />
+        {% endif %}
       </div>
-      <div id="content-grid" class="grid">
-        {% for item in content %}
-        {% include "_content_card.html" %}
+      {% if feeds %}
+      <div class="channel-grid">
+        <a class="channel-card" href="/favorites">
+          <span class="channel-card-avatar channel-card-icon is-favorites">
+            <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-7.5-4.7-9.4-9A5.3 5.3 0 0 1 12 6.6 5.3 5.3 0 0 1 21.4 12c-1.9 4.3-9.4 9-9.4 9z"></path></svg>
+          </span>
+          <span class="channel-card-info">
+            <span class="channel-card-title">Favorites</span>
+            <span class="channel-card-count">{{ favorites_count }} video{{ '' if favorites_count == 1 else 's' }}</span>
+          </span>
+        </a>
+        <a class="channel-card" href="/saved">
+          <span class="channel-card-avatar channel-card-icon is-saved">
+            <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg>
+          </span>
+          <span class="channel-card-info">
+            <span class="channel-card-title">Saved for later</span>
+            <span class="channel-card-count">{{ saved_count }} video{{ '' if saved_count == 1 else 's' }}</span>
+          </span>
+        </a>
+        {% for feed in feeds %}
+        {% set video_count = channel_video_counts.get(feed.id, 0) %}
+        <a class="channel-card" href="/channel/{{ feed.id }}">
+          {% if feed.avatar_url %}
+          <img class="channel-card-avatar" src="{{ feed.avatar_url }}" alt="" />
+          {% else %}
+          <span class="channel-card-avatar"></span>
+          {% endif %}
+          <span class="channel-card-info">
+            <span class="channel-card-title" title="{{ feed.channel_title or feed.rss_url }}">{{ feed.channel_title or feed.rss_url }}</span>
+            <span class="channel-card-count">{{ video_count }} video{{ '' if video_count == 1 else 's' }}</span>
+          </span>
+        </a>
         {% endfor %}
       </div>
-      <div
-        id="pagination"
-        class="pagination"
-        data-page="{{ library_page }}"
-        data-total-pages="{{ library_total_pages }}"
-        {% if library_total_pages <= 1 %}hidden{% endif %}
-      >
-        <button type="button" id="first-page" class="btn-ghost" aria-label="First page">« First</button>
-        <button type="button" id="prev-page" class="btn-ghost">‹ Prev</button>
-        <span id="page-indicator" class="muted"></span>
-        <button type="button" id="next-page" class="btn-ghost">Next ›</button>
-        <button type="button" id="last-page" class="btn-ghost" aria-label="Last page">Last »</button>
-      </div>
-      <p id="empty-state" class="muted" {% if content %}hidden{% endif %}>
-        No content yet — add a channel in the Manage tab to get started.
-      </p>
+      <p id="channel-search-empty" class="muted" hidden>No channels match your search.</p>
+      {% else %}
+      <p class="muted">No content yet — add a channel in the Manage tab to get started.</p>
+      {% endif %}
     </section>
 
     <section id="tab-manage" class="tab-panel" data-tab-panel="manage" hidden>
@@ -192,23 +200,31 @@
         </div>
         <ul id="channel-search-results" class="search-results"></ul>
 
-        <div class="section-heading-row">
-          <h2>Followed channels</h2>
-          <button type="button" id="open-bulk-import" class="btn-quiet">Bulk import</button>
+        <h2>Bulk import</h2>
+        <div id="bulk-import-form-section">
+          <p class="muted">
+            One channel per line — a handle (<code>@handle</code>), a full channel URL, or a row
+            copied straight from a Google Takeout <code>subscriptions.csv</code> export.
+          </p>
+          <textarea
+            id="bulk-import-input"
+            class="bulk-import-input"
+            rows="8"
+            placeholder="@handle&#10;https://www.youtube.com/@anotherhandle"
+          ></textarea>
+          <div class="modal-actions">
+            <button type="button" id="bulk-import-start" class="btn-primary">Import</button>
+          </div>
         </div>
-        <ul id="feed-list">
-          {% for feed in feeds %}
-          <li class="search-result" data-feed-id="{{ feed.id }}">
-            {% if feed.avatar_url %}<img class="search-result-thumb" src="{{ feed.avatar_url }}" alt="" />{% else %}<span class="search-result-thumb"></span>{% endif %}
-            <div class="search-result-info">
-              <span class="search-result-title">{{ feed.channel_title or feed.rss_url }}</span>
-            </div>
-            <button type="button" class="unfollow" data-feed-id="{{ feed.id }}" aria-label="Unfollow">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-            </button>
-          </li>
-          {% endfor %}
-        </ul>
+
+        <div id="bulk-import-progress-section" class="bulk-import-progress" hidden>
+          <p id="bulk-import-progress-text" class="muted"></p>
+          <ul id="bulk-import-results" class="bulk-import-results"></ul>
+          <div class="modal-actions">
+            <button type="button" id="bulk-import-again" class="btn-quiet" hidden>Import more</button>
+            <button type="button" id="bulk-import-reload" class="btn-primary" hidden>Refresh page</button>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -248,6 +264,13 @@
             <span class="muted">across {{ usage.count }} item{{ '' if usage.count == 1 else 's' }}</span>
           </div>
           <button type="button" id="open-downloads" class="btn-quiet">Manage downloads</button>
+        </div>
+
+        <h2>History</h2>
+        <p class="muted">Clears your "Recently played" shelf on Home. Doesn't remove any downloads.</p>
+        <div class="storage-summary">
+          <span class="storage-total">Recently played</span>
+          <button type="button" id="clear-recently-played" class="btn-quiet">Clear</button>
         </div>
       </div>
     </section>
@@ -293,36 +316,6 @@
       {% else %}
       <p class="muted">Nothing downloaded yet. Anything you play gets cached here.</p>
       {% endif %}
-    </div>
-  </div>
-
-  <div id="bulk-import-overlay" class="modal-overlay" hidden>
-    <div class="modal modal-bulk-import">
-      <div class="modal-header">
-        <h2>Bulk import channels</h2>
-        <button type="button" id="bulk-import-close" class="modal-close" aria-label="Close">×</button>
-      </div>
-
-      <div id="bulk-import-form-section">
-        <p class="muted">
-          One channel per line — a handle (<code>@handle</code>), a full channel URL, or a row
-          copied straight from a Google Takeout <code>subscriptions.csv</code> export.
-        </p>
-        <textarea
-          id="bulk-import-input"
-          class="bulk-import-input"
-          rows="8"
-          placeholder="@handle&#10;https://www.youtube.com/@anotherhandle"
-        ></textarea>
-        <div class="modal-actions">
-          <button type="button" id="bulk-import-start" class="btn-primary">Import</button>
-        </div>
-      </div>
-
-      <div id="bulk-import-progress-section" class="bulk-import-progress" hidden>
-        <p id="bulk-import-progress-text" class="muted"></p>
-        <ul id="bulk-import-results" class="bulk-import-results"></ul>
-      </div>
     </div>
   </div>
 
