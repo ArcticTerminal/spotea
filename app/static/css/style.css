@@ -60,6 +60,19 @@
 
 * {
   box-sizing: border-box;
+  /* No gray flash on tap, and no double-tap-to-zoom on buttons/links —
+     without these, every tap reads as "this is a webpage", not an app. */
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+html {
+  /* Defensive backstop: a component miscalculating its width should clip,
+     not drag the whole page into horizontal scroll — which reads as fully
+     broken on mobile (the entire layout shifts sideways). Real fixes for
+     specific overflow culprits still belong at the source; this just caps
+     the blast radius of ones we haven't caught yet. */
+  overflow-x: hidden;
 }
 
 body {
@@ -67,6 +80,20 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   background: var(--bg-page);
   color: var(--text-primary);
+  overflow-x: hidden;
+}
+
+/* Form controls don't inherit font-size from the page by default — browsers
+   give them their own native "control font" (commonly ~13px) regardless of
+   body's font-size. Any input/textarea that doesn't override this ends up
+   under the 16px iOS needs to not auto-zoom on focus, even though nothing
+   here looks like it set a small font on purpose. This is the actual fix;
+   the explicit font-size on individual inputs below just documents intent
+   where it matters. */
+input,
+textarea,
+select {
+  font: inherit;
 }
 
 .login-body {
@@ -74,6 +101,11 @@ body {
   align-items: center;
   justify-content: center;
   min-height: 100vh;
+  /* dvh accounts for the mobile browser chrome (address bar) actually on
+     screen, instead of the vh unit's fixed "as if it were hidden" value —
+     without it, this card can jump/resize as Safari's bar shows and hides.
+     Falls back to the vh line above on browsers without dvh support. */
+  min-height: 100dvh;
 }
 
 .login-card {
@@ -115,7 +147,7 @@ body {
   margin-top: 0.5rem;
   padding: 0.6rem;
   border: none;
-  border-radius: 999px;
+  border-radius: 6px;
   background: var(--accent);
   color: var(--black);
   font-weight: 600;
@@ -148,6 +180,12 @@ body {
   max-width: 1100px;
   margin: 0 auto;
   padding: 1rem;
+  /* Keeps the bar clear of a notch in landscape / a fullscreen PWA's status
+     area. env() resolves to 0 anywhere without a safe-area inset, so this
+     is a no-op on ordinary devices. */
+  padding-top: calc(1rem + env(safe-area-inset-top, 0px));
+  padding-left: calc(1rem + env(safe-area-inset-left, 0px));
+  padding-right: calc(1rem + env(safe-area-inset-right, 0px));
 }
 
 .topbar h1 {
@@ -176,15 +214,88 @@ body {
   display: flex;
   align-items: center;
   gap: 0.75rem;
+  position: relative;
+}
+
+.topbar-actions-inline {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+/* Shown only under the max-width: 480px breakpoint below, which flips this
+   and .topbar-actions-inline's visibility. The compound selector (not just
+   .mobile-menu-btn) is needed to outrank .btn-icon's own `display:
+   inline-flex` on specificity rather than source order — this rule and that
+   one are otherwise equally specific, and .btn-icon happens to be declared
+   later in the file. */
+.btn-icon.mobile-menu-btn {
+  display: none;
+}
+
+.mobile-menu {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  min-width: 200px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+  padding: 0.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  z-index: 1050;
+}
+
+.mobile-menu[hidden] {
+  display: none;
+}
+
+/* display: contents so the <form> wrapping the Log out button doesn't
+   introduce an extra box in the menu's flex column — the button inside
+   still lays out as if it were a direct child of .mobile-menu. */
+.mobile-menu-form {
+  display: contents;
+}
+
+.mobile-menu-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: 44px;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mobile-menu-item:hover {
+  background: var(--bg-hover-strong);
+}
+
+.mobile-menu-item svg {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  color: var(--white);
 }
 
 .btn-icon {
   background: none;
   border: 1px solid var(--border-default);
   color: var(--text-secondary);
-  border-radius: 999px;
-  width: 34px;
-  height: 34px;
+  border-radius: 6px;
+  /* 44px — the platform-recommended minimum touch target, not just enough
+     room for the 16px icon. */
+  width: 44px;
+  height: 44px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -214,9 +325,16 @@ body {
   background: none;
   border: 1px solid var(--border-default);
   color: var(--text-secondary);
-  border-radius: 999px;
+  border-radius: 6px;
   padding: 0.4rem 0.9rem;
   cursor: pointer;
+  /* Matches .btn-icon's 44px so "Log out" isn't the odd one out next to it
+     in the topbar — a plain text button's line-height alone renders a few
+     px shorter than the icon+text profile pill sitting next to it. */
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .btn-ghost:hover {
@@ -232,6 +350,37 @@ body {
 .btn-ghost:disabled:hover {
   border-color: var(--border-default);
   color: var(--text-secondary);
+}
+
+.btn-profile {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  max-width: 140px;
+}
+
+.btn-profile span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Below this, "Spotea" + a named profile pill + the refresh icon + "Log
+   out" don't reliably fit on one line — the exact tipping point depends on
+   the profile's name length and the platform font's actual glyph widths,
+   which easily land under the ~390px a phone-sized viewport gives us.
+   Collapsing them into a single hamburger menu sidesteps that entirely
+   (a fixed, small width) instead of trying to out-guess every name/font
+   combination — and leaves room to add more actions later without
+   reopening this problem. */
+@media (max-width: 480px) {
+  .topbar-actions-inline {
+    display: none;
+  }
+
+  .btn-icon.mobile-menu-btn {
+    display: inline-flex;
+  }
 }
 
 .tabs {
@@ -365,6 +514,9 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
 @media (min-width: 700px) {
   .topbar-inner {
     padding: 1rem 1.5rem;
+    padding-top: calc(1rem + env(safe-area-inset-top, 0px));
+    padding-left: calc(1.5rem + env(safe-area-inset-left, 0px));
+    padding-right: calc(1.5rem + env(safe-area-inset-right, 0px));
   }
 
   .tabs-inner {
@@ -445,7 +597,7 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
 
 .btn-add-channel {
   border: none;
-  border-radius: 999px;
+  border-radius: 6px;
   padding: 0.3rem 0.7rem;
   font-size: 0.75rem;
   font-weight: 600;
@@ -536,14 +688,124 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   color: var(--text-muted);
 }
 
+.modal-profiles {
+  max-width: 400px;
+  /* Caps the whole modal, not just the list, so the "New profile name…"
+     input at the bottom stays reachable above the on-screen keyboard on
+     mobile instead of the modal overflowing past the visible viewport. */
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.profiles-list {
+  list-style: none;
+  margin: 0 0 1rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.profile-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0.75rem;
+  background: var(--bg-base);
+  border: 1px solid transparent;
+  border-radius: 6px;
+}
+
+/* Same "selected" treatment as the audio-quality options in Settings —
+   an accent border + tint — instead of a text badge. */
+.profile-row.is-current {
+  border-color: var(--accent);
+  background: var(--accent-tint);
+}
+
+.profile-row-main {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  padding: 0.5rem 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.profile-row-main:disabled {
+  cursor: default;
+}
+
+.profile-row-icon {
+  display: inline-flex;
+  color: var(--white);
+  flex-shrink: 0;
+}
+
+.profile-row-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.profile-row-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profiles-add-form {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.profiles-add-form input {
+  flex: 1;
+  padding: 0.5rem 0.6rem;
+  border-radius: 6px;
+  border: 1px solid var(--border-default);
+  background: var(--bg-input);
+  color: var(--text-primary);
+}
+
+.profile-edit-form {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.profile-name-input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.4rem 0.6rem;
+  border-radius: 6px;
+  border: 1px solid var(--border-default);
+  background: var(--bg-input);
+  color: var(--text-primary);
+}
+
 .storage-export,
 .storage-remove {
   background: none;
   border: none;
   color: var(--text-muted);
   cursor: pointer;
-  padding: 0.3rem;
+  /* min-width/height (not padding alone) guarantees a 44px touch target
+     regardless of the 16px icon's own box. */
+  min-width: 44px;
+  min-height: 44px;
   display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
 }
 
@@ -685,7 +947,7 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   background: var(--bg-base);
   border: 1px solid var(--border-default);
   color: var(--text-primary);
-  border-radius: 999px;
+  border-radius: 6px;
   padding: 0.5rem 1rem;
   font-size: 0.85rem;
   font-weight: 600;
@@ -727,9 +989,10 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
+  /* 44px touch target, same reasoning as .btn-icon. */
+  width: 44px;
+  height: 44px;
+  border-radius: 6px;
   color: var(--text-secondary);
   text-decoration: none;
 }
@@ -798,11 +1061,14 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   width: 150px;
   max-width: 100%;
   padding: 0.3rem 0.6rem;
-  border-radius: 999px;
+  border-radius: 6px;
   border: 1px solid var(--border-default);
   background: var(--bg-raised);
   color: var(--text-primary);
-  font-size: 0.8rem;
+  /* 16px, not smaller — iOS Safari auto-zooms the page on focus for any
+     input with a smaller computed font-size, which reads as broken on
+     mobile. */
+  font-size: 1rem;
 }
 
 .library-search-input::placeholder {
@@ -1091,7 +1357,8 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   border: none;
   color: var(--text-faint);
   cursor: pointer;
-  padding: 0.3rem;
+  min-width: 44px;
+  min-height: 44px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1319,7 +1586,11 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   font-size: 1.4rem;
   line-height: 1;
   cursor: pointer;
-  padding: 0.2rem;
+  min-width: 44px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
 }
 
@@ -1331,7 +1602,7 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   background: none;
   border: none;
   color: var(--text-secondary);
-  border-radius: 999px;
+  border-radius: 6px;
   padding: 0.5rem 1rem;
   font-size: 0.85rem;
   font-weight: 600;
@@ -1348,7 +1619,7 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   background: var(--danger);
   border: none;
   color: var(--black);
-  border-radius: 999px;
+  border-radius: 6px;
   padding: 0.5rem 1.15rem;
   font-size: 0.85rem;
   font-weight: 700;
@@ -1363,7 +1634,7 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   background: var(--accent);
   border: none;
   color: var(--black);
-  border-radius: 999px;
+  border-radius: 6px;
   padding: 0.5rem 1.15rem;
   font-size: 0.85rem;
   font-weight: 700;
@@ -1389,7 +1660,8 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   background: var(--bg-input);
   color: var(--text-primary);
   font: inherit;
-  font-size: 0.85rem;
+  /* 16px — see .library-search-input's comment on iOS auto-zoom. */
+  font-size: 1rem;
   margin-bottom: 1rem;
 }
 
@@ -1464,7 +1736,7 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
 .toast-container {
   position: fixed;
   left: 50%;
-  bottom: 1.5rem;
+  bottom: calc(1.5rem + env(safe-area-inset-bottom, 0px));
   transform: translateX(-50%);
   display: flex;
   flex-direction: column;
@@ -1596,8 +1868,18 @@ audio {
 }
 
 .range:hover::-webkit-slider-thumb,
-.range:focus-visible::-webkit-slider-thumb {
+.range:focus-visible::-webkit-slider-thumb,
+.range:active::-webkit-slider-thumb {
   opacity: 1;
+}
+
+/* Touch devices have no real :hover to reveal the thumb on — without this
+   the seek/volume bar looks like a bare line with nothing to grab until
+   you're already mid-drag. */
+@media (hover: none) {
+  .range::-webkit-slider-thumb {
+    opacity: 1;
+  }
 }
 
 .range::-moz-range-thumb {
@@ -1666,7 +1948,8 @@ audio {
   border: none;
   color: var(--text-secondary);
   cursor: pointer;
-  padding: 0.25rem;
+  min-width: 44px;
+  min-height: 44px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1695,7 +1978,7 @@ audio {
 .btn-play-main {
   width: 60px;
   height: 60px;
-  border-radius: 50%;
+  border-radius: 6px;
   border: none;
   background: var(--white);
   color: var(--black);
@@ -1706,9 +1989,14 @@ audio {
   transition: transform 0.12s ease, background 0.12s ease;
 }
 
-.btn-play-main:hover {
-  transform: scale(1.06);
-  background: var(--accent-hover);
+/* (hover: hover) excludes touch — without it, tapping this on mobile leaves
+   it visibly "stuck" orange, because touch browsers apply :hover on tap but
+   never send the mouseleave that would normally clear it on desktop. */
+@media (hover: hover) {
+  .btn-play-main:hover {
+    transform: scale(1.06);
+    background: var(--accent-hover);
+  }
 }
 
 .btn-play-main svg {
@@ -1744,7 +2032,8 @@ audio {
   border: none;
   color: var(--text-secondary);
   cursor: pointer;
-  padding: 0;
+  min-width: 44px;
+  min-height: 44px;
   display: flex;
   align-items: center;
   justify-content: center;

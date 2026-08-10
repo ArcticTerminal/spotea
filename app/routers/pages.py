@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.content_query import DEFAULT_PAGE_SIZE, query_content_page
-from app.deps import get_db, require_login
+from app.deps import get_current_profile, get_db, require_login
 from app.formatting import format_duration, format_size
 from app.models import Content, Feed, User
 from app.storage import collect_usage
@@ -16,51 +16,52 @@ templates = Jinja2Templates(directory="app/templates")
 templates.env.filters["duration"] = format_duration
 templates.env.filters["filesize"] = format_size
 
-DEFAULT_USER_ID = 1
 HOME_SHELF_LIMIT = 12
 HOME_CHANNEL_LIMIT = 8
 
 
-def _home_shelf_query(db: Session):
-    return (
-        db.query(Content).options(joinedload(Content.feed)).filter(Content.user_id == DEFAULT_USER_ID)
-    )
+def _home_shelf_query(db: Session, user_id: int):
+    return db.query(Content).options(joinedload(Content.feed)).filter(Content.user_id == user_id)
 
 
 @router.get("/", response_class=HTMLResponse)
-def home(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
-    feeds = db.query(Feed).filter(Feed.user_id == DEFAULT_USER_ID).order_by(Feed.added_at.desc()).all()
+def home(
+    request: Request, profile: User = Depends(get_current_profile), db: Session = Depends(get_db)
+) -> HTMLResponse:
+    feeds = db.query(Feed).filter(Feed.user_id == profile.id).order_by(Feed.added_at.desc()).all()
     # feeds is already newest-first — Home's chip row is just the most
     # recently followed few (with 100+ channels followed, the full list made
     # that row an endless horizontal scroll); Library's grid below still
     # gets every channel via `feeds` itself.
     home_recent_channels = feeds[:HOME_CHANNEL_LIMIT]
-    usage = collect_usage(db, DEFAULT_USER_ID)
-    user = db.get(User, DEFAULT_USER_ID)
+    usage = collect_usage(db, profile.id)
 
     # Each shelf (and the Library grid below) is its own bounded query now —
     # this used to be one `.all()` over every content row the user has ever
     # had (sliced in Python per shelf), which got very slow once backfilling
     # full channel histories pushed that past a few thousand rows.
     home_new_uploads = (
-        _home_shelf_query(db).order_by(Content.published_at.desc()).limit(HOME_SHELF_LIMIT).all()
+        _home_shelf_query(db, profile.id)
+        .order_by(Content.published_at.desc())
+        .limit(HOME_SHELF_LIMIT)
+        .all()
     )
     home_recently_played = (
-        _home_shelf_query(db)
+        _home_shelf_query(db, profile.id)
         .filter(Content.last_played_at.isnot(None))
         .order_by(Content.last_played_at.desc())
         .limit(HOME_SHELF_LIMIT)
         .all()
     )
     home_favorites = (
-        _home_shelf_query(db)
+        _home_shelf_query(db, profile.id)
         .filter(Content.is_favorite.is_(True))
         .order_by(Content.published_at.desc())
         .limit(HOME_SHELF_LIMIT)
         .all()
     )
     home_saved = (
-        _home_shelf_query(db)
+        _home_shelf_query(db, profile.id)
         .filter(Content.is_saved.is_(True))
         .order_by(Content.published_at.desc())
         .limit(HOME_SHELF_LIMIT)
@@ -71,18 +72,18 @@ def home(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
     # query covers every channel's card instead of a per-feed query each.
     channel_video_counts = dict(
         db.query(Content.feed_id, func.count(Content.id))
-        .filter(Content.user_id == DEFAULT_USER_ID)
+        .filter(Content.user_id == profile.id)
         .group_by(Content.feed_id)
         .all()
     )
     favorites_count = (
         db.query(func.count(Content.id))
-        .filter(Content.user_id == DEFAULT_USER_ID, Content.is_favorite.is_(True))
+        .filter(Content.user_id == profile.id, Content.is_favorite.is_(True))
         .scalar()
     )
     saved_count = (
         db.query(func.count(Content.id))
-        .filter(Content.user_id == DEFAULT_USER_ID, Content.is_saved.is_(True))
+        .filter(Content.user_id == profile.id, Content.is_saved.is_(True))
         .scalar()
     )
 
@@ -96,7 +97,7 @@ def home(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
             "favorites_count": favorites_count,
             "saved_count": saved_count,
             "usage": usage,
-            "audio_quality": user.audio_quality,
+            "audio_quality": profile.audio_quality,
             "home_recently_played": home_recently_played,
             "home_new_uploads": home_new_uploads,
             "home_favorites": home_favorites,
@@ -109,6 +110,7 @@ def _content_list_page(
     request: Request,
     db: Session,
     *,
+    user_id: int,
     kind: str,
     is_match: ColumnElement[bool],
     filter_value: str,
@@ -120,8 +122,8 @@ def _content_list_page(
     with a fixed filter, rendered through content_list.html (the same
     track-list/pagination partials channel.html uses, minus its
     single-channel avatar hero)."""
-    video_count = db.query(func.count(Content.id)).filter(Content.user_id == DEFAULT_USER_ID, is_match).scalar()
-    items, page, total_pages = query_content_page(db, DEFAULT_USER_ID, page=page, filter=filter_value)
+    video_count = db.query(func.count(Content.id)).filter(Content.user_id == user_id, is_match).scalar()
+    items, page, total_pages = query_content_page(db, user_id, page=page, filter=filter_value)
 
     return templates.TemplateResponse(
         request,
@@ -141,10 +143,16 @@ def _content_list_page(
 
 
 @router.get("/favorites", response_class=HTMLResponse)
-def favorites_page(request: Request, page: int = 1, db: Session = Depends(get_db)) -> HTMLResponse:
+def favorites_page(
+    request: Request,
+    page: int = 1,
+    profile: User = Depends(get_current_profile),
+    db: Session = Depends(get_db),
+) -> HTMLResponse:
     return _content_list_page(
         request,
         db,
+        user_id=profile.id,
         kind="favorites",
         is_match=Content.is_favorite.is_(True),
         filter_value="__favorites__",
@@ -155,10 +163,16 @@ def favorites_page(request: Request, page: int = 1, db: Session = Depends(get_db
 
 
 @router.get("/saved", response_class=HTMLResponse)
-def saved_page(request: Request, page: int = 1, db: Session = Depends(get_db)) -> HTMLResponse:
+def saved_page(
+    request: Request,
+    page: int = 1,
+    profile: User = Depends(get_current_profile),
+    db: Session = Depends(get_db),
+) -> HTMLResponse:
     return _content_list_page(
         request,
         db,
+        user_id=profile.id,
         kind="saved",
         is_match=Content.is_saved.is_(True),
         filter_value="__saved__",
@@ -170,16 +184,20 @@ def saved_page(request: Request, page: int = 1, db: Session = Depends(get_db)) -
 
 @router.get("/channel/{feed_id}", response_class=HTMLResponse)
 def channel_page(
-    feed_id: int, request: Request, page: int = 1, db: Session = Depends(get_db)
+    feed_id: int,
+    request: Request,
+    page: int = 1,
+    profile: User = Depends(get_current_profile),
+    db: Session = Depends(get_db),
 ) -> HTMLResponse:
-    feed = db.query(Feed).filter(Feed.id == feed_id, Feed.user_id == DEFAULT_USER_ID).first()
+    feed = db.query(Feed).filter(Feed.id == feed_id, Feed.user_id == profile.id).first()
     if feed is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Channel not found")
 
     video_count = db.query(func.count(Content.id)).filter(
-        Content.feed_id == feed_id, Content.user_id == DEFAULT_USER_ID
+        Content.feed_id == feed_id, Content.user_id == profile.id
     ).scalar()
-    items, page, total_pages = query_content_page(db, DEFAULT_USER_ID, page=page, feed_id=feed_id)
+    items, page, total_pages = query_content_page(db, profile.id, page=page, feed_id=feed_id)
 
     return templates.TemplateResponse(
         request,
@@ -196,11 +214,16 @@ def channel_page(
 
 
 @router.get("/player/{content_id}", response_class=HTMLResponse)
-def player_page(content_id: int, request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
+def player_page(
+    content_id: int,
+    request: Request,
+    profile: User = Depends(get_current_profile),
+    db: Session = Depends(get_db),
+) -> HTMLResponse:
     content = (
         db.query(Content)
         .options(joinedload(Content.feed))
-        .filter(Content.id == content_id, Content.user_id == DEFAULT_USER_ID)
+        .filter(Content.id == content_id, Content.user_id == profile.id)
         .first()
     )
     if content is None:

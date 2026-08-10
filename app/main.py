@@ -14,6 +14,7 @@ from app.routers import auth as auth_router
 from app.routers import content as content_router
 from app.routers import feeds as feeds_router
 from app.routers import pages as pages_router
+from app.routers import profiles as profiles_router
 from app.routers import settings as settings_router
 from app.routers import storage as storage_router
 
@@ -23,7 +24,7 @@ DEFAULT_USER_ID = 1
 def _ensure_default_user() -> None:
     with SessionLocal() as db:
         if db.get(User, DEFAULT_USER_ID) is None:
-            db.add(User(id=DEFAULT_USER_ID, name="local"))
+            db.add(User(id=DEFAULT_USER_ID, name="Default"))
             db.commit()
 
 
@@ -69,6 +70,7 @@ app.include_router(feeds_router.router)
 app.include_router(content_router.router)
 app.include_router(storage_router.router)
 app.include_router(settings_router.router)
+app.include_router(profiles_router.router)
 app.include_router(pages_router.router)
 
 

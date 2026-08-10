@@ -184,6 +184,45 @@ function setupRefreshButton() {
   btn.addEventListener("click", () => refreshFeeds());
 }
 
+// Below the mobile-menu-btn breakpoint (see style.css), the profile/refresh/
+// logout row collapses into this single hamburger dropdown instead — same
+// underlying actions, just consolidated so the topbar doesn't have to fit
+// three separate controls (and any more added later) on one narrow line.
+function setupMobileMenu() {
+  const btn = document.getElementById("mobile-menu-btn");
+  const menu = document.getElementById("mobile-menu");
+  if (!btn || !menu) return;
+
+  const setOpen = (open) => {
+    menu.hidden = !open;
+    btn.setAttribute("aria-expanded", String(open));
+  };
+
+  btn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    setOpen(menu.hidden);
+  });
+
+  document.addEventListener("click", (event) => {
+    if (!menu.hidden && !menu.contains(event.target) && event.target !== btn) setOpen(false);
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !menu.hidden) setOpen(false);
+  });
+
+  document.getElementById("mobile-menu-refresh")?.addEventListener("click", () => {
+    setOpen(false);
+    refreshFeeds();
+  });
+
+  document.getElementById("mobile-menu-profile")?.addEventListener("click", () => {
+    setOpen(false);
+    const overlay = document.getElementById("profiles-overlay");
+    if (overlay) overlay.hidden = false;
+  });
+}
+
 function debounce(fn, delay) {
   let timer;
   return (...args) => {
@@ -662,5 +701,6 @@ document.addEventListener("DOMContentLoaded", () => {
   setupLibrarySearch();
   setupHorizontalScrollers();
   setupRefreshButton();
+  setupMobileMenu();
   maybeAutoRefresh();
 });

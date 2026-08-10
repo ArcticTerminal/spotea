@@ -6,26 +6,28 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from app.deps import get_db, require_login
+from app.deps import get_current_profile, get_db, require_login
 from app.formatting import safe_filename
-from app.models import Content
+from app.models import Content, User
 from app.storage import clear_all
 
 router = APIRouter(prefix="/storage", tags=["storage"], dependencies=[Depends(require_login)])
 
-DEFAULT_USER_ID = 1
-
 
 @router.delete("")
-def clear_storage(db: Session = Depends(get_db)) -> dict[str, int]:
-    cleared = clear_all(db, DEFAULT_USER_ID)
+def clear_storage(
+    profile: User = Depends(get_current_profile), db: Session = Depends(get_db)
+) -> dict[str, int]:
+    cleared = clear_all(db, profile.id)
     return {"cleared": cleared}
 
 
 @router.get("/export")
-def export_all(db: Session = Depends(get_db)) -> StreamingResponse:
+def export_all(
+    profile: User = Depends(get_current_profile), db: Session = Depends(get_db)
+) -> StreamingResponse:
     rows = (
-        db.query(Content).filter(Content.user_id == DEFAULT_USER_ID, Content.status == "ready").all()
+        db.query(Content).filter(Content.user_id == profile.id, Content.status == "ready").all()
     )
 
     buffer = io.BytesIO()

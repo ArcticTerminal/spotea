@@ -90,6 +90,22 @@ class SettingsUpdate(BaseModel):
     audio_quality: str
 
 
+class ProfileOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    is_current: bool
+
+
+class ProfileCreate(BaseModel):
+    name: str
+
+
+class ProfileUpdate(BaseModel):
+    name: str
+
+
 class BulkImportCreate(BaseModel):
     urls: str
 

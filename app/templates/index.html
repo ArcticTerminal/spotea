@@ -2,7 +2,8 @@
 <html lang="en" style="background: #121212">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#121212" />
   <title>Spotea</title>
   <link rel="icon" href="/static/img/favicon.ico" />
   <link rel="stylesheet" href="/static/css/style.css" />
@@ -47,16 +48,58 @@
     <div class="topbar-inner">
       <h1 class="brand"><img src="/static/img/logo.svg" alt="" class="brand-logo" />Spotea</h1>
       <div class="topbar-actions">
-        <button type="button" id="refresh-feeds-btn" class="btn-icon" aria-label="Refresh feeds" title="Refresh feeds">
+        <div class="topbar-actions-inline">
+          <button type="button" id="refresh-feeds-btn" class="btn-icon" aria-label="Refresh feeds" title="Refresh feeds">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <polyline points="23 4 23 10 17 10"></polyline>
+              <polyline points="1 20 1 14 7 14"></polyline>
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+            </svg>
+          </button>
+          <button type="button" id="profile-switcher-btn" class="btn-ghost btn-profile" aria-haspopup="dialog" aria-label="Switch profile" title="Switch profile">
+            <span class="profile-row-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+            </span>
+            <span id="profile-switcher-name">Profile</span>
+          </button>
+          <form method="post" action="/logout">
+            <button type="submit" class="btn-ghost">Log out</button>
+          </form>
+        </div>
+
+        <button type="button" id="mobile-menu-btn" class="btn-icon mobile-menu-btn" aria-haspopup="menu" aria-expanded="false" aria-label="Menu" title="Menu">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <polyline points="23 4 23 10 17 10"></polyline>
-            <polyline points="1 20 1 14 7 14"></polyline>
-            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+            <line x1="3" y1="6" x2="21" y2="6"></line>
+            <line x1="3" y1="12" x2="21" y2="12"></line>
+            <line x1="3" y1="18" x2="21" y2="18"></line>
           </svg>
         </button>
-        <form method="post" action="/logout">
-          <button type="submit" class="btn-ghost">Log out</button>
-        </form>
+        <div id="mobile-menu" class="mobile-menu" role="menu" hidden>
+          <button type="button" id="mobile-menu-refresh" class="mobile-menu-item" role="menuitem">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <polyline points="23 4 23 10 17 10"></polyline>
+              <polyline points="1 20 1 14 7 14"></polyline>
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+            </svg>
+            <span>Refresh feeds</span>
+          </button>
+          <button type="button" id="mobile-menu-profile" class="mobile-menu-item" role="menuitem">
+            <span class="profile-row-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+            </span>
+            <span id="mobile-menu-profile-name">Switch profile</span>
+          </button>
+          <form method="post" action="/logout" class="mobile-menu-form">
+            <button type="submit" class="mobile-menu-item" role="menuitem">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                <polyline points="16 17 21 12 16 7"></polyline>
+                <line x1="21" y1="12" x2="9" y2="12"></line>
+              </svg>
+              <span>Log out</span>
+            </button>
+          </form>
+        </div>
       </div>
     </div>
   </header>
@@ -147,6 +190,8 @@
           class="library-search-input"
           placeholder="Search channels…"
           autocomplete="off"
+          autocapitalize="off"
+          autocorrect="off"
           aria-label="Search channels"
         />
         {% endif %}
@@ -196,7 +241,7 @@
       <div class="channels-panel-inner">
         <h2>Search channels</h2>
         <div class="channel-search">
-          <input type="text" id="channel-search-input" placeholder="Search YouTube channels…" autocomplete="off" />
+          <input type="text" id="channel-search-input" placeholder="Search YouTube channels…" autocomplete="off" autocapitalize="off" autocorrect="off" />
         </div>
         <ul id="channel-search-results" class="search-results"></ul>
 
@@ -272,6 +317,10 @@
           <span class="storage-total">Recently played</span>
           <button type="button" id="clear-recently-played" class="btn-quiet">Clear</button>
         </div>
+
+        <h2>Profiles</h2>
+        <p class="muted">Rename, re-icon, or remove a profile. Deleting one also removes its channels and downloads.</p>
+        <ul id="profiles-settings-list" class="profiles-list profiles-list-settings"></ul>
       </div>
     </section>
   </main>
@@ -319,6 +368,27 @@
     </div>
   </div>
 
+  <div id="profiles-overlay" class="modal-overlay" hidden>
+    <div class="modal modal-profiles">
+      <div class="modal-header">
+        <h2>Switch profile</h2>
+        <button type="button" id="profiles-close" class="modal-close" aria-label="Close">×</button>
+      </div>
+      <ul id="profiles-switch-list" class="profiles-list"></ul>
+      <form id="profiles-add-form" class="profiles-add-form">
+        <input
+          type="text"
+          id="profiles-add-input"
+          placeholder="New profile name…"
+          maxlength="100"
+          autocomplete="off"
+          required
+        />
+        <button type="submit" class="btn-primary">Add</button>
+      </form>
+    </div>
+  </div>
+
   <div id="backfill-overlay" class="overlay" hidden>
     <div class="backfill-overlay-content">
       <span class="spinner spinner-lg" role="status" aria-label="Fetching channel history"></span>
@@ -331,5 +401,6 @@
 
   <script src="/static/js/ui.js"></script>
   <script src="/static/js/app.js"></script>
+  <script src="/static/js/profiles.js"></script>
 </body>
 </html>

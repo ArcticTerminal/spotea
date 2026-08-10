@@ -1,8 +1,11 @@
+FROM mwader/static-ffmpeg:7.1 AS ffmpeg
+
 FROM python:3.12-slim
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
+# Static binary avoids pulling in Debian's ffmpeg package, which drags along
+# ~450MB of GPU/TTS/SMT libraries (mesa, llvm, flite, z3) unrelated to the
+# audio extraction this app actually does.
+COPY --from=ffmpeg /ffmpeg /usr/local/bin/ffmpeg
 
 WORKDIR /app
 

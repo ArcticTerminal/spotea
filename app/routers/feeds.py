@@ -8,9 +8,9 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
-from app.deps import get_db, require_login
+from app.deps import get_current_profile, get_db, require_login
 from app.downloader import download_avatar
-from app.models import Content, Feed
+from app.models import Content, Feed, User
 from app.rss import (
     ChannelResolutionError,
     InvalidFeedError,
@@ -39,8 +39,6 @@ from app.schemas import (
 from app.storage import delete_files_for_feed
 
 router = APIRouter(prefix="/feeds", tags=["feeds"], dependencies=[Depends(require_login)])
-
-DEFAULT_USER_ID = 1
 
 # In-memory only: fine for a single-process app, mirrors the download-progress
 # pattern in content.py. Keyed by feed_id. Terminal phase is "done" (done ==
@@ -235,7 +233,7 @@ class FeedAlreadyExistsError(Exception):
         self.channel_title = channel_title
 
 
-def _create_feed_from_rss_url(db: Session, rss_url: str) -> tuple[Feed, int, str | None]:
+def _create_feed_from_rss_url(db: Session, rss_url: str, user_id: int) -> tuple[Feed, int, str | None]:
     """DB-and-remaining-fetch half of adding a feed, given an already-resolved
     RSS URL. Split out from _add_feed_core so bulk import can resolve many
     URLs in parallel first (see _resolve_bulk_entry) and then only run this,
@@ -243,13 +241,13 @@ def _create_feed_from_rss_url(db: Session, rss_url: str) -> tuple[Feed, int, str
     returned channel_id's backfill — deferred via BackgroundTasks for a
     single add (keeps the response fast), inline for bulk import (which is
     already running off the request thread)."""
-    existing = db.query(Feed).filter(Feed.user_id == DEFAULT_USER_ID, Feed.rss_url == rss_url).first()
+    existing = db.query(Feed).filter(Feed.user_id == user_id, Feed.rss_url == rss_url).first()
     if existing:
         raise FeedAlreadyExistsError(rss_url, existing.channel_title)
 
     parsed = fetch_feed(rss_url)
 
-    feed = Feed(user_id=DEFAULT_USER_ID, rss_url=rss_url, channel_title=parsed.channel_title)
+    feed = Feed(user_id=user_id, rss_url=rss_url, channel_title=parsed.channel_title)
     db.add(feed)
     db.commit()
     db.refresh(feed)
@@ -261,19 +259,22 @@ def _create_feed_from_rss_url(db: Session, rss_url: str) -> tuple[Feed, int, str
     return feed, new_count, channel_id
 
 
-def _add_feed_core(db: Session, channel_url: str) -> tuple[Feed, int, str | None]:
+def _add_feed_core(db: Session, channel_url: str, user_id: int) -> tuple[Feed, int, str | None]:
     """Resolve, validate, save a feed, and apply its first RSS parse. Shared
     by the single-add route and bulk import so the two never diverge."""
     rss_url = resolve_feed_url(channel_url.strip())
-    return _create_feed_from_rss_url(db, rss_url)
+    return _create_feed_from_rss_url(db, rss_url, user_id)
 
 
 @router.post("", response_model=FeedAddResult, status_code=status.HTTP_201_CREATED)
 def add_feed(
-    payload: FeedCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db)
+    payload: FeedCreate,
+    background_tasks: BackgroundTasks,
+    profile: User = Depends(get_current_profile),
+    db: Session = Depends(get_db),
 ) -> FeedAddResult:
     try:
-        feed, new_count, channel_id = _add_feed_core(db, payload.channel_url)
+        feed, new_count, channel_id = _add_feed_core(db, payload.channel_url, profile.id)
     except FeedAlreadyExistsError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Feed already added") from exc
     except ChannelResolutionError as exc:
@@ -316,7 +317,7 @@ def _resolve_bulk_entry(line: str) -> dict:
         return {"line": line, "rss_url": None, "error": str(exc)}
 
 
-def _run_bulk_import(job_id: str, lines: list[str]) -> None:
+def _run_bulk_import(job_id: str, lines: list[str], user_id: int) -> None:
     progress = _import_progress[job_id]
 
     # Phase 1: resolve every line in parallel (see _resolve_bulk_entry) —
@@ -343,7 +344,9 @@ def _run_bulk_import(job_id: str, lines: list[str]) -> None:
 
             if resolved["error"] is None:
                 try:
-                    feed, _new_count, channel_id = _create_feed_from_rss_url(db, resolved["rss_url"])
+                    feed, _new_count, channel_id = _create_feed_from_rss_url(
+                        db, resolved["rss_url"], user_id
+                    )
                     entry["status"] = "added"
                     entry["error"] = None
                     entry["channel_title"] = feed.channel_title
@@ -361,14 +364,18 @@ def _run_bulk_import(job_id: str, lines: list[str]) -> None:
 
 
 @router.post("/import", response_model=BulkImportStartOut, status_code=status.HTTP_202_ACCEPTED)
-def start_bulk_import(payload: BulkImportCreate, background_tasks: BackgroundTasks) -> BulkImportStartOut:
+def start_bulk_import(
+    payload: BulkImportCreate,
+    background_tasks: BackgroundTasks,
+    profile: User = Depends(get_current_profile),
+) -> BulkImportStartOut:
     lines = [line.strip() for line in payload.urls.splitlines() if line.strip()]
     if not lines:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No channels given")
 
     job_id = secrets.token_urlsafe(8)
     _import_progress[job_id] = {"total": len(lines), "resolved": 0, "done": 0, "results": []}
-    background_tasks.add_task(_run_bulk_import, job_id, lines)
+    background_tasks.add_task(_run_bulk_import, job_id, lines, profile.id)
     return BulkImportStartOut(job_id=job_id, total=len(lines))
 
 
@@ -395,13 +402,17 @@ def search_feeds(q: str) -> list[ChannelSearchResultOut]:
 
 
 @router.get("", response_model=list[FeedOut])
-def list_feeds(db: Session = Depends(get_db)) -> list[Feed]:
-    return db.query(Feed).filter(Feed.user_id == DEFAULT_USER_ID).order_by(Feed.added_at.desc()).all()
+def list_feeds(
+    profile: User = Depends(get_current_profile), db: Session = Depends(get_db)
+) -> list[Feed]:
+    return db.query(Feed).filter(Feed.user_id == profile.id).order_by(Feed.added_at.desc()).all()
 
 
 @router.get("/{feed_id}/backfill-status", response_model=BackfillStatusOut)
-def get_backfill_status(feed_id: int, db: Session = Depends(get_db)) -> BackfillStatusOut:
-    feed = db.query(Feed).filter(Feed.id == feed_id, Feed.user_id == DEFAULT_USER_ID).first()
+def get_backfill_status(
+    feed_id: int, profile: User = Depends(get_current_profile), db: Session = Depends(get_db)
+) -> BackfillStatusOut:
+    feed = db.query(Feed).filter(Feed.id == feed_id, Feed.user_id == profile.id).first()
     if not feed:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Feed not found")
 
@@ -410,8 +421,10 @@ def get_backfill_status(feed_id: int, db: Session = Depends(get_db)) -> Backfill
 
 
 @router.delete("/{feed_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_feed(feed_id: int, db: Session = Depends(get_db)) -> None:
-    feed = db.query(Feed).filter(Feed.id == feed_id, Feed.user_id == DEFAULT_USER_ID).first()
+def delete_feed(
+    feed_id: int, profile: User = Depends(get_current_profile), db: Session = Depends(get_db)
+) -> None:
+    feed = db.query(Feed).filter(Feed.id == feed_id, Feed.user_id == profile.id).first()
     if not feed:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Feed not found")
 
@@ -424,8 +437,10 @@ def delete_feed(feed_id: int, db: Session = Depends(get_db)) -> None:
 
 
 @router.post("/refresh", response_model=RefreshResult)
-def refresh_feeds(db: Session = Depends(get_db)) -> RefreshResult:
-    feeds = db.query(Feed).filter(Feed.user_id == DEFAULT_USER_ID).all()
+def refresh_feeds(
+    profile: User = Depends(get_current_profile), db: Session = Depends(get_db)
+) -> RefreshResult:
+    feeds = db.query(Feed).filter(Feed.user_id == profile.id).all()
     if not feeds:
         return RefreshResult(new_content_count=0)
 

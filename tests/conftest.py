@@ -66,18 +66,25 @@ def _init_schema():
     yield
 
 
+DEFAULT_PROFILE_ID = 1
+
+
 @pytest.fixture(autouse=True)
 def _clean_tables(_init_schema):
-    """Runs after every test — deletes all rows except `users` (the single
-    default user every test implicitly relies on existing, same as the app
-    itself always assumes) so tests don't leak state into each other
-    without paying to recreate the DB file each time."""
+    """Runs after every test — deletes all rows except the bootstrap default
+    profile (`users.id == DEFAULT_PROFILE_ID`, every test implicitly relies
+    on it existing, same as the app itself always assumes) so tests don't
+    leak state into each other without paying to recreate the DB file each
+    time. Any extra profile a test created (see test_profiles_api.py) is
+    cleaned up here too, not just other tables — otherwise it'd silently
+    carry over into later tests' profile counts."""
     yield
     with engine.begin() as conn:
         for table in reversed(Base.metadata.sorted_tables):
             if table.name == "users":
-                continue
-            conn.execute(table.delete())
+                conn.execute(table.delete().where(table.c.id != DEFAULT_PROFILE_ID))
+            else:
+                conn.execute(table.delete())
 
 
 @pytest.fixture

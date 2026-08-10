@@ -6,16 +6,15 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.content_query import query_content_page
-from app.deps import get_db, require_login
+from app.deps import get_current_profile, get_db, require_login
 from app.downloader import DownloadError, download_audio
 from app.formatting import safe_filename
 from app.models import Content, User
 from app.rss import VIDEO_ID_RE
 from app.schemas import ContentOut, ContentPageOut, FavoriteOut, SavedOut, StatusOut
+from app.storage import unlink_if_unshared
 
 router = APIRouter(prefix="/content", tags=["content"], dependencies=[Depends(require_login)])
-
-DEFAULT_USER_ID = 1
 
 # In-memory only: fine for a single-process app, and progress ticks too
 # frequently to justify a DB write on every hook call.
@@ -31,9 +30,9 @@ AUDIO_MEDIA_TYPES = {
 }
 
 
-def _get_content_or_404(db: Session, content_id: int) -> Content:
+def _get_content_or_404(db: Session, content_id: int, user_id: int) -> Content:
     content = (
-        db.query(Content).filter(Content.id == content_id, Content.user_id == DEFAULT_USER_ID).first()
+        db.query(Content).filter(Content.id == content_id, Content.user_id == user_id).first()
     )
     if content is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Content not found")
@@ -65,8 +64,13 @@ def _run_download(content_id: int, video_id: str, quality: str, db: Session) -> 
 
 
 @router.get("", response_model=ContentPageOut)
-def list_content(page: int = 1, filter: str = "", db: Session = Depends(get_db)) -> ContentPageOut:
-    items, page, total_pages = query_content_page(db, DEFAULT_USER_ID, page, filter)
+def list_content(
+    page: int = 1,
+    filter: str = "",
+    profile: User = Depends(get_current_profile),
+    db: Session = Depends(get_db),
+) -> ContentPageOut:
+    items, page, total_pages = query_content_page(db, profile.id, page, filter)
     return ContentPageOut(
         items=[
             ContentOut(
@@ -96,10 +100,12 @@ def list_content(page: int = 1, filter: str = "", db: Session = Depends(get_db))
 # request is already committed to that route), and no request would ever
 # reach this one.
 @router.delete("/recently-played")
-def clear_recently_played(db: Session = Depends(get_db)) -> dict[str, int]:
+def clear_recently_played(
+    profile: User = Depends(get_current_profile), db: Session = Depends(get_db)
+) -> dict[str, int]:
     cleared = (
         db.query(Content)
-        .filter(Content.user_id == DEFAULT_USER_ID, Content.last_played_at.isnot(None))
+        .filter(Content.user_id == profile.id, Content.last_played_at.isnot(None))
         .update({"last_played_at": None}, synchronize_session=False)
     )
     db.commit()
@@ -108,9 +114,12 @@ def clear_recently_played(db: Session = Depends(get_db)) -> dict[str, int]:
 
 @router.post("/{content_id}/download", response_model=StatusOut)
 def start_download(
-    content_id: int, background_tasks: BackgroundTasks, db: Session = Depends(get_db)
+    content_id: int,
+    background_tasks: BackgroundTasks,
+    profile: User = Depends(get_current_profile),
+    db: Session = Depends(get_db),
 ) -> StatusOut:
-    content = _get_content_or_404(db, content_id)
+    content = _get_content_or_404(db, content_id, profile.id)
 
     if content.status == "downloading":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Already downloading")
@@ -122,15 +131,16 @@ def start_download(
     content.error_message = None
     db.commit()
 
-    user = db.get(User, DEFAULT_USER_ID)
-    background_tasks.add_task(_run_download, content.id, content.video_id, user.audio_quality, db)
+    background_tasks.add_task(_run_download, content.id, content.video_id, profile.audio_quality, db)
 
     return StatusOut(id=content.id, status=content.status, error_message=content.error_message)
 
 
 @router.get("/{content_id}/status", response_model=StatusOut)
-def get_status(content_id: int, db: Session = Depends(get_db)) -> StatusOut:
-    content = _get_content_or_404(db, content_id)
+def get_status(
+    content_id: int, profile: User = Depends(get_current_profile), db: Session = Depends(get_db)
+) -> StatusOut:
+    content = _get_content_or_404(db, content_id, profile.id)
     phase, percent = _download_progress.get(content_id, (None, None))
     return StatusOut(
         id=content.id,
@@ -142,40 +152,53 @@ def get_status(content_id: int, db: Session = Depends(get_db)) -> StatusOut:
 
 
 @router.post("/{content_id}/favorite", response_model=FavoriteOut)
-def add_favorite(content_id: int, db: Session = Depends(get_db)) -> FavoriteOut:
-    content = _get_content_or_404(db, content_id)
+def add_favorite(
+    content_id: int, profile: User = Depends(get_current_profile), db: Session = Depends(get_db)
+) -> FavoriteOut:
+    content = _get_content_or_404(db, content_id, profile.id)
     content.is_favorite = True
     db.commit()
     return FavoriteOut(id=content.id, is_favorite=content.is_favorite)
 
 
 @router.delete("/{content_id}/favorite", response_model=FavoriteOut)
-def remove_favorite(content_id: int, db: Session = Depends(get_db)) -> FavoriteOut:
-    content = _get_content_or_404(db, content_id)
+def remove_favorite(
+    content_id: int, profile: User = Depends(get_current_profile), db: Session = Depends(get_db)
+) -> FavoriteOut:
+    content = _get_content_or_404(db, content_id, profile.id)
     content.is_favorite = False
     db.commit()
     return FavoriteOut(id=content.id, is_favorite=content.is_favorite)
 
 
 @router.post("/{content_id}/save", response_model=SavedOut)
-def add_saved(content_id: int, db: Session = Depends(get_db)) -> SavedOut:
-    content = _get_content_or_404(db, content_id)
+def add_saved(
+    content_id: int, profile: User = Depends(get_current_profile), db: Session = Depends(get_db)
+) -> SavedOut:
+    content = _get_content_or_404(db, content_id, profile.id)
     content.is_saved = True
     db.commit()
     return SavedOut(id=content.id, is_saved=content.is_saved)
 
 
 @router.delete("/{content_id}/save", response_model=SavedOut)
-def remove_saved(content_id: int, db: Session = Depends(get_db)) -> SavedOut:
-    content = _get_content_or_404(db, content_id)
+def remove_saved(
+    content_id: int, profile: User = Depends(get_current_profile), db: Session = Depends(get_db)
+) -> SavedOut:
+    content = _get_content_or_404(db, content_id, profile.id)
     content.is_saved = False
     db.commit()
     return SavedOut(id=content.id, is_saved=content.is_saved)
 
 
 @router.get("/{content_id}/stream")
-def stream_content(content_id: int, download: bool = False, db: Session = Depends(get_db)) -> FileResponse:
-    content = _get_content_or_404(db, content_id)
+def stream_content(
+    content_id: int,
+    download: bool = False,
+    profile: User = Depends(get_current_profile),
+    db: Session = Depends(get_db),
+) -> FileResponse:
+    content = _get_content_or_404(db, content_id, profile.id)
 
     if content.status != "ready" or not content.file_path:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Content is not ready")
@@ -197,13 +220,13 @@ def stream_content(content_id: int, download: bool = False, db: Session = Depend
 
 
 @router.delete("/{content_id}", response_model=StatusOut)
-def delete_content(content_id: int, db: Session = Depends(get_db)) -> StatusOut:
-    content = _get_content_or_404(db, content_id)
+def delete_content(
+    content_id: int, profile: User = Depends(get_current_profile), db: Session = Depends(get_db)
+) -> StatusOut:
+    content = _get_content_or_404(db, content_id, profile.id)
 
     if content.file_path:
-        file_path = Path(content.file_path)
-        if file_path.exists():
-            file_path.unlink()
+        unlink_if_unshared(db, content.file_path, content.id)
 
     content.status = "not_downloaded"
     content.file_path = None
