@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 
-from app.models import Content, Feed
+from app.models import Content, Feed, User
 
 USER_ID = 1
 
@@ -94,3 +94,55 @@ def test_get_content_channel_filter(client, db_session):
     res = client.get("/content", params={"filter": "Nonexistent Channel"})
     assert res.status_code == 200
     assert res.json()["items"] == []
+
+
+def test_get_single_content_returns_full_shape(client, db_session):
+    _feed, items = _seed(db_session, count=3)
+
+    res = client.get(f"/content/{items[0].id}")
+    assert res.status_code == 200
+
+    body = res.json()
+    assert set(body.keys()) == {
+        "id",
+        "feed_id",
+        "channel_title",
+        "video_id",
+        "title",
+        "thumbnail_url",
+        "duration_seconds",
+        "published_at",
+        "status",
+        "added_at",
+        "is_favorite",
+        "is_saved",
+    }
+    assert body["id"] == items[0].id
+    assert body["channel_title"] == "Test Channel"
+
+
+def test_get_single_content_404_for_nonexistent_id(client, db_session):
+    res = client.get("/content/999999")
+    assert res.status_code == 404
+
+
+def test_get_single_content_404_for_another_users_content(client, db_session):
+    other_profile = User(name="Music")
+    db_session.add(other_profile)
+    db_session.commit()
+    db_session.refresh(other_profile)
+
+    other_feed = Feed(user_id=other_profile.id, rss_url="https://example.com/other", channel_title="Other")
+    db_session.add(other_feed)
+    db_session.commit()
+    db_session.refresh(other_feed)
+
+    other_content = Content(
+        feed_id=other_feed.id, user_id=other_profile.id, video_id="otheruser01", title="Not yours"
+    )
+    db_session.add(other_content)
+    db_session.commit()
+    db_session.refresh(other_content)
+
+    res = client.get(f"/content/{other_content.id}")
+    assert res.status_code == 404

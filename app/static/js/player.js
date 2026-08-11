@@ -1,6 +1,15 @@
 const SKIP_SECONDS = 15;
 const STATUS_POLL_MS = 1500;
 
+// prepareAudio() used to only ever run once per page load (player.html
+// renders exactly one track). It now also drives Home's player overlay
+// (see app.js's openPlayer), which can call it repeatedly for different
+// tracks in the same page — this tracks the in-flight download-status poll
+// across those calls so a later call can cancel a still-running earlier one
+// instead of leaving it to eventually hijack playback once its download
+// finishes (see prepareAudio's own comment at the top of its body).
+let _activePollTimer = null;
+
 // Range inputs can't style their "already played" portion natively, so paint it
 // with a gradient that tracks the current value.
 function paintRange(input) {
@@ -124,7 +133,14 @@ function setupPlayer() {
   // the player is what triggers a download, kicking one off on plain page load
   // would let mere prefetching fill the user's disk. Wait until the page is
   // genuinely being viewed.
-  whenVisible(() => prepareAudio(audio));
+  //
+  // Guarded on a real content id being present: true on player.html (Jinja
+  // fills #player-root's dataset server-side), false on index.html's overlay
+  // until a track is actually opened (see app.js's openPlayer, which sets the
+  // dataset itself and calls prepareAudio directly once it does).
+  if (document.getElementById("player-root").dataset.contentId) {
+    whenVisible(() => prepareAudio(audio));
+  }
 }
 
 // Lock-screen/notification-shade transport controls and Bluetooth/headset
@@ -203,6 +219,20 @@ async function prepareAudio(audio) {
   const streamUrl = root.dataset.stream;
   const contentId = root.dataset.contentId;
 
+  // Both only matter once this can run more than once per page (player.html
+  // never does; the Home overlay does, switching tracks). Without clearing
+  // the previous call's poll, a still-downloading earlier track can finish
+  // later and hijack playback out from under whatever's loaded now. Without
+  // resetting the error styling, a track opened after an earlier one failed
+  // would inherit its stale "Download failed" look before this call's own
+  // state has a chance to say otherwise.
+  if (_activePollTimer) {
+    clearInterval(_activePollTimer);
+    _activePollTimer = null;
+  }
+  prepare.classList.remove("is-error");
+  prepare.querySelector(".spinner").hidden = false;
+
   const startPlayback = () => {
     prepare.hidden = true;
     transport.classList.remove("is-disabled");
@@ -262,11 +292,13 @@ async function prepareAudio(audio) {
       consecutiveFailures = 0;
 
       if (data.status === "ready") {
-        clearInterval(timer);
+        clearInterval(_activePollTimer);
+        _activePollTimer = null;
         root.dataset.status = "ready";
         startPlayback();
       } else if (data.status === "error") {
-        clearInterval(timer);
+        clearInterval(_activePollTimer);
+        _activePollTimer = null;
         fail(data.error_message ? "Download failed" : "Download failed");
       } else if (data.phase === "converting") {
         prepareText.textContent = "Converting…";
@@ -276,13 +308,14 @@ async function prepareAudio(audio) {
     } catch (err) {
       consecutiveFailures += 1;
       if (consecutiveFailures >= MAX_CONSECUTIVE_POLL_FAILURES) {
-        clearInterval(timer);
+        clearInterval(_activePollTimer);
+        _activePollTimer = null;
         fail("Lost connection while downloading");
       }
     }
   };
 
-  const timer = setInterval(checkStatus, STATUS_POLL_MS);
+  _activePollTimer = setInterval(checkStatus, STATUS_POLL_MS);
 
   // Mobile browsers throttle/suspend timers for a backgrounded tab, so the
   // interval above may not have ticked in a while by the time the user
@@ -321,7 +354,26 @@ function setupFavorite() {
   });
 }
 
+// Player is reachable from many different pages (a channel, Favorites,
+// Saved, a Home shelf) — unlike channel.html/content_list.html's back-link,
+// which always means "back to Library", there's no single right fallback
+// destination here. Real browser history is, so prefer it whenever there's
+// a same-origin previous page to return to; the plain href="/" stays as the
+// no-JS/no-referrer fallback (e.g. the player opened directly, a fresh tab).
+function setupBackLink() {
+  const link = document.getElementById("player-back-link");
+  if (!link) return;
+
+  link.addEventListener("click", (event) => {
+    if (document.referrer && new URL(document.referrer).origin === window.location.origin) {
+      event.preventDefault();
+      history.back();
+    }
+  });
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   setupPlayer();
   setupFavorite();
+  setupBackLink();
 });

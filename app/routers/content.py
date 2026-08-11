@@ -3,7 +3,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from fastapi.responses import FileResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.content_query import query_content_page
 from app.deps import get_current_profile, get_db, require_login
@@ -91,6 +91,39 @@ def list_content(
         ],
         page=page,
         total_pages=total_pages,
+    )
+
+
+@router.get("/{content_id}", response_model=ContentOut)
+def get_content(
+    content_id: int, profile: User = Depends(get_current_profile), db: Session = Depends(get_db)
+) -> ContentOut:
+    """Single-item fetch — used by the Home player overlay (see app.js's
+    openPlayer) to populate itself for a track without a full page
+    navigation. joinedload's needed here (unlike _get_content_or_404, whose
+    other callers never touch .feed) since channel_title comes from it."""
+    content = (
+        db.query(Content)
+        .options(joinedload(Content.feed))
+        .filter(Content.id == content_id, Content.user_id == profile.id)
+        .first()
+    )
+    if content is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Content not found")
+
+    return ContentOut(
+        id=content.id,
+        feed_id=content.feed_id,
+        channel_title=content.feed.channel_title,
+        video_id=content.video_id,
+        title=content.title,
+        thumbnail_url=content.thumbnail_url,
+        duration_seconds=content.duration_seconds,
+        published_at=content.published_at,
+        status=content.status,
+        added_at=content.added_at,
+        is_favorite=content.is_favorite,
+        is_saved=content.is_saved,
     )
 
 

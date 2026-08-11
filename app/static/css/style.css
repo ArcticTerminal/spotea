@@ -340,6 +340,14 @@ select {
   height: 16px;
 }
 
+/* SVG isn't in scope for the UA stylesheet's [hidden] { display: none } rule
+   the way HTML elements are — same fix already applied to .btn-play-main
+   and .btn-quiet-icon's own icon-toggle buttons below. Needed here for the
+   mini-player's play/pause icon swap (see app.js's setupPlayerOverlay). */
+.btn-icon svg[hidden] {
+  display: none;
+}
+
 .btn-icon:hover {
   background: var(--bg-hover-strong);
   color: var(--white);
@@ -480,6 +488,20 @@ html[data-active-tab="settings"] .tab-btn[data-tab="settings"] {
   padding: 1rem;
   max-width: 1100px;
   margin: 0 auto;
+  /* Explore (before/without search results) and Settings can be shorter
+     than the viewport, unlike Home/Library which are always long. On real
+     mobile browsers, a page that isn't tall enough to scroll behaves
+     differently from one that is — their dynamic address-bar/toolbar chrome
+     can show/hide based on scroll capability, which shifts what
+     `position: fixed; bottom: 0` (the mini-player) actually renders against
+     between tabs, even though nothing about its own CSS changed. Padding
+     every tab out to at least a full viewport keeps that "is this page
+     scrollable" condition consistent across tabs instead of flipping
+     specifically on the short ones. dvh (dynamic viewport height, accounts
+     for that same address-bar chrome) with a vh fallback for browsers
+     without it. */
+  min-height: 100vh;
+  min-height: 100dvh;
 }
 
 .tab-panel[hidden] {
@@ -756,6 +778,21 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   font-size: 0.85rem;
   color: var(--text-muted);
   padding: 0.4rem 0.6rem;
+}
+
+.search-loading {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  padding: 0.4rem 0.6rem;
+}
+
+.search-loading .spinner {
+  width: 14px;
+  height: 14px;
+  border-width: 2px;
 }
 
 .btn-add-channel {
@@ -1947,6 +1984,11 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   font-weight: 600;
   margin-bottom: 1.5rem;
   cursor: pointer;
+  /* This is the first element on channel.html/content_list.html/player.html
+     — standalone pages with no .topbar above them to already clear a notch
+     or Dynamic Island (see .topbar-inner above). Adds on top of .layout's/
+     .player-card's own base padding rather than replacing it. */
+  margin-top: env(safe-area-inset-top, 0px);
 }
 
 .back-link svg {
@@ -2236,4 +2278,188 @@ audio {
 .btn-fav:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+/* Home/Library/Explore's in-page player — see
+   app/templates/_player_overlay.html. .player-card/.player-art/etc. above
+   are reused as-is for its contents; this is just the full-screen backdrop
+   and the persistent mini-bar that sits below it when collapsed. */
+
+.player-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  overflow-y: auto;
+  background: radial-gradient(circle at 50% 0%, var(--bg-page-glow) 0%, var(--bg-page) 60%);
+}
+
+.player-overlay[hidden] {
+  display: none;
+}
+
+/* Modeled on YouTube Music/Apple Music's mobile mini-player: a flush bar
+   docked to the bottom edge (not floating), a thin passive progress line
+   along its top edge, square art, title/artist, and a play/pause button as
+   the one dominant control. Tapping the bar itself (anywhere but the two
+   buttons) expands to the full overlay. */
+.mini-player {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 900;
+  background: var(--bg-raised);
+  box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.35);
+  /* Frosted-glass feel where supported; opaque --bg-raised is already a
+     complete, correct look on its own where it isn't. */
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+.mini-player[hidden] {
+  display: none;
+}
+
+.mini-player-progress {
+  height: 3px;
+  background: var(--track-empty);
+}
+
+.mini-player-progress-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--accent);
+}
+
+.mini-player-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem calc(0.5rem + env(safe-area-inset-bottom, 0px)) 0.75rem;
+}
+
+.mini-player-info {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: none;
+  padding: 0.15rem 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mini-player-thumb {
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  overflow: hidden;
+  flex-shrink: 0;
+  background: var(--bg-input);
+  display: block;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
+.mini-player-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.mini-player-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.mini-player-title {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mini-player-channel {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mini-player-playpause {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: none;
+  background: var(--white);
+  color: var(--bg-page);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.mini-player-playpause svg {
+  width: 18px;
+  height: 18px;
+}
+
+.mini-player-playpause svg[hidden] {
+  display: none;
+}
+
+/* Icon isn't optically centered in its own bounding box (more weight to the
+   right), which reads as visibly off-center inside a circular button. */
+#mini-icon-play {
+  margin-left: 2px;
+}
+
+.mini-player-close {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.mini-player-close svg {
+  width: 15px;
+  height: 15px;
+}
+
+.mini-player-close:hover {
+  color: var(--white);
+}
+
+@media (hover: hover) {
+  .mini-player-playpause:hover {
+    transform: scale(1.05);
+  }
+}
+
+/* Keeps Home's last shelf row from sitting underneath the floating mini-bar
+   — toggled on <body> (see app.js's openPlayer/closePlayer) rather than a
+   permanent reserved gap, matching the app's existing convention of keying
+   layout off toggled state (e.g. html[data-active-tab]) instead of
+   always-on padding. */
+body.has-mini-player .layout {
+  padding-bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px));
 }

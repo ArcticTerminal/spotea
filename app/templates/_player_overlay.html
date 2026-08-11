@@ -1,41 +1,25 @@
-<!doctype html>
-<html lang="en" style="background: #121212">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-  <meta name="theme-color" content="#121212" />
-  <title>{{ content.title }} — Spotea</title>
-  <link rel="icon" href="/static/img/favicon.ico" />
-  <link rel="manifest" href="/static/manifest.json" />
-  <link rel="apple-touch-icon" href="/static/img/apple-touch-icon.png" />
-  <meta name="mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="apple-mobile-web-app-title" content="Spotea" />
-  <link rel="stylesheet" href="/static/css/style.css" />
-</head>
-<body class="player-body">
-  <main
-    class="player-card"
-    id="player-root"
-    data-content-id="{{ content.id }}"
-    data-status="{{ content.status }}"
-    data-stream="/content/{{ content.id }}/stream"
-  >
-    <a class="back-link" id="player-back-link" href="/">
+<!-- Home/Library/Explore-only in-page player: an overlay (full "now playing"
+     view) plus a persistent mini-bar that stays visible while it's
+     collapsed. Reuses player.html's exact markup/ids so player.js's
+     setupPlayer/prepareAudio/setupMediaSession/setupFavorite work against it
+     unmodified — safe since index.html and player.html are never the same
+     document. Starts with an empty #player-root dataset (nothing loaded
+     until a track is actually opened, see app.js's openPlayer), unlike
+     player.html where Jinja fills it in server-side. -->
+<div id="player-overlay" class="player-overlay" hidden>
+  <div class="player-card" id="player-root" data-content-id="" data-status="" data-stream="">
+    <button type="button" class="back-link" id="overlay-collapse-btn" aria-label="Collapse">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5"></path><path d="M12 19l-7-7 7-7"></path></svg>
-      Back
-    </a>
+      Collapse
+    </button>
 
     <div class="player-art">
-      {% if content.thumbnail_url %}
-      <img src="{{ content.thumbnail_url }}" alt="" />
-      {% endif %}
+      <img id="player-art-img" alt="" hidden />
     </div>
 
     <div class="player-meta">
-      <h1 class="player-title">{{ content.title }}</h1>
-      <p class="player-channel">{{ content.feed.channel_title }}</p>
+      <h1 class="player-title"></h1>
+      <p class="player-channel"></p>
     </div>
 
     <audio id="audio" preload="metadata"></audio>
@@ -49,7 +33,7 @@
       <input type="range" id="seek-bar" class="range" min="0" max="100" step="0.1" value="0" aria-label="Seek" />
       <div class="progress-times">
         <span id="current-time">0:00</span>
-        <span id="duration-time">{{ content.duration_seconds | duration if content.duration_seconds else '0:00' }}</span>
+        <span id="duration-time">0:00</span>
       </div>
     </div>
 
@@ -82,18 +66,38 @@
       <button
         type="button"
         id="favorite-btn"
-        class="btn-fav{{ ' is-on' if content.is_favorite else '' }}"
-        data-content-id="{{ content.id }}"
-        data-favorite="{{ 'true' if content.is_favorite else 'false' }}"
-        aria-pressed="{{ 'true' if content.is_favorite else 'false' }}"
+        class="btn-fav"
+        data-content-id=""
+        data-favorite="false"
+        aria-pressed="false"
         aria-label="Favorite"
       >
-        <svg viewBox="0 0 24 24" fill="{{ 'currentColor' if content.is_favorite else 'none' }}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-7.5-4.7-9.4-9A5.3 5.3 0 0 1 12 6.6 5.3 5.3 0 0 1 21.4 12c-1.9 4.3-9.4 9-9.4 9z"></path></svg>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-7.5-4.7-9.4-9A5.3 5.3 0 0 1 12 6.6 5.3 5.3 0 0 1 21.4 12c-1.9 4.3-9.4 9-9.4 9z"></path></svg>
       </button>
     </div>
-  </main>
+  </div>
+</div>
 
-  <script src="/static/js/ui.js"></script>
-  <script src="/static/js/player.js"></script>
-</body>
-</html>
+<div id="mini-player" class="mini-player" hidden>
+  <div class="mini-player-progress">
+    <div id="mini-player-progress-fill" class="mini-player-progress-fill"></div>
+  </div>
+  <div class="mini-player-bar">
+    <button type="button" id="mini-player-expand" class="mini-player-info" aria-label="Expand player">
+      <span class="mini-player-thumb">
+        <img id="mini-player-art-img" alt="" hidden />
+      </span>
+      <span class="mini-player-text">
+        <span id="mini-player-title" class="mini-player-title"></span>
+        <span id="mini-player-channel" class="mini-player-channel"></span>
+      </span>
+    </button>
+    <button type="button" id="mini-player-playpause" class="mini-player-playpause" aria-label="Play">
+      <svg id="mini-icon-play" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"></path></svg>
+      <svg id="mini-icon-pause" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" hidden><path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z"></path></svg>
+    </button>
+    <button type="button" id="mini-player-close" class="mini-player-close" aria-label="Close player">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+    </button>
+  </div>
+</div>

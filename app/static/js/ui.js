@@ -1,6 +1,20 @@
 // Shared confirm dialog + toast + duration formatting. Loaded before the
 // page-specific script on every page, so these are always available.
 
+// Every page here is rendered once, server-side, with nothing that refreshes
+// its dynamic content (Recently Played, storage usage, a channel's track
+// list, ...) afterward — a normal navigation is fine since it always re-runs
+// the server route, but the browser's back/forward cache can restore a
+// page's exact pre-navigation DOM without contacting the server at all
+// (e.g. hitting the player's back button, or any native back gesture, after
+// having played/downloaded something). That silently shows stale data with
+// no error or signal that anything's wrong. Forcing one real reload whenever
+// a page comes back this way is simpler and more robust than trying to track
+// every specific action that could have changed something while away.
+window.addEventListener("pageshow", (event) => {
+  if (event.persisted) window.location.reload();
+});
+
 // Mirrors format_duration() in app/formatting.py (M:SS, or H:MM:SS past an
 // hour) — used by both the player's elapsed/duration display and the
 // content cards' duration badge.
