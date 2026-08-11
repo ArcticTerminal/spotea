@@ -113,7 +113,10 @@
     <section id="tab-home" class="tab-panel" data-tab-panel="home">
       {% if home_recent_channels %}
       <div class="shelf">
-        <h2 class="shelf-title">Recently followed</h2>
+        <div class="shelf-header">
+          <h2 class="shelf-title">Recently followed</h2>
+          <a class="shelf-see-more" href="/#library">See more ›</a>
+        </div>
         <div class="channel-row" id="home-channel-row">
           {% for feed in home_recent_channels %}
           <button type="button" class="channel-chip{{ ' has-avatar' if feed.avatar_url else '' }}" data-feed-id="{{ feed.id }}">
@@ -130,7 +133,10 @@
       {% else %}
 
       <div class="shelf">
-        <h2 class="shelf-title">New uploads</h2>
+        <div class="shelf-header">
+          <h2 class="shelf-title">New uploads</h2>
+          <a class="shelf-see-more" href="/new-uploads">See more ›</a>
+        </div>
         {% if home_new_uploads %}
         <div class="shelf-row">
           {% for item in home_new_uploads %}
@@ -142,20 +148,24 @@
         {% endif %}
       </div>
 
-      {% if home_recently_played %}
-      <div class="shelf">
-        <h2 class="shelf-title">Recently played</h2>
-        <div class="shelf-row">
+      <div class="shelf" id="home-shelf-recently-played" {% if not home_recently_played %}hidden{% endif %}>
+        <div class="shelf-header">
+          <h2 class="shelf-title">Recently played</h2>
+          <a class="shelf-see-more" href="/recently-played">See more ›</a>
+        </div>
+        <div class="shelf-row" id="home-recently-played-row">
           {% for item in home_recently_played %}
           {% include "_content_card.html" %}
           {% endfor %}
         </div>
       </div>
-      {% endif %}
 
       {% if home_favorites %}
       <div class="shelf">
-        <h2 class="shelf-title">Favorites</h2>
+        <div class="shelf-header">
+          <h2 class="shelf-title">Favorites</h2>
+          <a class="shelf-see-more" href="/favorites">See more ›</a>
+        </div>
         <div class="shelf-row">
           {% for item in home_favorites %}
           {% include "_content_card.html" %}
@@ -165,7 +175,10 @@
       {% endif %}
 
       <div class="shelf" id="home-shelf-saved" {% if not home_saved %}hidden{% endif %}>
-        <h2 class="shelf-title">Saved for later</h2>
+        <div class="shelf-header">
+          <h2 class="shelf-title">Saved for later</h2>
+          <a class="shelf-see-more" href="/saved">See more ›</a>
+        </div>
         <div class="shelf-row" id="home-saved-row">
           {% for item in home_saved %}
           {% include "_content_card.html" %}
@@ -210,6 +223,24 @@
           <span class="channel-card-info">
             <span class="channel-card-title">Saved for later</span>
             <span class="channel-card-count">{{ saved_count }} video{{ '' if saved_count == 1 else 's' }}</span>
+          </span>
+        </a>
+        <a class="channel-card" href="/new-uploads">
+          <span class="channel-card-avatar channel-card-icon is-new-uploads">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+          </span>
+          <span class="channel-card-info">
+            <span class="channel-card-title">New Uploads</span>
+            <span class="channel-card-count">{{ new_uploads_count }} video{{ '' if new_uploads_count == 1 else 's' }}</span>
+          </span>
+        </a>
+        <a class="channel-card" href="/recently-played">
+          <span class="channel-card-avatar channel-card-icon is-recently-played">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+          </span>
+          <span class="channel-card-info">
+            <span class="channel-card-title">Recently Played</span>
+            <span class="channel-card-count">{{ recently_played_count }} video{{ '' if recently_played_count == 1 else 's' }}</span>
           </span>
         </a>
         {% for feed in feeds %}

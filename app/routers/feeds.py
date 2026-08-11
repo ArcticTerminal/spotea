@@ -13,6 +13,7 @@ from app.feed_sync import REFRESH_POOL_SIZE, apply_feed_data, fetch_feed_data
 from app.feed_sync import refresh_feeds as sync_refresh_feeds
 from app.models import Content, Feed, User
 from app.rss import (
+    SHORT_MAX_DURATION_SECONDS,
     ChannelResolutionError,
     InvalidFeedError,
     channel_feed_url,
@@ -98,7 +99,16 @@ def _run_backfill(feed_id: int, channel_id: str, db: Session) -> None:
             row.video_id
             for row in db.query(Content.video_id).filter(Content.user_id == feed.user_id)
         }
-        new_entries = [v for v in videos if v.video_id not in existing_ids]
+        # Same defensive Shorts guard as feed_sync.apply_feed_data — the
+        # Videos-tab playlist backfill relies on is supposed to exclude
+        # Shorts already, but that's an unofficial convention, not a
+        # guarantee.
+        new_entries = [
+            v
+            for v in videos
+            if v.video_id not in existing_ids
+            and not (v.duration_seconds is not None and v.duration_seconds <= SHORT_MAX_DURATION_SECONDS)
+        ]
 
         oldest_known = (
             db.query(func.min(Content.published_at))

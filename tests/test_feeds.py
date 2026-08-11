@@ -111,6 +111,79 @@ def test_apply_feed_data_skips_video_already_owned_by_another_feed(db_session):
     assert rows[0].feed_id == feed_a.id
 
 
+def test_apply_feed_data_marks_new_rows_as_new_upload(db_session):
+    feed = Feed(user_id=USER_ID, rss_url="https://example.com/new-upload-feed", channel_title="C")
+    db_session.add(feed)
+    db_session.commit()
+    db_session.refresh(feed)
+
+    parsed = ParsedFeed(
+        channel_title="C",
+        entries=[ParsedEntry(video_id="freshvid01", title="Fresh video", thumbnail_url=None, published_at=None)],
+    )
+    result = FeedFetchResult(parsed=parsed, durations={}, channel_id=None, avatar_url=None)
+
+    apply_feed_data(db_session, feed, result)
+
+    row = db_session.query(Content).filter(Content.video_id == "freshvid01").first()
+    assert row.is_new_upload is True
+
+
+def test_apply_feed_data_skips_likely_shorts(db_session):
+    feed = Feed(user_id=USER_ID, rss_url="https://example.com/shorts-feed", channel_title="C")
+    db_session.add(feed)
+    db_session.commit()
+    db_session.refresh(feed)
+
+    parsed = ParsedFeed(
+        channel_title="C",
+        entries=[
+            ParsedEntry(video_id="shortvid01", title="A Short", thumbnail_url=None, published_at=None),
+            ParsedEntry(video_id="longvid001", title="A regular video", thumbnail_url=None, published_at=None),
+        ],
+    )
+    result = FeedFetchResult(
+        parsed=parsed, durations={"shortvid01": 45, "longvid001": 300}, channel_id=None, avatar_url=None
+    )
+
+    new_count = apply_feed_data(db_session, feed, result)
+
+    assert new_count == 1
+    remaining = {row.video_id for row in db_session.query(Content).filter(Content.feed_id == feed.id)}
+    assert remaining == {"longvid001"}
+
+
+def test_apply_feed_data_remarks_existing_row_still_in_feed_as_new_upload(db_session):
+    """A video already in the DB (e.g. from a past backfill) that's still
+    part of the channel's current RSS window should get picked up as a new
+    upload too — this is what lets New Uploads self-heal/populate on the
+    next refresh instead of staying permanently empty for pre-existing rows."""
+    feed = Feed(user_id=USER_ID, rss_url="https://example.com/remark-feed", channel_title="C")
+    db_session.add(feed)
+    db_session.commit()
+    db_session.refresh(feed)
+
+    db_session.add(
+        Content(
+            feed_id=feed.id, user_id=USER_ID, video_id="existingv01", title="Old row",
+            duration_seconds=300, is_new_upload=False,
+        )
+    )
+    db_session.commit()
+
+    parsed = ParsedFeed(
+        channel_title="C",
+        entries=[ParsedEntry(video_id="existingv01", title="Old row", thumbnail_url=None, published_at=None)],
+    )
+    result = FeedFetchResult(parsed=parsed, durations={}, channel_id=None, avatar_url=None)
+
+    new_count = apply_feed_data(db_session, feed, result)
+
+    assert new_count == 0  # not a new row
+    row = db_session.query(Content).filter(Content.video_id == "existingv01").first()
+    assert row.is_new_upload is True
+
+
 def test_refresh_feeds_isolates_one_failing_feed(db_session, monkeypatch):
     feed_fails = Feed(user_id=USER_ID, rss_url="https://example.com/fails", channel_title="Fails")
     feed_ok = Feed(user_id=USER_ID, rss_url="https://example.com/ok", channel_title="Ok")
@@ -164,6 +237,50 @@ def test_run_backfill_marks_done_on_unexpected_failure(db_session, monkeypatch):
     feeds_module._run_backfill(feed.id, channel_id, db_session)
 
     assert feeds_module._backfill_progress[feed.id][0] == "done"
+
+
+def test_run_backfill_does_not_mark_entries_as_new_upload(db_session, monkeypatch):
+    channel_id = "UCbackfill0001"
+    feed = Feed(user_id=USER_ID, rss_url=channel_feed_url(channel_id), channel_title="History", followed=True)
+    db_session.add(feed)
+    db_session.commit()
+    db_session.refresh(feed)
+
+    monkeypatch.setattr(
+        feeds_module,
+        "fetch_channel_all_videos",
+        lambda channel_id, on_progress=None: [
+            BackfillEntry(video_id="oldvid0001", title="Old video", thumbnail_url=None, duration_seconds=None)
+        ],
+    )
+
+    feeds_module._run_backfill(feed.id, channel_id, db_session)
+
+    row = db_session.query(Content).filter(Content.video_id == "oldvid0001").first()
+    assert row is not None
+    assert row.is_new_upload is False
+
+
+def test_run_backfill_skips_likely_shorts(db_session, monkeypatch):
+    channel_id = "UCbackfillshorts"
+    feed = Feed(user_id=USER_ID, rss_url=channel_feed_url(channel_id), channel_title="History", followed=True)
+    db_session.add(feed)
+    db_session.commit()
+    db_session.refresh(feed)
+
+    monkeypatch.setattr(
+        feeds_module,
+        "fetch_channel_all_videos",
+        lambda channel_id, on_progress=None: [
+            BackfillEntry(video_id="shortvid02", title="A Short", thumbnail_url=None, duration_seconds=30),
+            BackfillEntry(video_id="longvid002", title="A regular video", thumbnail_url=None, duration_seconds=600),
+        ],
+    )
+
+    feeds_module._run_backfill(feed.id, channel_id, db_session)
+
+    remaining = {row.video_id for row in db_session.query(Content).filter(Content.feed_id == feed.id)}
+    assert remaining == {"longvid002"}
 
 
 def test_unfollowing_a_channel_with_no_engaged_content_deletes_it_entirely(client, db_session):

@@ -14,6 +14,7 @@ _COLUMN_MIGRATIONS = [
     ("feeds", "avatar_url", "VARCHAR(500)"),
     ("feeds", "followed", "BOOLEAN NOT NULL DEFAULT 1"),
     ("content", "is_preview", "BOOLEAN NOT NULL DEFAULT 0"),
+    ("content", "is_new_upload", "BOOLEAN NOT NULL DEFAULT 0"),
 ]
 
 

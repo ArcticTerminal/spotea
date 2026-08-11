@@ -211,7 +211,14 @@ function whenVisible(run) {
 // Downloads are triggered by playing something, not by a separate button on the
 // card. If the audio isn't on disk yet, kick off the download here and hold the
 // transport disabled until the file is ready.
-async function prepareAudio(audio) {
+//
+// onStart (optional) fires exactly once, right as audio.src is actually
+// assigned — the moment the server records this as a play (see
+// routers/content.py's stream_content, which sets last_played_at on that
+// same request). player.html has nothing to do with this; it's how the Home
+// overlay (see app.js's openPlayer) knows to live-patch the Recently Played
+// shelf instead of leaving it stuck at whatever it was at page load.
+async function prepareAudio(audio, onStart) {
   const root = document.getElementById("player-root");
   const prepare = document.getElementById("prepare-state");
   const prepareText = document.getElementById("prepare-text");
@@ -237,6 +244,7 @@ async function prepareAudio(audio) {
     prepare.hidden = true;
     transport.classList.remove("is-disabled");
     audio.src = streamUrl;
+    if (onStart) onStart();
     audio.play().catch(() => {
       /* Autoplay may be blocked; the play button still works. */
     });

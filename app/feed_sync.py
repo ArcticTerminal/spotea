@@ -8,6 +8,7 @@ from app.database import SessionLocal
 from app.downloader import download_avatar
 from app.models import Content, Feed
 from app.rss import (
+    SHORT_MAX_DURATION_SECONDS,
     InvalidFeedError,
     ParsedFeed,
     extract_channel_id,
@@ -118,6 +119,9 @@ def apply_feed_data(db: Session, feed: Feed, result: FeedFetchResult) -> int:
 
     new_count = 0
     for entry in new_entries:
+        duration = result.durations.get(entry.video_id)
+        if duration is not None and duration <= SHORT_MAX_DURATION_SECONDS:
+            continue  # likely a Short that slipped through the Videos-tab fetch
         db.add(
             Content(
                 feed_id=feed.id,
@@ -126,7 +130,14 @@ def apply_feed_data(db: Session, feed: Feed, result: FeedFetchResult) -> int:
                 title=entry.title,
                 thumbnail_url=entry.thumbnail_url,
                 published_at=entry.published_at,
-                duration_seconds=result.durations.get(entry.video_id),
+                duration_seconds=duration,
+                # This is the only place an RSS-parsed row is ever inserted —
+                # both a channel's initial fetch (when followed) and every
+                # later routine refresh come through here, and both count as
+                # a "new upload" (see Content.is_new_upload's docstring).
+                # _run_backfill's own inserts bypass this function entirely,
+                # which is what keeps historical backfill out.
+                is_new_upload=True,
             )
         )
         new_count += 1
@@ -134,6 +145,20 @@ def apply_feed_data(db: Session, feed: Feed, result: FeedFetchResult) -> int:
     for video_id in missing_duration_ids:
         if video_id in result.durations:
             existing_rows[video_id].duration_seconds = result.durations[video_id]
+
+    # A video already in the DB (however it originally got there) that's
+    # still part of the channel's current RSS window is, in the sense that
+    # actually matters to a user, a "new upload" too — this is what makes
+    # New Uploads self-heal/populate from whatever a channel's feed
+    # currently shows on the next refresh, rather than staying permanently
+    # empty for every video that existed before this column did. Same
+    # Shorts guard as new inserts, using whatever duration is on file.
+    for video_id, row in existing_rows.items():
+        if row.is_new_upload:
+            continue
+        if row.duration_seconds is not None and row.duration_seconds <= SHORT_MAX_DURATION_SECONDS:
+            continue
+        row.is_new_upload = True
 
     db.commit()
     return new_count

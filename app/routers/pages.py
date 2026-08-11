@@ -60,15 +60,21 @@ def home(
     # this used to be one `.all()` over every content row the user has ever
     # had (sliced in Python per shelf), which got very slow once backfilling
     # full channel histories pushed that past a few thousand rows.
+    # is_new_upload (set in feed_sync.apply_feed_data) is what actually
+    # means "new upload" here — an RSS-sourced row, as opposed to one from
+    # _run_backfill's full-history scan or an Explore preview. The
+    # feed.followed check on top of it is still needed as a safety net: it's
+    # the same reasoning content_query.py's is_preview carve-out documents —
     # Explore-added content keeps a live feed_id even after being
     # favorited/saved, but that feed is only a placeholder (followed=False)
-    # unless the user actually follows the channel — see
-    # routers/feeds.py's _get_or_create_placeholder_feed. New Uploads is
-    # meant to reflect channels the user follows, so a one-off Explore
-    # listen shouldn't land here just because it got favorited.
+    # unless the user actually follows the channel (see
+    # routers/feeds.py's _get_or_create_placeholder_feed) — and it also
+    # covers a channel that was later unfollowed but had some content kept
+    # (see routers/feeds.py's delete_feed), whose is_new_upload=True rows
+    # shouldn't keep showing here as if still followed.
     home_new_uploads = (
         _home_shelf_query(db, profile.id)
-        .filter(Content.feed.has(Feed.followed.is_(True)))
+        .filter(Content.is_new_upload.is_(True), Content.feed.has(Feed.followed.is_(True)))
         .order_by(Content.published_at.desc())
         .limit(HOME_SHELF_LIMIT)
         .all()
@@ -120,6 +126,19 @@ def home(
         .filter(Content.user_id == profile.id, Content.is_saved.is_(True))
         .scalar()
     )
+    # Matches query_content_page's __new_uploads__/__played__ filters exactly
+    # (see content_query.py) so these Library-card counts never disagree
+    # with what the page they link to actually lists.
+    new_uploads_count = (
+        db.query(func.count(Content.id))
+        .filter(Content.user_id == profile.id, Content.is_new_upload.is_(True), Content.is_preview.is_(False))
+        .scalar()
+    )
+    recently_played_count = (
+        db.query(func.count(Content.id))
+        .filter(Content.user_id == profile.id, Content.last_played_at.isnot(None))
+        .scalar()
+    )
 
     return templates.TemplateResponse(
         request,
@@ -130,6 +149,8 @@ def home(
             "channel_video_counts": channel_video_counts,
             "favorites_count": favorites_count,
             "saved_count": saved_count,
+            "new_uploads_count": new_uploads_count,
+            "recently_played_count": recently_played_count,
             "usage": usage,
             "audio_quality": profile.audio_quality,
             "feed_refresh_interval_minutes": app_settings.feed_refresh_interval_minutes,
@@ -213,6 +234,46 @@ def saved_page(
         filter_value="__saved__",
         title="Saved for later",
         empty_message="Nothing saved yet.",
+        page=page,
+    )
+
+
+@router.get("/new-uploads", response_class=HTMLResponse)
+def new_uploads_page(
+    request: Request,
+    page: int = 1,
+    profile: User = Depends(get_current_profile),
+    db: Session = Depends(get_db),
+) -> HTMLResponse:
+    return _content_list_page(
+        request,
+        db,
+        user_id=profile.id,
+        kind="new-uploads",
+        is_match=Content.is_new_upload.is_(True),
+        filter_value="__new_uploads__",
+        title="New Uploads",
+        empty_message="No new uploads yet.",
+        page=page,
+    )
+
+
+@router.get("/recently-played", response_class=HTMLResponse)
+def recently_played_page(
+    request: Request,
+    page: int = 1,
+    profile: User = Depends(get_current_profile),
+    db: Session = Depends(get_db),
+) -> HTMLResponse:
+    return _content_list_page(
+        request,
+        db,
+        user_id=profile.id,
+        kind="recently-played",
+        is_match=Content.last_played_at.isnot(None),
+        filter_value="__played__",
+        title="Recently Played",
+        empty_message="Nothing played yet.",
         page=page,
     )
 

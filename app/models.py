@@ -89,6 +89,13 @@ class Content(Base):
     # played (see routers/pages.py's home_recently_played). No automatic
     # cleanup — it stays around indefinitely otherwise.
     is_preview: Mapped[bool] = mapped_column(default=False)
+    # True for a row inserted by an RSS parse (a channel's initial fetch when
+    # followed, or any later routine refresh — see feed_sync.apply_feed_data,
+    # the only place this is set) — False for _run_backfill's direct inserts
+    # (the full-history scan) and Explore's add_single_video. This is what
+    # "New Uploads" (Home shelf and Library's full playlist) actually means:
+    # RSS-sourced content, not a channel's backfilled-in history.
+    is_new_upload: Mapped[bool] = mapped_column(default=False)
 
     feed: Mapped["Feed"] = relationship(back_populates="content")
     user: Mapped["User"] = relationship(back_populates="content")

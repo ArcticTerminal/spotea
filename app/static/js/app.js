@@ -28,6 +28,34 @@ function syncSavedShelf(contentId, isSaved) {
   shelf.hidden = row.children.length === 0;
 }
 
+// Same problem as syncSavedShelf above, for a different reason: this shelf
+// used to always end up fresh "for free" because playing anything meant
+// navigating to /player/{id} and back, which re-rendered the whole page.
+// Now that Home/Library/Explore play through the in-page overlay (see
+// openPlayer) instead of navigating away at all, nothing re-runs the server
+// route afterward — a replay has to patch this shelf in live or it just
+// never updates for the rest of the session. Only handles moving a card
+// that's rendered *somewhere* on Home to the front of this shelf (cloning,
+// like syncSavedShelf) — a track that's never appeared as a card here (e.g.
+// played once via Explore search and never shown on Home) is left for the
+// next real page load to pick up, rather than hand-building the card's
+// markup a second time in JS just for that edge case.
+function syncRecentlyPlayedShelf(contentId) {
+  const shelf = document.getElementById("home-shelf-recently-played");
+  const row = document.getElementById("home-recently-played-row");
+  if (!shelf || !row) return;
+
+  const existingInRow = row.querySelector(`.card[data-content-id="${contentId}"]`);
+  const source = existingInRow || document.querySelector(`.card[data-content-id="${contentId}"]`);
+  if (!source) return;
+
+  if (existingInRow) existingInRow.remove();
+  const clone = source.cloneNode(true);
+  clone.hidden = false;
+  row.prepend(clone);
+  shelf.hidden = false;
+}
+
 function setupHomeChannels() {
   const row = document.getElementById("home-channel-row");
   if (!row) return;
@@ -556,7 +584,7 @@ async function openPlayer(contentId) {
   document.getElementById("mini-player").hidden = false;
   document.body.classList.add("has-mini-player");
 
-  prepareAudio(audio);
+  prepareAudio(audio, () => syncRecentlyPlayedShelf(contentId));
 }
 
 function closePlayer() {

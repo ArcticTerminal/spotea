@@ -13,6 +13,18 @@ from app.config import settings
 from app.downloader import YOUTUBE_WATCH_URL, download_avatar
 
 VIDEO_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{11}$")
+
+# Fetching a channel's Videos-tab playlist (UULF, see longform_feed_url)
+# instead of its full-uploads feed is supposed to exclude Shorts entirely —
+# but that's an unofficial, undocumented YouTube convention, and in practice
+# a Short occasionally still turns up there anyway. This is a defensive
+# second check applied at insert time (see feed_sync.apply_feed_data and
+# routers/feeds.py's _run_backfill) using each entry's already-fetched
+# duration, not a replacement for the UULF trick — classic Shorts are ≤60s;
+# YouTube widened the format to up to 3 minutes in 2024, but that upper
+# range overlaps with plenty of legitimate short-form long-content videos,
+# so this stays conservative rather than risk dropping real content.
+SHORT_MAX_DURATION_SECONDS = 60
 CHANNEL_ID_URL_RE = re.compile(r"youtube\.com/channel/(UC[\w-]{22})")
 CHANNEL_ID_PARAM_RE = re.compile(r"channel_id=([\w-]+)")
 

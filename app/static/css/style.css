@@ -54,6 +54,10 @@
   /* Pinned "Favorites" tile */
   --favorite: #e0245e;
 
+  /* Pinned "New Uploads" / "Recently Played" tiles */
+  --new-upload: #3b82f6;
+  --recently-played: #8b5cf6;
+
   /* Seek/volume slider's unfilled track */
   --track-empty: #4d4d4d;
 }
@@ -1072,9 +1076,30 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   margin-bottom: 1.75rem;
 }
 
-.shelf-title {
+.shelf-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
   margin: 0 0 0.75rem;
+}
+
+.shelf-title {
+  margin: 0;
   font-size: 1.1rem;
+}
+
+.shelf-see-more {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: 0.82rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.shelf-see-more:hover {
+  color: var(--white);
 }
 
 .shelf-empty {
@@ -1289,6 +1314,14 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
 
 .channel-card-icon.is-saved {
   background: var(--accent);
+}
+
+.channel-card-icon.is-new-uploads {
+  background: var(--new-upload);
+}
+
+.channel-card-icon.is-recently-played {
+  background: var(--recently-played);
 }
 
 .channel-hero-avatar.channel-card-icon svg {

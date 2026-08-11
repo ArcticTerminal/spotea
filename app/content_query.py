@@ -38,17 +38,17 @@ def query_content_page(
     # practice (favoriting/saving already clears is_preview as a side
     # effect), but the channel-detail page (feed_id) could otherwise be
     # reached directly for a placeholder feed, so it's filtered here for
-    # every caller, not just some.
-    query = (
-        db.query(Content)
-        .options(joinedload(Content.feed))
-        .filter(Content.user_id == user_id, Content.is_preview.is_(False))
-    )
+    # every caller, not just some — except __played__ (Recently Played),
+    # where a preview that's actually been listened to still belongs on the
+    # list; same carve-out pages.py's home_recently_played shelf documents.
+    query = db.query(Content).options(joinedload(Content.feed)).filter(Content.user_id == user_id)
+    if filter != "__played__":
+        query = query.filter(Content.is_preview.is_(False))
 
     if feed_id is not None:
         query = query.filter(Content.feed_id == feed_id)
 
-    needs_feed_join = filter not in ("", "__favorites__", "__saved__", "__played__")
+    needs_feed_join = filter not in ("", "__favorites__", "__saved__", "__played__", "__new_uploads__")
     if needs_feed_join:
         query = query.join(Feed)
 
@@ -58,6 +58,8 @@ def query_content_page(
         query = query.filter(Content.is_saved.is_(True))
     elif filter == "__played__":
         query = query.filter(Content.last_played_at.isnot(None))
+    elif filter == "__new_uploads__":
+        query = query.filter(Content.is_new_upload.is_(True))
     elif filter.startswith(CHANNEL_FILTER_PREFIX):
         channel_title = filter[len(CHANNEL_FILTER_PREFIX) :]
         query = query.filter(Feed.channel_title == channel_title)
@@ -68,7 +70,10 @@ def query_content_page(
         pattern = f"%{filter}%"
         query = query.filter(or_(Feed.channel_title.ilike(pattern), Content.title.ilike(pattern)))
 
-    query = query.order_by(Content.published_at.desc())
+    # Recently Played means "most recently played," not "most recently
+    # published" — every other filter sorts by publish date.
+    order_column = Content.last_played_at if filter == "__played__" else Content.published_at
+    query = query.order_by(order_column.desc())
 
     total_items = query.count()
     total_pages = max(1, -(-total_items // page_size))
