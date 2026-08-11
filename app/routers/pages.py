@@ -60,8 +60,15 @@ def home(
     # this used to be one `.all()` over every content row the user has ever
     # had (sliced in Python per shelf), which got very slow once backfilling
     # full channel histories pushed that past a few thousand rows.
+    # Explore-added content keeps a live feed_id even after being
+    # favorited/saved, but that feed is only a placeholder (followed=False)
+    # unless the user actually follows the channel — see
+    # routers/feeds.py's _get_or_create_placeholder_feed. New Uploads is
+    # meant to reflect channels the user follows, so a one-off Explore
+    # listen shouldn't land here just because it got favorited.
     home_new_uploads = (
         _home_shelf_query(db, profile.id)
+        .filter(Content.feed.has(Feed.followed.is_(True)))
         .order_by(Content.published_at.desc())
         .limit(HOME_SHELF_LIMIT)
         .all()

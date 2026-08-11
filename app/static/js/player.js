@@ -117,6 +117,7 @@ function setupPlayer() {
   syncMuteIcon();
   paintRange(seek);
   paintRange(volume);
+  setupMediaSession(audio);
 
   // Browsers speculatively load links (prerender runs the page's JS), so a card
   // link can open this page without the user ever clicking it. Since opening
@@ -124,6 +125,53 @@ function setupPlayer() {
   // would let mere prefetching fill the user's disk. Wait until the page is
   // genuinely being viewed.
   whenVisible(() => prepareAudio(audio));
+}
+
+// Lock-screen/notification-shade transport controls and Bluetooth/headset
+// buttons all route through this — without it, playback is only
+// controllable while this tab is in the foreground.
+function setupMediaSession(audio) {
+  if (!("mediaSession" in navigator)) return;
+
+  const title = document.querySelector(".player-title")?.textContent || "";
+  const artist = document.querySelector(".player-channel")?.textContent || "";
+  const artworkSrc = document.querySelector(".player-art img")?.src;
+
+  navigator.mediaSession.metadata = new MediaMetadata({
+    title,
+    artist,
+    artwork: artworkSrc ? [{ src: artworkSrc }] : [],
+  });
+
+  navigator.mediaSession.setActionHandler("play", () => audio.play().catch(() => {}));
+  navigator.mediaSession.setActionHandler("pause", () => audio.pause());
+  navigator.mediaSession.setActionHandler("seekbackward", () => {
+    audio.currentTime = Math.max(0, audio.currentTime - SKIP_SECONDS);
+  });
+  navigator.mediaSession.setActionHandler("seekforward", () => {
+    audio.currentTime = Math.min(audio.duration || 0, audio.currentTime + SKIP_SECONDS);
+  });
+  navigator.mediaSession.setActionHandler("seekto", (details) => {
+    if (details.seekTime != null) audio.currentTime = details.seekTime;
+  });
+
+  audio.addEventListener("play", () => {
+    navigator.mediaSession.playbackState = "playing";
+  });
+  audio.addEventListener("pause", () => {
+    navigator.mediaSession.playbackState = "paused";
+  });
+
+  const syncPositionState = () => {
+    if (!audio.duration || Number.isNaN(audio.duration)) return;
+    try {
+      navigator.mediaSession.setPositionState({ duration: audio.duration, position: audio.currentTime });
+    } catch (err) {
+      /* Throws if position momentarily exceeds duration mid-seek; harmless to skip. */
+    }
+  };
+  audio.addEventListener("loadedmetadata", syncPositionState);
+  audio.addEventListener("timeupdate", syncPositionState);
 }
 
 function whenVisible(run) {

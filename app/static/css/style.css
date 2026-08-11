@@ -73,6 +73,27 @@ html {
      specific overflow culprits still belong at the source; this just caps
      the blast radius of ones we haven't caught yet. */
   overflow-x: hidden;
+  /* `contain` alone still lets the page rubber-band in place at the top/
+     bottom edge — visually dragging even the sticky header down with it,
+     since that bounce is a compositor-level shift of the whole viewport,
+     not an actual scroll offset sticky positioning reacts to. `none` drops
+     the bounce entirely (not just its chaining into the browser's own
+     pull-to-refresh UI), so the page just stops dead at its scroll limits,
+     like a native app. The page still scrolls normally in between. */
+  overscroll-behavior-y: none;
+}
+
+@media (max-width: 480px) {
+  /* The page still scrolls — this only hides the OS/browser scrollbar
+     chrome, which reads as a stray desktop-web artifact in an app-like
+     mobile layout (same reasoning as .shelf-row/.channel-row above). */
+  html {
+    scrollbar-width: none;
+  }
+
+  html::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 body {
@@ -80,7 +101,14 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   background: var(--bg-page);
   color: var(--text-primary);
-  overflow-x: hidden;
+  /* Not overflow-x: hidden here (html above already has it) — that would
+     force this box's computed overflow-y to auto per spec, turning body
+     into a spurious scroll container. html is the element that actually
+     scrolls (its clientHeight is the viewport, scrollHeight is the page);
+     a sticky-positioned descendant sticks relative to the nearest such
+     scroll-container ancestor, so having one on body too breaks any
+     position: sticky child (e.g. .app-header-sticky) even though body never
+     actually scrolls itself. */
 }
 
 /* Form controls don't inherit font-size from the page by default — browsers
@@ -386,6 +414,20 @@ select {
   .btn-icon.mobile-menu-btn {
     display: inline-flex;
   }
+
+  /* Keeps the header + tabs pinned while the page scrolls, instead of
+     scrolling away with the content below them. One sticky wrapper around
+     both (rather than stickying .topbar and .tabs separately) avoids having
+     to hardcode .tabs' top offset to .topbar's rendered height. z-index
+     just needs to clear ordinary page content — .mobile-menu (1050) and the
+     modal layers above it still stack correctly since they're descendants
+     of this wrapper, not siblings. */
+  .app-header-sticky {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    background: var(--bg-page);
+  }
 }
 
 .tabs {
@@ -522,6 +564,11 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   background: var(--bg-input);
   border: 1px solid var(--border-default);
   border-radius: 6px;
+  /* .btn-quiet's own resting color (--text-secondary) is meant for a
+     borderless, blend-into-the-background label — wrong once this variant
+     gets its own filled pill background/border above, where it reads as a
+     real button and should look like one at rest, not just on hover. */
+  color: var(--text-primary);
 }
 
 .settings-row > .btn-quiet:hover {
