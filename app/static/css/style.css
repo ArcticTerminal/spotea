@@ -471,7 +471,6 @@ select {
 html[data-active-tab="home"] .tab-btn[data-tab="home"],
 html[data-active-tab="library"] .tab-btn[data-tab="library"],
 html[data-active-tab="explore"] .tab-btn[data-tab="explore"],
-html[data-active-tab="manage"] .tab-btn[data-tab="manage"],
 html[data-active-tab="settings"] .tab-btn[data-tab="settings"] {
   color: var(--white);
   border-bottom-color: var(--accent);
@@ -498,7 +497,6 @@ html[data-active-tab] .tab-panel {
 html[data-active-tab="home"] .tab-panel[data-tab-panel="home"],
 html[data-active-tab="library"] .tab-panel[data-tab-panel="library"],
 html[data-active-tab="explore"] .tab-panel[data-tab-panel="explore"],
-html[data-active-tab="manage"] .tab-panel[data-tab-panel="manage"],
 html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   display: block;
 }
@@ -508,11 +506,20 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   margin: 0 auto;
 }
 
-/* Settings gets more room than Manage's search/import column — on a wide
-   viewport the shared 480px cap left roughly a third of the screen used and
-   two thirds empty on both sides. */
+/* Settings gets more room than the shared 480px cap below — its row
+   descriptions wrap awkwardly at 480px. */
 #tab-settings .channels-panel-inner {
   max-width: 680px;
+}
+
+/* Explore drops the cap entirely rather than getting a wider one: Home and
+   Library (its neighbors on the tab bar) are never wrapped in
+   .channels-panel-inner at all, so they already render at .layout's full
+   1100px. Explore should match them exactly — same default width as the
+   rest of the app — especially once the planned playlist shelves land,
+   which want that same full-width row to scroll in. */
+#tab-explore .channels-panel-inner {
+  max-width: none;
 }
 
 .channels-panel-inner h2 {
@@ -1697,6 +1704,14 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   max-height: 80vh;
   display: flex;
   flex-direction: column;
+}
+
+.modal-bulk-import {
+  max-width: 440px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
 }
 
 .modal-header {

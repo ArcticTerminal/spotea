@@ -349,14 +349,19 @@ def add_single_video(
     its channel. Always created as a preview (Content.is_preview=True): it
     plays through the normal player like any other content, but stays out of
     Library/New Uploads until the user favorites or saves it (see
-    routers/content.py's add_favorite/add_saved)."""
+    routers/content.py's add_favorite/add_saved).
+
+    If this video already has a Content row for this user — a previous
+    Explore preview, or a real upload from a followed channel — this isn't a
+    conflict: it just means there's nothing to add, so hand back that row's
+    id and let the player match/replay whatever was already downloaded."""
     existing_content = (
         db.query(Content)
         .filter(Content.user_id == profile.id, Content.video_id == payload.video_id)
         .first()
     )
     if existing_content:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Already in your library")
+        return VideoAddResult(content_id=existing_content.id)
 
     channel_id = resolve_video_channel(payload.video_id)
     if not channel_id:

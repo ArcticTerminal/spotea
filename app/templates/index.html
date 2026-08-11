@@ -20,7 +20,7 @@
     // corrects it after DOMContentLoaded, which flashes stale content for a
     // frame on every reload.
     (function () {
-      var VALID_TABS = ["home", "library", "explore", "manage", "settings"];
+      var VALID_TABS = ["home", "library", "explore", "settings"];
       var fromHash = location.hash.slice(1);
       var fromStorage = localStorage.getItem("spotea-active-tab");
       var tab =
@@ -104,7 +104,6 @@
     <button type="button" class="tab-btn" data-tab="home" role="tab" aria-selected="false">Home</button>
     <button type="button" class="tab-btn" data-tab="library" role="tab" aria-selected="false">Library</button>
     <button type="button" class="tab-btn" data-tab="explore" role="tab" aria-selected="false">Explore</button>
-    <button type="button" class="tab-btn" data-tab="manage" role="tab" aria-selected="false">Manage</button>
     <button type="button" class="tab-btn" data-tab="settings" role="tab" aria-selected="false">Settings</button>
     </div>
   </nav>
@@ -127,7 +126,7 @@
       {% endif %}
 
       {% if not channel_video_counts %}
-      <p class="muted">No content yet — add a channel in the Manage tab to get started.</p>
+      <p class="muted">No content yet — add a channel in the Explore tab to get started.</p>
       {% else %}
 
       <div class="shelf">
@@ -230,56 +229,28 @@
       </div>
       <p id="channel-search-empty" class="muted" hidden>No channels match your search.</p>
       {% else %}
-      <p class="muted">No content yet — add a channel in the Manage tab to get started.</p>
+      <p class="muted">No content yet — add a channel in the Explore tab to get started.</p>
       {% endif %}
     </section>
 
     <section id="tab-explore" class="tab-panel" data-tab-panel="explore" hidden>
       <div class="channels-panel-inner">
-        <h2>Search a song</h2>
-        <p class="muted">
-          Listen to one specific track without following its channel — handy for features and
-          collaborations that don't show up on an artist's own channel.
-        </p>
         <div class="channel-search">
-          <input type="text" id="video-search-input" placeholder="Search for a song…" autocomplete="off" autocapitalize="off" autocorrect="off" />
-        </div>
-        <ul id="video-search-results" class="search-results video-search-results"></ul>
-      </div>
-    </section>
-
-    <section id="tab-manage" class="tab-panel" data-tab-panel="manage" hidden>
-      <div class="channels-panel-inner">
-        <h2>Search channels</h2>
-        <div class="channel-search">
-          <input type="text" id="channel-search-input" placeholder="Search YouTube channels…" autocomplete="off" autocapitalize="off" autocorrect="off" />
-        </div>
-        <ul id="channel-search-results" class="search-results"></ul>
-
-        <h2>Bulk import</h2>
-        <div id="bulk-import-form-section">
-          <p class="muted">
-            One channel per line — a handle (<code>@handle</code>), a full channel URL, or a row
-            copied straight from a Google Takeout <code>subscriptions.csv</code> export.
-          </p>
-          <textarea
-            id="bulk-import-input"
-            class="bulk-import-input"
-            rows="8"
-            placeholder="@handle&#10;https://www.youtube.com/@anotherhandle"
-          ></textarea>
-          <div class="modal-actions">
-            <button type="button" id="bulk-import-start" class="btn-primary">Import</button>
-          </div>
+          <input type="text" id="explore-search-input" placeholder="Search a song or channel…" autocomplete="off" autocapitalize="off" autocorrect="off" />
         </div>
 
-        <div id="bulk-import-progress-section" class="bulk-import-progress" hidden>
-          <p id="bulk-import-progress-text" class="muted"></p>
-          <ul id="bulk-import-results" class="bulk-import-results"></ul>
-          <div class="modal-actions">
-            <button type="button" id="bulk-import-again" class="btn-quiet" hidden>Import more</button>
-            <button type="button" id="bulk-import-reload" class="btn-primary" hidden>Refresh page</button>
-          </div>
+        <div id="explore-results-panel" hidden>
+          <h2>Songs</h2>
+          <ul id="video-search-results" class="search-results video-search-results"></ul>
+
+          <h2>Channels</h2>
+          <ul id="channel-search-results" class="search-results"></ul>
+        </div>
+
+        <div id="explore-browse-panel">
+          <!-- Smart playlist shelf (On Repeat / Recently Added / Forgotten
+               Favorites / Saved Mix, computed from existing play/favorite/
+               saved data) goes here once that feature ships. -->
         </div>
       </div>
     </section>
@@ -325,6 +296,15 @@
           </select>
         </div>
 
+        <h2>Channels</h2>
+        <div class="settings-row">
+          <div class="settings-row-info">
+            <span class="settings-row-label">Import channels</span>
+            <span class="settings-row-desc">Paste a list of handles or URLs to follow several channels at once.</span>
+          </div>
+          <button type="button" id="open-bulk-import" class="btn-quiet">Import</button>
+        </div>
+
         <h2>Feed updates</h2>
         <div class="settings-row">
           <div class="settings-row-info">
@@ -341,6 +321,40 @@
       </div>
     </section>
   </main>
+
+  <div id="bulk-import-overlay" class="modal-overlay" hidden>
+    <div class="modal modal-bulk-import">
+      <div class="modal-header">
+        <h2>Import channels</h2>
+        <button type="button" id="bulk-import-close" class="modal-close" aria-label="Close">×</button>
+      </div>
+
+      <div id="bulk-import-form-section">
+        <p class="muted">
+          One channel per line — a handle (<code>@handle</code>), a full channel URL, or a row
+          copied straight from a Google Takeout <code>subscriptions.csv</code> export.
+        </p>
+        <textarea
+          id="bulk-import-input"
+          class="bulk-import-input"
+          rows="8"
+          placeholder="@handle&#10;https://www.youtube.com/@anotherhandle"
+        ></textarea>
+        <div class="modal-actions">
+          <button type="button" id="bulk-import-start" class="btn-primary">Import</button>
+        </div>
+      </div>
+
+      <div id="bulk-import-progress-section" class="bulk-import-progress" hidden>
+        <p id="bulk-import-progress-text" class="muted"></p>
+        <ul id="bulk-import-results" class="bulk-import-results"></ul>
+        <div class="modal-actions">
+          <button type="button" id="bulk-import-again" class="btn-quiet" hidden>Import more</button>
+          <button type="button" id="bulk-import-reload" class="btn-primary" hidden>Refresh page</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <div id="downloads-overlay" class="modal-overlay" hidden>
     <div class="modal modal-downloads">

@@ -314,28 +314,53 @@ async function addChannel(channelUrl, button) {
   }
 }
 
-function setupChannelSearch() {
-  const input = document.getElementById("channel-search-input");
-  const resultsList = document.getElementById("channel-search-results");
-  if (!input || !resultsList) return;
+// Explore's search box covers both songs and channels at once — search-videos
+// and search-channels are still two separate endpoints/result lists under the
+// hood (see renderVideoSearchResults/renderSearchResults below), but one input
+// drives both in parallel instead of showing two permanently-visible boxes.
+function setupExploreSearch() {
+  const input = document.getElementById("explore-search-input");
+  const resultsPanel = document.getElementById("explore-results-panel");
+  const browsePanel = document.getElementById("explore-browse-panel");
+  const videoResults = document.getElementById("video-search-results");
+  const channelResults = document.getElementById("channel-search-results");
+  if (!input || !resultsPanel || !browsePanel) return;
 
   const runSearch = debounce(async (query) => {
     if (!query) {
-      resultsList.innerHTML = "";
+      resultsPanel.hidden = true;
+      browsePanel.hidden = false;
+      videoResults.innerHTML = "";
+      channelResults.innerHTML = "";
       return;
     }
-    try {
-      const res = await fetch(`/feeds/search?q=${encodeURIComponent(query)}`);
-      if (!res.ok) return;
-      renderSearchResults(await res.json());
-    } catch (err) {
-      // ignore transient search errors
+
+    resultsPanel.hidden = false;
+    browsePanel.hidden = true;
+
+    const [videoRes, channelRes] = await Promise.allSettled([
+      fetch(`/feeds/search-videos?q=${encodeURIComponent(query)}`),
+      fetch(`/feeds/search?q=${encodeURIComponent(query)}`),
+    ]);
+
+    if (videoRes.status === "fulfilled" && videoRes.value.ok) {
+      renderVideoSearchResults(await videoRes.value.json());
+    }
+    if (channelRes.status === "fulfilled" && channelRes.value.ok) {
+      renderSearchResults(await channelRes.value.json());
     }
   }, 400);
 
   input.addEventListener("input", () => runSearch(input.value.trim()));
 
-  resultsList.addEventListener("click", (event) => {
+  videoResults.addEventListener("click", (event) => {
+    const button = event.target.closest(".video-search-play");
+    if (!button) return;
+    const row = button.closest(".video-search-result");
+    playSearchedVideo(row.dataset, button);
+  });
+
+  channelResults.addEventListener("click", (event) => {
     const btn = event.target.closest(".btn-add-channel");
     if (!btn) return;
     addChannel(btn.dataset.channelUrl, btn);
@@ -384,9 +409,12 @@ function renderVideoSearchResults(results) {
 
 // Explore's "listen" action: adds the video (always as an unkept preview —
 // see routers/feeds.py's add_single_video) and jumps straight to its player,
-// same as tapping any other card. No backfill-overlay wait here — unlike
-// addChannel, this is a single insert, not a channel sync, so it should feel
-// instant.
+// same as tapping any other card. If this video already has a Content row
+// (an earlier Explore preview, or an upload from a followed channel),
+// add_single_video hands back that row's id instead of erroring, so this
+// just replays whatever was already downloaded. No backfill-overlay wait
+// here — unlike addChannel, this is a single insert, not a channel sync, so
+// it should feel instant.
 async function playSearchedVideo(dataset, button) {
   if (button) button.disabled = true;
 
@@ -409,46 +437,13 @@ async function playSearchedVideo(dataset, button) {
       return;
     }
 
-    if (res.status === 409) {
-      showToast("Already in your library");
-    } else {
-      const data = await res.json().catch(() => ({}));
-      showToast(data.detail || "Could not add this song");
-    }
+    const data = await res.json().catch(() => ({}));
+    showToast(data.detail || "Could not add this song");
   } catch (err) {
     showToast("Could not add this song");
   } finally {
     if (button) button.disabled = false;
   }
-}
-
-function setupVideoSearch() {
-  const input = document.getElementById("video-search-input");
-  const resultsList = document.getElementById("video-search-results");
-  if (!input || !resultsList) return;
-
-  const runSearch = debounce(async (query) => {
-    if (!query) {
-      resultsList.innerHTML = "";
-      return;
-    }
-    try {
-      const res = await fetch(`/feeds/search-videos?q=${encodeURIComponent(query)}`);
-      if (!res.ok) return;
-      renderVideoSearchResults(await res.json());
-    } catch (err) {
-      // ignore transient search errors
-    }
-  }, 400);
-
-  input.addEventListener("input", () => runSearch(input.value.trim()));
-
-  resultsList.addEventListener("click", (event) => {
-    const button = event.target.closest(".video-search-play");
-    if (!button) return;
-    const row = button.closest(".video-search-result");
-    playSearchedVideo(row.dataset, button);
-  });
 }
 
 const TAB_STORAGE_KEY = "spotea-active-tab";
@@ -497,6 +492,29 @@ function setupDownloadsOverlay() {
   const overlay = document.getElementById("downloads-overlay");
   const openBtn = document.getElementById("open-downloads");
   const closeBtn = document.getElementById("downloads-close");
+  if (!overlay || !openBtn) return;
+
+  const open = () => {
+    overlay.hidden = false;
+  };
+  const close = () => {
+    overlay.hidden = true;
+  };
+
+  openBtn.addEventListener("click", open);
+  closeBtn.addEventListener("click", close);
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay) close();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !overlay.hidden) close();
+  });
+}
+
+function setupBulkImportOverlay() {
+  const overlay = document.getElementById("bulk-import-overlay");
+  const openBtn = document.getElementById("open-bulk-import");
+  const closeBtn = document.getElementById("bulk-import-close");
   if (!overlay || !openBtn) return;
 
   const open = () => {
@@ -696,13 +714,12 @@ function renderBulkImportResults(results) {
     .join("");
 }
 
-// Inline on the Manage tab now (was a modal) — Search channels and Bulk
-// import sit on the page together instead of the latter hiding behind a
-// button, which also means there's no "close" moment to hang a reload off
-// of. Reload is instead an explicit "Refresh page" button once an import
-// finishes with at least one channel actually added, so the user still gets
-// to read the per-line results (including failures) before anything
-// refreshes out from under them.
+// Lives in the #bulk-import-overlay modal (see setupBulkImportOverlay above).
+// Reload is an explicit "Refresh page" button, not something that fires on
+// modal close — closing the modal (× / backdrop / Escape) is also how you'd
+// dismiss it after a successful import, so tying a reload to that would fire
+// it unexpectedly. This way the user reads the per-line results (including
+// any failures) before anything refreshes out from under them.
 function setupBulkImport() {
   const startBtn = document.getElementById("bulk-import-start");
   const againBtn = document.getElementById("bulk-import-again");
@@ -803,9 +820,9 @@ function setupBulkImport() {
 
 document.addEventListener("DOMContentLoaded", () => {
   setupTabs();
-  setupChannelSearch();
-  setupVideoSearch();
+  setupExploreSearch();
   setupDownloadsOverlay();
+  setupBulkImportOverlay();
   setupBulkImport();
   setupStorage();
   setupSettings();

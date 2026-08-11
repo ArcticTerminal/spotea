@@ -115,13 +115,11 @@ async function toggleSaved(contentId, button) {
   }
 }
 
-// Shared by Manage's "Remove a channel" search results and the channel
-// page's own Unfollow button — confirm + DELETE + error toast are identical
-// either way, only what happens after success differs (reload in place vs.
-// navigate away from a channel page that no longer exists), so that part is
-// left to the caller via onConfirmed (fires right after the user confirms,
-// before the request — e.g. to show a covering overlay) and the boolean
-// return value.
+// Confirm + DELETE + error toast for unfollowing a channel. What happens
+// after success is left to the caller via onConfirmed (fires right after the
+// user confirms, before the request — e.g. to show a covering overlay) and
+// the boolean return value, so a second caller can reload in place instead of
+// navigating away like the channel page's own Unfollow button does.
 async function unfollowChannel(feedId, onConfirmed) {
   const confirmed = await confirmDialog(
     "Unfollow this channel? Its videos will be removed from your library.",

@@ -245,11 +245,21 @@ async function prepareAudio(audio) {
     }
   }
 
-  const timer = setInterval(async () => {
+  // The download itself is a server-side background task, independent of
+  // whether this tab can currently reach the server — a single missed poll
+  // (a Wi-Fi blip, a backgrounded mobile tab getting its timers/network
+  // throttled, a momentary server hiccup) doesn't mean the download failed,
+  // just that this one check-in did. Only give up after several consecutive
+  // misses; a lone one is silently retried on the next tick.
+  const MAX_CONSECUTIVE_POLL_FAILURES = 4;
+  let consecutiveFailures = 0;
+
+  const checkStatus = async () => {
     try {
       const res = await fetch(`/content/${contentId}/status`);
       if (!res.ok) throw new Error("status check failed");
       const data = await res.json();
+      consecutiveFailures = 0;
 
       if (data.status === "ready") {
         clearInterval(timer);
@@ -264,10 +274,23 @@ async function prepareAudio(audio) {
         prepareText.textContent = `Downloading audio… ${data.progress_percent}%`;
       }
     } catch (err) {
-      clearInterval(timer);
-      fail("Lost connection while downloading");
+      consecutiveFailures += 1;
+      if (consecutiveFailures >= MAX_CONSECUTIVE_POLL_FAILURES) {
+        clearInterval(timer);
+        fail("Lost connection while downloading");
+      }
     }
-  }, STATUS_POLL_MS);
+  };
+
+  const timer = setInterval(checkStatus, STATUS_POLL_MS);
+
+  // Mobile browsers throttle/suspend timers for a backgrounded tab, so the
+  // interval above may not have ticked in a while by the time the user
+  // switches back — check in immediately instead of waiting for the next
+  // scheduled tick.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") checkStatus();
+  });
 }
 
 function setupFavorite() {
