@@ -1,3 +1,5 @@
+import asyncio
+import contextlib
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
@@ -9,7 +11,7 @@ from app.config import settings
 from app.database import Base, SessionLocal, engine
 from app.deps import NotAuthenticated, require_login
 from app.migrations import run_migrations
-from app.models import User
+from app.models import AppSettings, User
 from app.routers import auth as auth_router
 from app.routers import content as content_router
 from app.routers import feeds as feeds_router
@@ -17,8 +19,12 @@ from app.routers import pages as pages_router
 from app.routers import profiles as profiles_router
 from app.routers import settings as settings_router
 from app.routers import storage as storage_router
+from app.scheduler import run_scheduler
 
 DEFAULT_USER_ID = 1
+
+# Fixed id for the single AppSettings row — see app.models.AppSettings.
+APP_SETTINGS_ID = 1
 
 
 def _ensure_default_user() -> None:
@@ -28,12 +34,27 @@ def _ensure_default_user() -> None:
             db.commit()
 
 
+def _ensure_app_settings() -> None:
+    with SessionLocal() as db:
+        if db.get(AppSettings, APP_SETTINGS_ID) is None:
+            db.add(AppSettings(id=APP_SETTINGS_ID))
+            db.commit()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     run_migrations(engine)
     _ensure_default_user()
-    yield
+    _ensure_app_settings()
+
+    scheduler_task = asyncio.create_task(run_scheduler())
+    try:
+        yield
+    finally:
+        scheduler_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await scheduler_task
 
 
 app = FastAPI(title="Spotea", lifespan=lifespan)
@@ -82,6 +103,20 @@ async def handle_not_authenticated(request: Request, exc: NotAuthenticated) -> R
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/sw.js")
+def service_worker() -> FileResponse:
+    # Served from the root rather than under /static/js/ — a service worker
+    # can only ever control paths at or below its own URL, so /static/js/sw.js
+    # would default to a /static/js/ scope instead of the whole app. No
+    # require_login: the browser's installability checks may fetch this
+    # before there's a session to send.
+    return FileResponse(
+        "app/static/js/sw.js",
+        media_type="text/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
 
 
 @app.get("/avatars/{filename}", dependencies=[Depends(require_login)])

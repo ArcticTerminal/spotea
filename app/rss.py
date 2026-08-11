@@ -10,7 +10,7 @@ import feedparser
 import yt_dlp
 
 from app.config import settings
-from app.downloader import download_avatar
+from app.downloader import YOUTUBE_WATCH_URL, download_avatar
 
 VIDEO_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{11}$")
 CHANNEL_ID_URL_RE = re.compile(r"youtube\.com/channel/(UC[\w-]{22})")
@@ -22,6 +22,11 @@ UPLOADS_PLAYLIST_URL_TEMPLATE = "https://www.youtube.com/playlist?list={playlist
 
 # sp=EgIQAg%3D%3D restricts YouTube search results to the "Channel" type.
 CHANNEL_SEARCH_URL_TEMPLATE = "https://www.youtube.com/results?search_query={query}&sp=EgIQAg%3D%3D"
+
+# No type filter — Explore is searching for a specific video/song, and
+# YouTube's default mixed results are already mostly videos. Adding a
+# "Video" type filter isn't needed on top of that.
+VIDEO_SEARCH_URL_TEMPLATE = "https://www.youtube.com/results?search_query={query}"
 
 _CHANNEL_RESOLVE_OPTS = {
     "quiet": True,
@@ -35,6 +40,21 @@ _CHANNEL_SEARCH_OPTS = {
     "no_warnings": True,
     "extract_flat": "in_playlist",
     "playlist_items": "1-8",
+}
+
+_VIDEO_SEARCH_OPTS = {
+    "quiet": True,
+    "no_warnings": True,
+    "extract_flat": "in_playlist",
+    "playlist_items": "1-8",
+}
+
+# Deliberately not flat: a flat search result's channel_id can be missing or
+# ambiguous for a video credited to multiple channels (e.g. a feature) — see
+# search_videos. This runs once, only on the single video the user picks.
+_VIDEO_CHANNEL_RESOLVE_OPTS = {
+    "quiet": True,
+    "no_warnings": True,
 }
 
 _DURATION_FETCH_OPTS = {
@@ -178,6 +198,70 @@ def search_channels(query: str) -> list[ChannelSearchResult]:
         )
 
     return results
+
+
+@dataclass
+class VideoSearchResult:
+    video_id: str
+    title: str
+    thumbnail_url: str | None
+    duration_seconds: int | None
+    channel_title: str | None
+
+
+def search_videos(query: str) -> list[VideoSearchResult]:
+    """Explore's search — finds a specific video/song rather than a channel
+    to follow. Unlike search_channels, no avatar download step: video
+    thumbnails are already hotlinked directly from i.ytimg.com elsewhere in
+    the app (see _content_card.html), with none of the ORB blocking that
+    makes channel avatars need the ggpht.com rewrite/local download."""
+    search_url = VIDEO_SEARCH_URL_TEMPLATE.format(query=urllib.parse.quote(query))
+
+    try:
+        with yt_dlp.YoutubeDL(_VIDEO_SEARCH_OPTS) as ydl:
+            info = ydl.extract_info(search_url, download=False)
+    except yt_dlp.utils.DownloadError:
+        return []
+
+    results: list[VideoSearchResult] = []
+    for entry in (info or {}).get("entries") or []:
+        video_id = entry.get("id")
+        if not video_id or not VIDEO_ID_RE.match(video_id):
+            # Drops non-video results for free — Mix/Radio pseudo-entries
+            # come back with "RD"-prefixed ids, never 11 chars.
+            continue
+
+        thumbnails = entry.get("thumbnails") or []
+        duration = entry.get("duration")
+
+        results.append(
+            VideoSearchResult(
+                video_id=video_id,
+                title=entry.get("title") or "Untitled",
+                thumbnail_url=_absolute_thumbnail_url(thumbnails[-1]["url"]) if thumbnails else None,
+                duration_seconds=int(duration) if isinstance(duration, (int, float)) else None,
+                channel_title=entry.get("channel"),
+            )
+        )
+
+    return results
+
+
+def resolve_video_channel(video_id: str) -> str | None:
+    """The authoritative channel_id for one specific video — a flat search
+    result's channel_id (see search_videos) can be missing or ambiguous for
+    a video credited to multiple channels (e.g. "feat." collaborations), so
+    adding a video to the library re-resolves it with a real, non-flat
+    lookup first. Only ever called once, on the video the user picks."""
+    url = YOUTUBE_WATCH_URL.format(video_id=video_id)
+
+    try:
+        with yt_dlp.YoutubeDL(_VIDEO_CHANNEL_RESOLVE_OPTS) as ydl:
+            info = ydl.extract_info(url, download=False)
+    except yt_dlp.utils.DownloadError:
+        return None
+
+    return (info or {}).get("channel_id")
 
 
 def fetch_channel_avatar_url(channel_id: str) -> str | None:

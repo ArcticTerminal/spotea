@@ -1,6 +1,5 @@
 import secrets
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
@@ -9,20 +8,20 @@ from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
 from app.deps import get_current_profile, get_db, require_login
-from app.downloader import download_avatar
+from app.feed_sync import REFRESH_POOL_SIZE, apply_feed_data, fetch_feed_data
+from app.feed_sync import refresh_feeds as sync_refresh_feeds
 from app.models import Content, Feed, User
 from app.rss import (
     ChannelResolutionError,
     InvalidFeedError,
-    ParsedFeed,
     extract_channel_id,
     fetch_channel_all_videos,
-    fetch_channel_avatar_url,
-    fetch_channel_video_durations,
     fetch_feed,
     longform_feed_url,
     resolve_feed_url,
+    resolve_video_channel,
     search_channels,
+    search_videos,
 )
 from app.schemas import (
     BackfillStatusOut,
@@ -35,8 +34,11 @@ from app.schemas import (
     FeedCreate,
     FeedOut,
     RefreshResult,
+    VideoAddCreate,
+    VideoAddResult,
+    VideoSearchResultOut,
 )
-from app.storage import delete_files_for_feed
+from app.storage import delete_files_for_feed, unlink_if_unshared
 
 router = APIRouter(prefix="/feeds", tags=["feeds"], dependencies=[Depends(require_login)])
 
@@ -114,119 +116,6 @@ def _run_backfill(feed_id: int, channel_id: str, db: Session) -> None:
     _backfill_progress[feed_id] = ("done", total, total)
 
 
-# Feed refresh is network-bound (RSS parse + a yt-dlp call per channel), so
-# refresh_feeds fans those out across threads rather than doing them one
-# channel at a time. Kept modest to stay polite to YouTube's servers — this
-# is unauthenticated scraping, and a burst of dozens of concurrent requests
-# risks 429s. DB writes never happen inside the pool (see _apply_feed_data).
-_REFRESH_POOL_SIZE = 8
-
-
-@dataclass
-class _FeedFetchResult:
-    parsed: ParsedFeed | None
-    durations: dict[str, int]
-    channel_id: str | None
-    avatar_url: str | None = None
-
-
-def _fetch_feed_data(feed_id: int, rss_url: str, avatar_url: str | None) -> _FeedFetchResult:
-    """The network half of a feed sync: RSS fetch plus, when needed, a
-    duration lookup and a channel-avatar lookup. Safe to run off the main
-    thread and in parallel across feeds — touches no SQLAlchemy state but
-    its own throwaway read session.
-
-    Fetches via the channel's Videos-tab playlist (UULF) when its channel ID
-    is known, rather than rss_url's plain channel feed — Shorts are excluded
-    there for free, no separate Shorts-tab fetch needed."""
-    channel_id = extract_channel_id(rss_url)
-    fetch_url = longform_feed_url(channel_id) if channel_id else rss_url
-
-    try:
-        parsed = fetch_feed(fetch_url)
-    except InvalidFeedError:
-        return _FeedFetchResult(parsed=None, durations={}, channel_id=channel_id)
-
-    durations: dict[str, int] = {}
-    if channel_id and parsed.entries:
-        incoming_ids = [entry.video_id for entry in parsed.entries]
-        with SessionLocal() as read_db:
-            existing = read_db.query(Content.video_id, Content.duration_seconds).filter(
-                Content.feed_id == feed_id, Content.video_id.in_(incoming_ids)
-            ).all()
-        existing_ids = {video_id for video_id, _ in existing}
-        needs_durations = any(vid not in existing_ids for vid in incoming_ids) or any(
-            duration is None for _, duration in existing
-        )
-        if needs_durations:
-            durations = fetch_channel_video_durations(channel_id)
-
-    # Fetched (and downloaded) once per channel, ever — skipped as soon as a
-    # feed has one, so this never adds a call to the steady-state per-session
-    # refresh.
-    fetched_avatar_url = None
-    if not avatar_url and channel_id:
-        remote_avatar_url = fetch_channel_avatar_url(channel_id)
-        if remote_avatar_url:
-            fetched_avatar_url = download_avatar(channel_id, remote_avatar_url)
-
-    return _FeedFetchResult(
-        parsed=parsed, durations=durations, channel_id=channel_id, avatar_url=fetched_avatar_url
-    )
-
-
-def _apply_feed_data(db: Session, feed: Feed, result: _FeedFetchResult) -> int:
-    """The DB half of a feed sync: insert new content rows and backfill
-    missing durations from an already-fetched _FeedFetchResult. Must run on
-    the request's own session, so always sequential (never in the pool)."""
-    parsed = result.parsed
-    if parsed is None:
-        return 0
-
-    # parsed.channel_title is "Videos" (the UULF playlist's own title, not the
-    # channel's) whenever the fetch went through the Videos-tab playlist, so
-    # only trust it as a channel_title backfill on the plain-feed fallback path.
-    if not feed.channel_title and parsed.channel_title and not result.channel_id:
-        feed.channel_title = parsed.channel_title
-
-    if result.avatar_url:
-        feed.avatar_url = result.avatar_url
-
-    incoming_ids = [entry.video_id for entry in parsed.entries]
-    existing_rows = {
-        row.video_id: row
-        for row in db.query(Content).filter(
-            Content.feed_id == feed.id, Content.video_id.in_(incoming_ids)
-        )
-    }
-    missing_duration_ids = {
-        video_id for video_id, row in existing_rows.items() if row.duration_seconds is None
-    }
-    new_entries = [entry for entry in parsed.entries if entry.video_id not in existing_rows]
-
-    new_count = 0
-    for entry in new_entries:
-        db.add(
-            Content(
-                feed_id=feed.id,
-                user_id=feed.user_id,
-                video_id=entry.video_id,
-                title=entry.title,
-                thumbnail_url=entry.thumbnail_url,
-                published_at=entry.published_at,
-                duration_seconds=result.durations.get(entry.video_id),
-            )
-        )
-        new_count += 1
-
-    for video_id in missing_duration_ids:
-        if video_id in result.durations:
-            existing_rows[video_id].duration_seconds = result.durations[video_id]
-
-    db.commit()
-    return new_count
-
-
 class FeedAlreadyExistsError(Exception):
     def __init__(self, rss_url: str, channel_title: str | None):
         super().__init__(rss_url)
@@ -240,20 +129,34 @@ def _create_feed_from_rss_url(db: Session, rss_url: str, user_id: int) -> tuple[
     strictly sequential, part per line. Callers decide how to run the
     returned channel_id's backfill — deferred via BackgroundTasks for a
     single add (keeps the response fast), inline for bulk import (which is
-    already running off the request thread)."""
+    already running off the request thread).
+
+    A matching Feed can already exist with followed=False — a placeholder
+    created by add_single_video for a channel the user only grabbed one
+    video from (see _get_or_create_placeholder_feed). Actually following it
+    now means upgrading that row in place (flip followed, run the same
+    fetch/backfill a brand-new feed gets) rather than bouncing the user with
+    "already exists" for a feed they never knowingly added."""
     existing = db.query(Feed).filter(Feed.user_id == user_id, Feed.rss_url == rss_url).first()
-    if existing:
+    if existing and existing.followed:
         raise FeedAlreadyExistsError(rss_url, existing.channel_title)
 
     parsed = fetch_feed(rss_url)
 
-    feed = Feed(user_id=user_id, rss_url=rss_url, channel_title=parsed.channel_title)
-    db.add(feed)
-    db.commit()
-    db.refresh(feed)
+    if existing:
+        feed = existing
+        feed.followed = True
+        if parsed.channel_title:
+            feed.channel_title = parsed.channel_title
+        db.commit()
+    else:
+        feed = Feed(user_id=user_id, rss_url=rss_url, channel_title=parsed.channel_title)
+        db.add(feed)
+        db.commit()
+        db.refresh(feed)
 
-    result = _fetch_feed_data(feed.id, feed.rss_url, feed.avatar_url)
-    new_count = _apply_feed_data(db, feed, result)
+    result = fetch_feed_data(feed.id, feed.rss_url, feed.avatar_url)
+    new_count = apply_feed_data(db, feed, result)
 
     channel_id = extract_channel_id(rss_url)
     return feed, new_count, channel_id
@@ -308,7 +211,7 @@ def _resolve_bulk_entry(line: str) -> dict:
     """Runs in a worker thread — pure network (yt-dlp), no DB access, so it's
     safe to fan out. For a batch of bare @handles this per-line channel
     resolution is the dominant cost (each one is its own yt-dlp lookup), the
-    same reasoning _fetch_feed_data's docstring gives for parallelizing
+    same reasoning feed_sync.fetch_feed_data's docstring gives for parallelizing
     refresh_feeds."""
     try:
         rss_url = resolve_feed_url(_normalize_bulk_entry(line))
@@ -321,10 +224,10 @@ def _run_bulk_import(job_id: str, lines: list[str], user_id: int) -> None:
     progress = _import_progress[job_id]
 
     # Phase 1: resolve every line in parallel (see _resolve_bulk_entry) —
-    # capped the same as _REFRESH_POOL_SIZE, for the same reason (stay polite
+    # capped the same as REFRESH_POOL_SIZE, for the same reason (stay polite
     # to YouTube's unauthenticated scraping).
     resolved_by_line: dict[str, dict] = {}
-    with ThreadPoolExecutor(max_workers=min(len(lines), _REFRESH_POOL_SIZE)) as pool:
+    with ThreadPoolExecutor(max_workers=min(len(lines), REFRESH_POOL_SIZE)) as pool:
         futures = [pool.submit(_resolve_bulk_entry, line) for line in lines]
         for future in as_completed(futures):
             resolved = future.result()
@@ -401,11 +304,126 @@ def search_feeds(q: str) -> list[ChannelSearchResultOut]:
     return [ChannelSearchResultOut(**result.__dict__) for result in search_channels(query)]
 
 
+@router.get("/search-videos", response_model=list[VideoSearchResultOut])
+def search_video_feeds(q: str) -> list[VideoSearchResultOut]:
+    query = q.strip()
+    if not query:
+        return []
+
+    return [VideoSearchResultOut(**result.__dict__) for result in search_videos(query)]
+
+
+def _get_or_create_placeholder_feed(
+    db: Session, channel_id: str, channel_title: str | None, user_id: int
+) -> Feed:
+    """Feed row for a channel the user hasn't actually followed — exists only
+    so a single video added via Explore has somewhere to attach (Content.feed_id
+    is required). followed=False keeps it out of Library and the background
+    refresh scheduler (see feed_sync.refresh_feeds's callers) until the user
+    follows the channel for real, which upgrades this same row in place (see
+    _create_feed_from_rss_url) instead of creating a duplicate — the rss_url
+    used here is exactly the dedup key that lookup checks.
+
+    No avatar fetch: a placeholder feed's avatar is never displayed anywhere
+    (Library and the channel-hero page are the only avatar consumers, and
+    both are followed-only surfaces)."""
+    rss_url = longform_feed_url(channel_id)
+    existing = db.query(Feed).filter(Feed.user_id == user_id, Feed.rss_url == rss_url).first()
+    if existing:
+        return existing
+
+    feed = Feed(user_id=user_id, rss_url=rss_url, channel_title=channel_title, followed=False)
+    db.add(feed)
+    db.commit()
+    db.refresh(feed)
+    return feed
+
+
+@router.post("/videos", response_model=VideoAddResult, status_code=status.HTTP_201_CREATED)
+def add_single_video(
+    payload: VideoAddCreate,
+    profile: User = Depends(get_current_profile),
+    db: Session = Depends(get_db),
+) -> VideoAddResult:
+    """Explore's "listen" action — adds exactly one video without following
+    its channel. Always created as a preview (Content.is_preview=True): it
+    plays through the normal player like any other content, but stays out of
+    Library/New Uploads until the user favorites or saves it (see
+    routers/content.py's add_favorite/add_saved)."""
+    existing_content = (
+        db.query(Content)
+        .filter(Content.user_id == profile.id, Content.video_id == payload.video_id)
+        .first()
+    )
+    if existing_content:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Already in your library")
+
+    channel_id = resolve_video_channel(payload.video_id)
+    if not channel_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Could not resolve this video")
+
+    feed = _get_or_create_placeholder_feed(db, channel_id, payload.channel_title, profile.id)
+
+    content = Content(
+        feed_id=feed.id,
+        user_id=profile.id,
+        video_id=payload.video_id,
+        title=payload.title,
+        thumbnail_url=payload.thumbnail_url,
+        duration_seconds=payload.duration_seconds,
+        # Flat search results don't reliably expose a real upload date, and
+        # NULL sorts last in SQLite's ORDER BY ... DESC (every Home shelf) —
+        # "just added" as the effective date is also the correct intent here.
+        published_at=datetime.utcnow(),
+        is_preview=True,
+    )
+    db.add(content)
+    db.commit()
+    db.refresh(content)
+
+    return VideoAddResult(content_id=content.id)
+
+
+@router.delete("/videos/{content_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_single_video(
+    content_id: int, profile: User = Depends(get_current_profile), db: Session = Depends(get_db)
+) -> None:
+    """Removes a video added via Explore outright (unlike DELETE
+    /content/{id}, which only resets download status) — used both to dismiss
+    a preview early and to remove something already kept. Only for content on
+    a followed=False feed; a real follow's content comes off through
+    unfollowing the channel, not this."""
+    content = (
+        db.query(Content)
+        .join(Feed)
+        .filter(Content.id == content_id, Content.user_id == profile.id, Feed.followed.is_(False))
+        .first()
+    )
+    if not content:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Content not found")
+
+    feed_id = content.feed_id
+    if content.file_path:
+        unlink_if_unshared(db, content.file_path, content.id)
+    db.delete(content)
+    db.commit()
+
+    remaining = db.query(func.count(Content.id)).filter(Content.feed_id == feed_id).scalar()
+    if remaining == 0:
+        db.query(Feed).filter(Feed.id == feed_id).delete()
+        db.commit()
+
+
 @router.get("", response_model=list[FeedOut])
 def list_feeds(
     profile: User = Depends(get_current_profile), db: Session = Depends(get_db)
 ) -> list[Feed]:
-    return db.query(Feed).filter(Feed.user_id == profile.id).order_by(Feed.added_at.desc()).all()
+    return (
+        db.query(Feed)
+        .filter(Feed.user_id == profile.id, Feed.followed.is_(True))
+        .order_by(Feed.added_at.desc())
+        .all()
+    )
 
 
 @router.get("/{feed_id}/backfill-status", response_model=BackfillStatusOut)
@@ -440,14 +458,5 @@ def delete_feed(
 def refresh_feeds(
     profile: User = Depends(get_current_profile), db: Session = Depends(get_db)
 ) -> RefreshResult:
-    feeds = db.query(Feed).filter(Feed.user_id == profile.id).all()
-    if not feeds:
-        return RefreshResult(new_content_count=0)
-
-    with ThreadPoolExecutor(max_workers=min(len(feeds), _REFRESH_POOL_SIZE)) as pool:
-        results = list(pool.map(lambda f: _fetch_feed_data(f.id, f.rss_url, f.avatar_url), feeds))
-
-    total_new = sum(
-        _apply_feed_data(db, feed, result) for feed, result in zip(feeds, results)
-    )
-    return RefreshResult(new_content_count=total_new)
+    feeds = db.query(Feed).filter(Feed.user_id == profile.id, Feed.followed.is_(True)).all()
+    return RefreshResult(new_content_count=sync_refresh_feeds(db, feeds))

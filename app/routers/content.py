@@ -157,6 +157,9 @@ def add_favorite(
 ) -> FavoriteOut:
     content = _get_content_or_404(db, content_id, profile.id)
     content.is_favorite = True
+    # Favoriting an Explore preview is a strong enough "keep this" signal on
+    # its own to promote it out of preview status.
+    content.is_preview = False
     db.commit()
     return FavoriteOut(id=content.id, is_favorite=content.is_favorite)
 
@@ -177,6 +180,8 @@ def add_saved(
 ) -> SavedOut:
     content = _get_content_or_404(db, content_id, profile.id)
     content.is_saved = True
+    # Same auto-promote reasoning as add_favorite above.
+    content.is_preview = False
     db.commit()
     return SavedOut(id=content.id, is_saved=content.is_saved)
 

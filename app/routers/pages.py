@@ -8,7 +8,7 @@ from sqlalchemy.sql.elements import ColumnElement
 from app.content_query import DEFAULT_PAGE_SIZE, query_content_page
 from app.deps import get_current_profile, get_db, require_login
 from app.formatting import format_duration, format_size
-from app.models import Content, Feed, User
+from app.models import AppSettings, Content, Feed, User
 from app.storage import collect_usage
 
 router = APIRouter(dependencies=[Depends(require_login)])
@@ -21,14 +21,34 @@ HOME_CHANNEL_LIMIT = 8
 
 
 def _home_shelf_query(db: Session, user_id: int):
-    return db.query(Content).options(joinedload(Content.feed)).filter(Content.user_id == user_id)
+    # is_preview excludes Explore videos not yet favorited/saved — see
+    # routers/feeds.py's add_single_video and routers/content.py's
+    # add_favorite/add_saved. Listening to one shouldn't look like it's
+    # already saved.
+    return (
+        db.query(Content)
+        .options(joinedload(Content.feed))
+        .filter(Content.user_id == user_id, Content.is_preview.is_(False))
+    )
 
 
 @router.get("/", response_class=HTMLResponse)
 def home(
     request: Request, profile: User = Depends(get_current_profile), db: Session = Depends(get_db)
 ) -> HTMLResponse:
-    feeds = db.query(Feed).filter(Feed.user_id == profile.id).order_by(Feed.added_at.desc()).all()
+    # Fixed id — see app.models.AppSettings and main._ensure_app_settings,
+    # which guarantees this row exists before any request can reach here.
+    app_settings = db.get(AppSettings, 1)
+
+    # followed=False excludes Explore's placeholder feeds (see
+    # routers/feeds.py's _get_or_create_placeholder_feed) — never a real
+    # follow, so it shouldn't show up as one in Library or here.
+    feeds = (
+        db.query(Feed)
+        .filter(Feed.user_id == profile.id, Feed.followed.is_(True))
+        .order_by(Feed.added_at.desc())
+        .all()
+    )
     # feeds is already newest-first — Home's chip row is just the most
     # recently followed few (with 100+ channels followed, the full list made
     # that row an endless horizontal scroll); Library's grid below still
@@ -46,9 +66,16 @@ def home(
         .limit(HOME_SHELF_LIMIT)
         .all()
     )
+    # Not built on _home_shelf_query: an Explore preview that's actually been
+    # played earns a spot here even though it's still is_preview (never
+    # favorited/saved) — otherwise playing something from Explore and coming
+    # back to Home would make it look like nothing happened. New
+    # uploads/Favorites/Saved have no such case, since none of those imply
+    # the user ever listened.
     home_recently_played = (
-        _home_shelf_query(db, profile.id)
-        .filter(Content.last_played_at.isnot(None))
+        db.query(Content)
+        .options(joinedload(Content.feed))
+        .filter(Content.user_id == profile.id, Content.last_played_at.isnot(None))
         .order_by(Content.last_played_at.desc())
         .limit(HOME_SHELF_LIMIT)
         .all()
@@ -98,6 +125,7 @@ def home(
             "saved_count": saved_count,
             "usage": usage,
             "audio_quality": profile.audio_quality,
+            "feed_refresh_interval_minutes": app_settings.feed_refresh_interval_minutes,
             "home_recently_played": home_recently_played,
             "home_new_uploads": home_new_uploads,
             "home_favorites": home_favorites,

@@ -139,6 +139,12 @@ function setupHorizontalScrollers() {
   });
 }
 
+// Feeds are also kept fresh by a server-side background job on a schedule
+// set in Settings (see routers/settings.py) — this is just for "I want it
+// now". The overlay (rather than just the button's own spin state) is the
+// feedback here because refresh-feeds-btn itself is hidden under the
+// mobile-menu breakpoint (see style.css); the overlay covers that entry
+// point too.
 async function refreshFeeds() {
   const overlay = document.getElementById("refresh-overlay");
   const btn = document.getElementById("refresh-feeds-btn");
@@ -165,17 +171,6 @@ async function refreshFeeds() {
       btn.classList.remove("is-spinning");
     }
   }
-}
-
-// Refreshing every followed channel's RSS is several network calls per channel,
-// so it's only worth doing once when the app is first opened in a browser
-// session — not on every reload. A manual button covers everything else.
-const SESSION_REFRESH_KEY = "spotea-session-refreshed";
-
-function maybeAutoRefresh() {
-  if (sessionStorage.getItem(SESSION_REFRESH_KEY)) return;
-  sessionStorage.setItem(SESSION_REFRESH_KEY, "1");
-  refreshFeeds();
 }
 
 function setupRefreshButton() {
@@ -347,6 +342,115 @@ function setupChannelSearch() {
   });
 }
 
+function renderVideoSearchResults(results) {
+  const list = document.getElementById("video-search-results");
+  if (!list) return;
+
+  if (!results.length) {
+    list.innerHTML = `<li class="search-empty">No songs found</li>`;
+    return;
+  }
+
+  list.innerHTML = results
+    .map((r) => {
+      const thumb = r.thumbnail_url
+        ? `<img class="video-search-thumb" src="${escapeHtml(r.thumbnail_url)}" alt="" />`
+        : `<span class="video-search-thumb"></span>`;
+      const duration = r.duration_seconds != null ? formatDuration(r.duration_seconds) : "";
+      const channel = r.channel_title ? escapeHtml(r.channel_title) : "";
+      const meta = [channel, duration].filter(Boolean).join(" · ");
+      return `
+        <li
+          class="search-result video-search-result"
+          data-video-id="${escapeHtml(r.video_id)}"
+          data-title="${escapeHtml(r.title)}"
+          data-thumbnail-url="${escapeHtml(r.thumbnail_url || "")}"
+          data-duration-seconds="${r.duration_seconds ?? ""}"
+          data-channel-title="${escapeHtml(r.channel_title || "")}"
+        >
+          ${thumb}
+          <div class="search-result-info">
+            <span class="search-result-title">${escapeHtml(r.title)}</span>
+            <span class="search-result-subs">${meta}</span>
+          </div>
+          <button type="button" class="btn-icon video-search-play" aria-label="Play">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"></path></svg>
+          </button>
+        </li>
+      `;
+    })
+    .join("");
+}
+
+// Explore's "listen" action: adds the video (always as an unkept preview —
+// see routers/feeds.py's add_single_video) and jumps straight to its player,
+// same as tapping any other card. No backfill-overlay wait here — unlike
+// addChannel, this is a single insert, not a channel sync, so it should feel
+// instant.
+async function playSearchedVideo(dataset, button) {
+  if (button) button.disabled = true;
+
+  try {
+    const res = await fetch("/feeds/videos", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        video_id: dataset.videoId,
+        title: dataset.title,
+        thumbnail_url: dataset.thumbnailUrl || null,
+        duration_seconds: dataset.durationSeconds ? Number(dataset.durationSeconds) : null,
+        channel_title: dataset.channelTitle || null,
+      }),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      window.location.href = `/player/${data.content_id}`;
+      return;
+    }
+
+    if (res.status === 409) {
+      showToast("Already in your library");
+    } else {
+      const data = await res.json().catch(() => ({}));
+      showToast(data.detail || "Could not add this song");
+    }
+  } catch (err) {
+    showToast("Could not add this song");
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+function setupVideoSearch() {
+  const input = document.getElementById("video-search-input");
+  const resultsList = document.getElementById("video-search-results");
+  if (!input || !resultsList) return;
+
+  const runSearch = debounce(async (query) => {
+    if (!query) {
+      resultsList.innerHTML = "";
+      return;
+    }
+    try {
+      const res = await fetch(`/feeds/search-videos?q=${encodeURIComponent(query)}`);
+      if (!res.ok) return;
+      renderVideoSearchResults(await res.json());
+    } catch (err) {
+      // ignore transient search errors
+    }
+  }, 400);
+
+  input.addEventListener("input", () => runSearch(input.value.trim()));
+
+  resultsList.addEventListener("click", (event) => {
+    const button = event.target.closest(".video-search-play");
+    if (!button) return;
+    const row = button.closest(".video-search-result");
+    playSearchedVideo(row.dataset, button);
+  });
+}
+
 const TAB_STORAGE_KEY = "spotea-active-tab";
 
 function setupTabs() {
@@ -462,24 +566,31 @@ function setupStorage() {
   });
 }
 
+async function putSetting(body, errorMessage) {
+  try {
+    const res = await fetch("/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error("update failed");
+  } catch (err) {
+    showToast(errorMessage);
+  }
+}
+
 function setupSettings() {
-  const form = document.getElementById("settings-form");
-  if (!form) return;
+  const qualitySelect = document.getElementById("audio-quality-select");
+  qualitySelect?.addEventListener("change", () => {
+    putSetting({ audio_quality: qualitySelect.value }, "Could not update audio quality");
+  });
 
-  form.addEventListener("change", async (event) => {
-    const input = event.target.closest('input[name="audio_quality"]');
-    if (!input) return;
-
-    try {
-      const res = await fetch("/settings", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ audio_quality: input.value }),
-      });
-      if (!res.ok) throw new Error("update failed");
-    } catch (err) {
-      showToast("Could not update audio quality");
-    }
+  const refreshIntervalSelect = document.getElementById("refresh-interval-select");
+  refreshIntervalSelect?.addEventListener("change", () => {
+    putSetting(
+      { feed_refresh_interval_minutes: Number(refreshIntervalSelect.value) },
+      "Could not update refresh interval"
+    );
   });
 }
 
@@ -693,6 +804,7 @@ function setupBulkImport() {
 document.addEventListener("DOMContentLoaded", () => {
   setupTabs();
   setupChannelSearch();
+  setupVideoSearch();
   setupDownloadsOverlay();
   setupBulkImport();
   setupStorage();
@@ -702,5 +814,4 @@ document.addEventListener("DOMContentLoaded", () => {
   setupHorizontalScrollers();
   setupRefreshButton();
   setupMobileMenu();
-  maybeAutoRefresh();
 });

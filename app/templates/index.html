@@ -6,6 +6,12 @@
   <meta name="theme-color" content="#121212" />
   <title>Spotea</title>
   <link rel="icon" href="/static/img/favicon.ico" />
+  <link rel="manifest" href="/static/manifest.json" />
+  <link rel="apple-touch-icon" href="/static/img/apple-touch-icon.png" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Spotea" />
   <link rel="stylesheet" href="/static/css/style.css" />
   <script>
     // Runs before the body paints, so the right tab (from the URL, falling
@@ -14,7 +20,7 @@
     // corrects it after DOMContentLoaded, which flashes stale content for a
     // frame on every reload.
     (function () {
-      var VALID_TABS = ["home", "library", "manage", "settings"];
+      var VALID_TABS = ["home", "library", "explore", "manage", "settings"];
       var fromHash = location.hash.slice(1);
       var fromStorage = localStorage.getItem("spotea-active-tab");
       var tab =
@@ -31,18 +37,6 @@
   <div id="refresh-overlay" class="overlay" hidden>
     <span class="spinner spinner-lg" role="status" aria-label="Refreshing"></span>
   </div>
-  <script>
-    // Unhidden here, synchronously, before <main> below even parses — not
-    // left to maybeAutoRefresh() in app.js, which only runs after
-    // DOMContentLoaded (and after several other setup calls). Waiting for
-    // that leaves a window where the page looks fully loaded and clickable
-    // but the session's one-time auto-refresh hasn't started yet, so a user
-    // can end up tapping a library item right as content shifts under them.
-    // Keep the key below in sync with SESSION_REFRESH_KEY in app.js.
-    if (!sessionStorage.getItem("spotea-session-refreshed")) {
-      document.getElementById("refresh-overlay").hidden = false;
-    }
-  </script>
 
   <header class="topbar">
     <div class="topbar-inner">
@@ -108,6 +102,7 @@
     <div class="tabs-inner">
     <button type="button" class="tab-btn" data-tab="home" role="tab" aria-selected="false">Home</button>
     <button type="button" class="tab-btn" data-tab="library" role="tab" aria-selected="false">Library</button>
+    <button type="button" class="tab-btn" data-tab="explore" role="tab" aria-selected="false">Explore</button>
     <button type="button" class="tab-btn" data-tab="manage" role="tab" aria-selected="false">Manage</button>
     <button type="button" class="tab-btn" data-tab="settings" role="tab" aria-selected="false">Settings</button>
     </div>
@@ -237,6 +232,20 @@
       {% endif %}
     </section>
 
+    <section id="tab-explore" class="tab-panel" data-tab-panel="explore" hidden>
+      <div class="channels-panel-inner">
+        <h2>Search a song</h2>
+        <p class="muted">
+          Listen to one specific track without following its channel — handy for features and
+          collaborations that don't show up on an artist's own channel.
+        </p>
+        <div class="channel-search">
+          <input type="text" id="video-search-input" placeholder="Search for a song…" autocomplete="off" autocapitalize="off" autocorrect="off" />
+        </div>
+        <ul id="video-search-results" class="search-results video-search-results"></ul>
+      </div>
+    </section>
+
     <section id="tab-manage" class="tab-panel" data-tab-panel="manage" hidden>
       <div class="channels-panel-inner">
         <h2>Search channels</h2>
@@ -275,52 +284,58 @@
 
     <section id="tab-settings" class="tab-panel" data-tab-panel="settings" hidden>
       <div class="channels-panel-inner">
-        <h2>Audio quality</h2>
-        <p class="muted">Applies to new downloads only — files you already have keep their current quality.</p>
+        <h2>Profiles</h2>
+        <div class="settings-row">
+          <div class="settings-row-info">
+            <span class="settings-row-label">Profiles</span>
+            <span class="settings-row-desc">Switch, rename, or remove a profile. Deleting one also removes its channels and downloads.</span>
+          </div>
+          <button type="button" id="open-profiles-settings" class="btn-quiet">Manage profiles</button>
+        </div>
 
-        <form id="settings-form" class="quality-options">
-          <label class="quality-option">
-            <input type="radio" name="audio_quality" value="high" {{ 'checked' if audio_quality == 'high' }} />
-            <span class="quality-option-body">
-              <span class="quality-option-title">High quality</span>
-              <span class="quality-option-desc">Best sound, ~58 MB per hour of audio</span>
-            </span>
-          </label>
-          <label class="quality-option">
-            <input type="radio" name="audio_quality" value="medium" {{ 'checked' if audio_quality == 'medium' }} />
-            <span class="quality-option-body">
-              <span class="quality-option-title">Medium quality</span>
-              <span class="quality-option-desc">~43 MB per hour of audio — takes a bit longer to prepare since it's re-encoded</span>
-            </span>
-          </label>
-          <label class="quality-option">
-            <input type="radio" name="audio_quality" value="low" {{ 'checked' if audio_quality == 'low' }} />
-            <span class="quality-option-body">
-              <span class="quality-option-title">Data saver</span>
-              <span class="quality-option-desc">Great for spoken content, ~22 MB per hour of audio</span>
-            </span>
-          </label>
-        </form>
+        <h2>History</h2>
+        <div class="settings-row">
+          <div class="settings-row-info">
+            <span class="settings-row-label">Recently played</span>
+            <span class="settings-row-desc">Clears your "Recently played" shelf on Home. Doesn't remove any downloads.</span>
+          </div>
+          <button type="button" id="clear-recently-played" class="btn-quiet">Clear</button>
+        </div>
 
         <h2>Downloads</h2>
-        <div class="storage-summary">
-          <div>
-            <span class="storage-total">{{ usage.total_bytes | filesize }}</span>
-            <span class="muted">across {{ usage.count }} item{{ '' if usage.count == 1 else 's' }}</span>
+        <div class="settings-row">
+          <div class="settings-row-info">
+            <span class="settings-row-label">Storage used</span>
+            <span class="settings-row-desc">{{ usage.total_bytes | filesize }} across {{ usage.count }} item{{ '' if usage.count == 1 else 's' }}</span>
           </div>
           <button type="button" id="open-downloads" class="btn-quiet">Manage downloads</button>
         </div>
 
-        <h2>History</h2>
-        <p class="muted">Clears your "Recently played" shelf on Home. Doesn't remove any downloads.</p>
-        <div class="storage-summary">
-          <span class="storage-total">Recently played</span>
-          <button type="button" id="clear-recently-played" class="btn-quiet">Clear</button>
+        <h2>Audio quality</h2>
+        <div class="settings-row">
+          <div class="settings-row-info">
+            <span class="settings-row-label">Download quality</span>
+            <span class="settings-row-desc">Applies to new downloads only — files you already have keep their current quality.</span>
+          </div>
+          <select id="audio-quality-select" class="settings-select" aria-label="Download quality">
+            <option value="high" {{ 'selected' if audio_quality == 'high' }}>High quality</option>
+            <option value="low" {{ 'selected' if audio_quality == 'low' }}>Data saver</option>
+          </select>
         </div>
 
-        <h2>Profiles</h2>
-        <p class="muted">Rename, re-icon, or remove a profile. Deleting one also removes its channels and downloads.</p>
-        <ul id="profiles-settings-list" class="profiles-list profiles-list-settings"></ul>
+        <h2>Feed updates</h2>
+        <div class="settings-row">
+          <div class="settings-row-info">
+            <span class="settings-row-label">Check for new videos</span>
+            <span class="settings-row-desc">How often followed channels are checked for new videos in the background.</span>
+          </div>
+          <select id="refresh-interval-select" class="settings-select" aria-label="Check for new videos">
+            <option value="15" {{ 'selected' if feed_refresh_interval_minutes == 15 }}>Every 15 minutes</option>
+            <option value="30" {{ 'selected' if feed_refresh_interval_minutes == 30 }}>Every 30 minutes</option>
+            <option value="60" {{ 'selected' if feed_refresh_interval_minutes == 60 }}>Every hour</option>
+            <option value="120" {{ 'selected' if feed_refresh_interval_minutes == 120 }}>Every 2 hours</option>
+          </select>
+        </div>
       </div>
     </section>
   </main>
@@ -375,6 +390,17 @@
         <button type="button" id="profiles-close" class="modal-close" aria-label="Close">×</button>
       </div>
       <ul id="profiles-switch-list" class="profiles-list"></ul>
+      <p class="muted profiles-switch-hint">Want to add or rename a profile? Head to Settings.</p>
+    </div>
+  </div>
+
+  <div id="profiles-manage-overlay" class="modal-overlay" hidden>
+    <div class="modal modal-profiles">
+      <div class="modal-header">
+        <h2>Manage profiles</h2>
+        <button type="button" id="profiles-manage-close" class="modal-close" aria-label="Close">×</button>
+      </div>
+      <ul id="profiles-manage-list" class="profiles-list"></ul>
       <form id="profiles-add-form" class="profiles-add-form">
         <input
           type="text"

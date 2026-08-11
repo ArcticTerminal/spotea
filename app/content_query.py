@@ -32,7 +32,18 @@ def query_content_page(
 
     Returns (items, clamped page, total_pages).
     """
-    query = db.query(Content).options(joinedload(Content.feed)).filter(Content.user_id == user_id)
+    # is_preview excludes Explore videos not yet favorited/saved — see
+    # routers/feeds.py's add_single_video and routers/content.py's
+    # add_favorite/add_saved. Favorites/Saved never actually hit this in
+    # practice (favoriting/saving already clears is_preview as a side
+    # effect), but the channel-detail page (feed_id) could otherwise be
+    # reached directly for a placeholder feed, so it's filtered here for
+    # every caller, not just some.
+    query = (
+        db.query(Content)
+        .options(joinedload(Content.feed))
+        .filter(Content.user_id == user_id, Content.is_preview.is_(False))
+    )
 
     if feed_id is not None:
         query = query.filter(Content.feed_id == feed_id)

@@ -143,6 +143,11 @@ select {
   font-size: 1rem;
 }
 
+.login-card input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
 .login-card button {
   margin-top: 0.5rem;
   padding: 0.6rem;
@@ -289,7 +294,7 @@ select {
 
 .btn-icon {
   background: none;
-  border: 1px solid var(--border-default);
+  border: none;
   color: var(--text-secondary);
   border-radius: 6px;
   /* 44px — the platform-recommended minimum touch target, not just enough
@@ -308,7 +313,7 @@ select {
 }
 
 .btn-icon:hover {
-  border-color: var(--border-strong);
+  background: var(--bg-hover-strong);
   color: var(--white);
 }
 
@@ -323,7 +328,7 @@ select {
 
 .btn-ghost {
   background: none;
-  border: 1px solid var(--border-default);
+  border: none;
   color: var(--text-secondary);
   border-radius: 6px;
   padding: 0.4rem 0.9rem;
@@ -338,7 +343,7 @@ select {
 }
 
 .btn-ghost:hover {
-  border-color: var(--border-strong);
+  background: var(--bg-hover-strong);
   color: var(--white);
 }
 
@@ -348,7 +353,7 @@ select {
 }
 
 .btn-ghost:disabled:hover {
-  border-color: var(--border-default);
+  background: none;
   color: var(--text-secondary);
 }
 
@@ -423,6 +428,7 @@ select {
    that lands on a different tab. */
 html[data-active-tab="home"] .tab-btn[data-tab="home"],
 html[data-active-tab="library"] .tab-btn[data-tab="library"],
+html[data-active-tab="explore"] .tab-btn[data-tab="explore"],
 html[data-active-tab="manage"] .tab-btn[data-tab="manage"],
 html[data-active-tab="settings"] .tab-btn[data-tab="settings"] {
   color: var(--white);
@@ -449,6 +455,7 @@ html[data-active-tab] .tab-panel {
 
 html[data-active-tab="home"] .tab-panel[data-tab-panel="home"],
 html[data-active-tab="library"] .tab-panel[data-tab-panel="library"],
+html[data-active-tab="explore"] .tab-panel[data-tab-panel="explore"],
 html[data-active-tab="manage"] .tab-panel[data-tab-panel="manage"],
 html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   display: block;
@@ -457,6 +464,13 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
 .channels-panel-inner {
   max-width: 480px;
   margin: 0 auto;
+}
+
+/* Settings gets more room than Manage's search/import column — on a wide
+   viewport the shared 480px cap left roughly a third of the screen used and
+   two thirds empty on both sides. */
+#tab-settings .channels-panel-inner {
+  max-width: 680px;
 }
 
 .channels-panel-inner h2 {
@@ -469,46 +483,93 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   margin-top: 0;
 }
 
-.quality-options {
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-  margin-top: 1rem;
-}
-
-.quality-option {
+/* Spotify-style settings row: label + one-line description on the left,
+   the actual control right-aligned — a plain native <select> rather than a
+   custom widget, since these are still just a handful of mutually
+   exclusive, self-explanatory choices. No card/border around the row
+   itself; a hairline separates rows, matching the reference. */
+.settings-row {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  padding: 0.9rem 1rem;
-  border: 1px solid var(--bg-input);
-  border-radius: 10px;
-  cursor: pointer;
+  justify-content: space-between;
+  gap: 1.5rem;
+  padding: 0.85rem 0;
+  border-bottom: 1px solid var(--border-subtle);
 }
 
-.quality-option:has(input:checked) {
-  border-color: var(--accent);
-  background: var(--accent-tint);
+.settings-row:last-child {
+  border-bottom: none;
 }
 
-.quality-option input {
-  accent-color: var(--accent);
-  flex-shrink: 0;
-}
-
-.quality-option-body {
+.settings-row-info {
   display: flex;
   flex-direction: column;
   gap: 0.15rem;
+  flex: 1;
+  min-width: 0;
 }
 
-.quality-option-title {
+/* Same visible border/background as .settings-select below, not the bare
+   .btn-quiet look — sitting next to (or, stacked on mobile, below) a
+   description line, a borderless text-only button reads as more paragraph
+   text rather than a control. Also flex-shrink/white-space: without them, a
+   long .settings-row-desc next to it could squeeze this into wrapping — a
+   button label breaking mid-word reads as broken, unlike a description
+   sentence wrapping. */
+.settings-row > .btn-quiet {
+  flex-shrink: 0;
+  white-space: nowrap;
+  background: var(--bg-input);
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+}
+
+.settings-row > .btn-quiet:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-input);
+}
+
+.settings-row-label {
   font-weight: 600;
 }
 
-.quality-option-desc {
+.settings-row-desc {
   font-size: 0.8rem;
   color: var(--text-muted);
+}
+
+.settings-select {
+  flex-shrink: 0;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  padding: 0.45rem 0.7rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.settings-select:hover {
+  border-color: var(--border-strong);
+}
+
+/* A description sentence next to a dropdown is tight on a phone screen —
+   stack them instead of forcing a side-by-side row. */
+@media (max-width: 480px) {
+  .settings-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+  }
+
+  /* Otherwise these stretch to the row's full (now vertical) width like
+     .settings-row-info above them, and a button's centered label ends up
+     floating in the middle of that width instead of sitting left with it. */
+  .settings-row > .settings-select,
+  .settings-row > .btn-quiet {
+    align-self: flex-start;
+  }
 }
 
 @media (min-width: 700px) {
@@ -528,13 +589,43 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   }
 }
 
-.channel-search input {
-  width: 100%;
+/* Shared shape for every text input in the app — search (library, channel
+   search), the profile name field — so they all read as the same control.
+   Each selector below only adds what's actually different about it (width
+   behavior, margin, flex). */
+.channel-search input,
+.profiles-add-form input,
+.library-search-input {
   padding: 0.5rem 0.6rem;
   border-radius: 6px;
   border: 1px solid var(--border-default);
   background: var(--bg-input);
   color: var(--text-primary);
+  /* 16px, not smaller — iOS Safari auto-zooms the page on focus for any
+     input with a smaller computed font-size, which reads as broken on
+     mobile. */
+  font-size: 1rem;
+}
+
+.channel-search input::placeholder,
+.profiles-add-form input::placeholder,
+.library-search-input::placeholder,
+.login-card input::placeholder,
+.bulk-import-input::placeholder {
+  color: var(--text-muted);
+}
+
+/* Accent border instead of the browser's default focus ring, on every
+   input above — no exceptions, so focus always reads the same way. */
+.channel-search input:focus,
+.profiles-add-form input:focus,
+.library-search-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.channel-search input {
+  width: 100%;
   margin-bottom: 0.75rem;
 }
 
@@ -587,6 +678,24 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
 .search-result-subs {
   font-size: 0.75rem;
   color: var(--text-muted);
+}
+
+/* Video results (Explore) reuse .search-result/.search-result-info/-title/
+   -subs as-is — only the thumbnail shape differs from a channel avatar
+   (rectangular, not circular), and the trailing control is a play icon
+   instead of an "Add" text button. */
+.video-search-thumb {
+  width: 56px;
+  height: 32px;
+  border-radius: 4px;
+  object-fit: cover;
+  flex-shrink: 0;
+  background: var(--bg-input);
+  display: block;
+}
+
+.video-search-play {
+  flex-shrink: 0;
 }
 
 .search-empty {
@@ -744,6 +853,18 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   cursor: default;
 }
 
+/* Same layout as .profile-row-main, minus the button semantics/cursor —
+   the manage list's rows aren't clickable-to-switch, just icon + name. */
+.profile-row-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0;
+  color: var(--text-primary);
+}
+
 .profile-row-icon {
   display: inline-flex;
   color: var(--white);
@@ -762,6 +883,17 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   white-space: nowrap;
 }
 
+.profile-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+
+.profiles-switch-hint {
+  margin: 1rem 0 0;
+}
+
 .profiles-add-form {
   display: flex;
   gap: 0.5rem;
@@ -769,28 +901,6 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
 
 .profiles-add-form input {
   flex: 1;
-  padding: 0.5rem 0.6rem;
-  border-radius: 6px;
-  border: 1px solid var(--border-default);
-  background: var(--bg-input);
-  color: var(--text-primary);
-}
-
-.profile-edit-form {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.profile-name-input {
-  flex: 1;
-  min-width: 0;
-  padding: 0.4rem 0.6rem;
-  border-radius: 6px;
-  border: 1px solid var(--border-default);
-  background: var(--bg-input);
-  color: var(--text-primary);
 }
 
 .storage-export,
@@ -967,11 +1077,6 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   flex: 0 0 auto;
 }
 
-.channel-chip:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
 .pagination {
   display: flex;
   align-items: center;
@@ -1060,24 +1165,6 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
 .library-search-input {
   width: 150px;
   max-width: 100%;
-  padding: 0.3rem 0.6rem;
-  border-radius: 6px;
-  border: 1px solid var(--border-default);
-  background: var(--bg-raised);
-  color: var(--text-primary);
-  /* 16px, not smaller — iOS Safari auto-zooms the page on focus for any
-     input with a smaller computed font-size, which reads as broken on
-     mobile. */
-  font-size: 1rem;
-}
-
-.library-search-input::placeholder {
-  color: var(--text-muted);
-}
-
-.library-search-input:focus {
-  outline: none;
-  border-color: var(--accent);
 }
 
 .channel-card-avatar {
@@ -1663,6 +1750,11 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   /* 16px — see .library-search-input's comment on iOS auto-zoom. */
   font-size: 1rem;
   margin-bottom: 1rem;
+}
+
+.bulk-import-input:focus {
+  outline: none;
+  border-color: var(--accent);
 }
 
 .bulk-import-progress {

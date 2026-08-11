@@ -12,6 +12,8 @@ _COLUMN_MIGRATIONS = [
     ("users", "audio_quality", "VARCHAR(10) NOT NULL DEFAULT 'high'"),
     ("content", "last_played_at", "DATETIME"),
     ("feeds", "avatar_url", "VARCHAR(500)"),
+    ("feeds", "followed", "BOOLEAN NOT NULL DEFAULT 1"),
+    ("content", "is_preview", "BOOLEAN NOT NULL DEFAULT 0"),
 ]
 
 
@@ -41,3 +43,16 @@ def run_migrations(engine: Engine) -> None:
                         "WHERE last_played_at IS NULL AND status = 'ready' AND downloaded_at IS NOT NULL"
                     )
                 )
+
+        # "medium" quality (locally re-encoded, the only tier that paid a
+        # transcode cost — see downloader.py) has been dropped in favor of
+        # just "high"/"low", both of which remux instead of re-encoding. Any
+        # profile still set to it falls back to "low", the closer match in
+        # intent (smaller files) of the two remaining tiers. The table's
+        # CHECK constraint predates this on already-created databases and
+        # SQLite can't alter it in place, but it still only allows
+        # 'high'/'medium'/'low' — 'low' passes it fine.
+        if "users" in existing_tables:
+            columns = {col["name"] for col in inspect(engine).get_columns("users")}
+            if "audio_quality" in columns:
+                conn.execute(text("UPDATE users SET audio_quality = 'low' WHERE audio_quality = 'medium'"))

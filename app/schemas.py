@@ -66,6 +66,26 @@ class ChannelSearchResultOut(BaseModel):
     channel_url: str
 
 
+class VideoSearchResultOut(BaseModel):
+    video_id: str
+    title: str
+    thumbnail_url: str | None
+    duration_seconds: int | None
+    channel_title: str | None
+
+
+class VideoAddCreate(BaseModel):
+    video_id: str
+    title: str
+    thumbnail_url: str | None = None
+    duration_seconds: int | None = None
+    channel_title: str | None = None
+
+
+class VideoAddResult(BaseModel):
+    content_id: int
+
+
 class FeedAddResult(BaseModel):
     feed: FeedOut
     new_content_count: int
@@ -84,10 +104,12 @@ class BackfillStatusOut(BaseModel):
 
 class SettingsOut(BaseModel):
     audio_quality: str
+    feed_refresh_interval_minutes: int
 
 
 class SettingsUpdate(BaseModel):
-    audio_quality: str
+    audio_quality: str | None = None
+    feed_refresh_interval_minutes: int | None = None
 
 
 class ProfileOut(BaseModel):

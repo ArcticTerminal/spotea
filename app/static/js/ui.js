@@ -149,6 +149,18 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 });
 
+// Makes the app installable ("Add to Home Screen" / desktop install prompt)
+// — see /sw.js and static/manifest.json. Registering from every page (this
+// file loads on all of them) rather than just index.html means installing
+// works no matter which page happens to be open when the browser offers it.
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch(() => {
+      // Not fatal — the app works the same without it, just not installable.
+    });
+  });
+}
+
 function showToast(message) {
   let container = document.getElementById("toast-container");
   if (!container) {
