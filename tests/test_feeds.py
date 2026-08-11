@@ -1,0 +1,212 @@
+from datetime import datetime
+
+import app.feed_sync as feed_sync_module
+import app.routers.feeds as feeds_module
+from app.feed_sync import FeedFetchResult, apply_feed_data
+from app.models import Content, Feed
+from app.rss import BackfillEntry, ParsedEntry, ParsedFeed, channel_feed_url
+
+USER_ID = 1
+
+
+def _seed_feed_with_content(db_session, **content_kwargs):
+    feed = Feed(user_id=USER_ID, rss_url="https://example.com/unfollow-me", channel_title="Unfollow Me")
+    db_session.add(feed)
+    db_session.commit()
+    db_session.refresh(feed)
+
+    defaults = {"status": "not_downloaded"}
+    defaults.update(content_kwargs)
+    content = Content(
+        feed_id=feed.id,
+        user_id=USER_ID,
+        video_id="untouched1",
+        title="Untouched video",
+        **defaults,
+    )
+    db_session.add(content)
+    db_session.commit()
+    db_session.refresh(content)
+    return feed, content
+
+
+def test_following_a_previously_previewed_channel_upgrades_the_placeholder(db_session, monkeypatch):
+    """Regression test for the Ezhel bug: an Explore-added video creates a
+    followed=False placeholder Feed; actually following that channel later
+    must reuse that same row (not create a duplicate whose content insert
+    would collide with the preview's Content row on the (user_id, video_id)
+    unique constraint)."""
+    channel_id = "UCabcdefghij"
+    rss_url = channel_feed_url(channel_id)
+
+    placeholder = Feed(user_id=USER_ID, rss_url=rss_url, channel_title="Ezhel", followed=False)
+    db_session.add(placeholder)
+    db_session.commit()
+    db_session.refresh(placeholder)
+
+    db_session.add(
+        Content(
+            feed_id=placeholder.id,
+            user_id=USER_ID,
+            video_id="preview0001",
+            title="Ezhel - Kaybet",
+            is_preview=True,
+            status="ready",
+        )
+    )
+    db_session.commit()
+
+    parsed = ParsedFeed(channel_title="Ezhel", entries=[])
+    monkeypatch.setattr(feeds_module, "fetch_feed", lambda url: parsed)
+    monkeypatch.setattr(
+        feeds_module,
+        "fetch_feed_data",
+        lambda feed_id, rss_url, avatar_url: FeedFetchResult(
+            parsed=parsed, durations={}, channel_id=channel_id, avatar_url=None
+        ),
+    )
+
+    feed, _new_count, resolved_channel_id = feeds_module._create_feed_from_rss_url(
+        db_session, rss_url, USER_ID
+    )
+
+    assert resolved_channel_id == channel_id
+    assert feed.id == placeholder.id
+    assert feed.followed is True
+
+    all_feeds = db_session.query(Feed).filter(Feed.user_id == USER_ID).all()
+    assert len(all_feeds) == 1
+
+
+def test_apply_feed_data_skips_video_already_owned_by_another_feed(db_session):
+    feed_a = Feed(user_id=USER_ID, rss_url="https://example.com/a", channel_title="A")
+    feed_b = Feed(user_id=USER_ID, rss_url="https://example.com/b", channel_title="B")
+    db_session.add_all([feed_a, feed_b])
+    db_session.commit()
+    db_session.refresh(feed_a)
+    db_session.refresh(feed_b)
+
+    db_session.add(
+        Content(feed_id=feed_a.id, user_id=USER_ID, video_id="shared0001", title="Shared video")
+    )
+    db_session.commit()
+
+    parsed = ParsedFeed(
+        channel_title="B",
+        entries=[
+            ParsedEntry(video_id="shared0001", title="Shared video", thumbnail_url=None, published_at=None)
+        ],
+    )
+    result = FeedFetchResult(parsed=parsed, durations={}, channel_id=None, avatar_url=None)
+
+    new_count = apply_feed_data(db_session, feed_b, result)
+
+    assert new_count == 0
+    rows = (
+        db_session.query(Content)
+        .filter(Content.user_id == USER_ID, Content.video_id == "shared0001")
+        .all()
+    )
+    assert len(rows) == 1
+    assert rows[0].feed_id == feed_a.id
+
+
+def test_refresh_feeds_isolates_one_failing_feed(db_session, monkeypatch):
+    feed_fails = Feed(user_id=USER_ID, rss_url="https://example.com/fails", channel_title="Fails")
+    feed_ok = Feed(user_id=USER_ID, rss_url="https://example.com/ok", channel_title="Ok")
+    db_session.add_all([feed_fails, feed_ok])
+    db_session.commit()
+    db_session.refresh(feed_fails)
+    db_session.refresh(feed_ok)
+
+    monkeypatch.setattr(
+        feed_sync_module,
+        "fetch_feed_data",
+        lambda feed_id, rss_url, avatar_url: FeedFetchResult(parsed=None, durations={}, channel_id=None),
+    )
+
+    def fake_apply_feed_data(db, feed, result):
+        if feed.id == feed_fails.id:
+            raise RuntimeError("simulated failure")
+        db.add(Content(feed_id=feed.id, user_id=feed.user_id, video_id="ok00000001", title="Ok video"))
+        db.commit()
+        return 1
+
+    monkeypatch.setattr(feed_sync_module, "apply_feed_data", fake_apply_feed_data)
+
+    new_count = feed_sync_module.refresh_feeds(db_session, [feed_fails, feed_ok])
+
+    assert new_count == 1
+    saved = db_session.query(Content).filter(Content.feed_id == feed_ok.id).all()
+    assert len(saved) == 1
+
+
+def test_run_backfill_marks_done_on_unexpected_failure(db_session, monkeypatch):
+    channel_id = "UCfailure0001"
+    feed = Feed(user_id=USER_ID, rss_url=channel_feed_url(channel_id), channel_title="Broken", followed=True)
+    db_session.add(feed)
+    db_session.commit()
+    db_session.refresh(feed)
+
+    monkeypatch.setattr(
+        feeds_module,
+        "fetch_channel_all_videos",
+        lambda channel_id, on_progress=None: [
+            BackfillEntry(video_id="backfill01", title="T", thumbnail_url=None, duration_seconds=None)
+        ],
+    )
+
+    def raise_on_commit():
+        raise RuntimeError("disk full")
+
+    monkeypatch.setattr(db_session, "commit", raise_on_commit)
+
+    feeds_module._run_backfill(feed.id, channel_id, db_session)
+
+    assert feeds_module._backfill_progress[feed.id][0] == "done"
+
+
+def test_unfollowing_a_channel_with_no_engaged_content_deletes_it_entirely(client, db_session):
+    feed, _content = _seed_feed_with_content(db_session)
+
+    res = client.delete(f"/feeds/{feed.id}")
+
+    assert res.status_code == 204
+    assert db_session.query(Feed).filter(Feed.id == feed.id).first() is None
+    assert db_session.query(Content).filter(Content.feed_id == feed.id).count() == 0
+
+
+def test_unfollowing_keeps_downloaded_content_and_downgrades_the_feed(client, db_session):
+    feed, content = _seed_feed_with_content(db_session, status="ready", file_path=None)
+
+    res = client.delete(f"/feeds/{feed.id}")
+    # client's request runs on its own Session — db_session's identity map
+    # otherwise keeps serving the pre-delete cached attribute values.
+    db_session.expire_all()
+
+    assert res.status_code == 204
+    kept_feed = db_session.query(Feed).filter(Feed.id == feed.id).first()
+    assert kept_feed is not None
+    assert kept_feed.followed is False
+    kept_content = db_session.query(Content).filter(Content.id == content.id).first()
+    assert kept_content is not None
+
+
+def test_unfollowing_keeps_recently_played_content(client, db_session):
+    feed, content = _seed_feed_with_content(db_session, last_played_at=datetime(2026, 1, 1))
+
+    res = client.delete(f"/feeds/{feed.id}")
+
+    assert res.status_code == 204
+    assert db_session.query(Feed).filter(Feed.id == feed.id).first() is not None
+    assert db_session.query(Content).filter(Content.id == content.id).first() is not None
+
+
+def test_unfollowing_keeps_favorited_and_saved_content(client, db_session):
+    feed, content = _seed_feed_with_content(db_session, is_favorite=True)
+
+    res = client.delete(f"/feeds/{feed.id}")
+
+    assert res.status_code == 204
+    assert db_session.query(Feed).filter(Feed.id == feed.id).first() is not None
+    assert db_session.query(Content).filter(Content.id == content.id).first() is not None

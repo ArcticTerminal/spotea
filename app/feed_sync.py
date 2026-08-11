@@ -1,3 +1,4 @@
+import logging
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
@@ -15,6 +16,8 @@ from app.rss import (
     fetch_feed,
     longform_feed_url,
 )
+
+logger = logging.getLogger(__name__)
 
 # Feed refresh is network-bound (RSS parse + a yt-dlp call per channel), so
 # refresh_feeds fans those out across threads rather than doing them one
@@ -95,10 +98,17 @@ def apply_feed_data(db: Session, feed: Feed, result: FeedFetchResult) -> int:
         feed.avatar_url = result.avatar_url
 
     incoming_ids = [entry.video_id for entry in parsed.entries]
+    # user_id-scoped, not feed_id-scoped: a video can already exist under a
+    # different feed_id for this user (e.g. an Explore preview added before
+    # this channel was followed for real, or the same video credited to two
+    # of the user's followed channels) — Content's (user_id, video_id)
+    # unique constraint is global, so inserting it again under this feed
+    # would violate it. Treating it as "already have it" and skipping is
+    # correct here, matching add_single_video's existing user-scoped check.
     existing_rows = {
         row.video_id: row
         for row in db.query(Content).filter(
-            Content.feed_id == feed.id, Content.video_id.in_(incoming_ids)
+            Content.user_id == feed.user_id, Content.video_id.in_(incoming_ids)
         )
     }
     missing_duration_ids = {
@@ -133,11 +143,21 @@ def refresh_feeds(db: Session, feeds: list[Feed]) -> int:
     """Fetch and apply every given feed's latest RSS data — the fetch half
     fanned out across a thread pool, the DB half applied back sequentially
     on the caller's session. Shared by the on-demand /feeds/refresh endpoint
-    (profile-scoped) and the background scheduler (every feed, no filter)."""
+    (profile-scoped) and the background scheduler (every feed across every
+    profile, no filter) — one feed's apply_feed_data failing must not abort
+    every other feed's refresh in the same call, so each is isolated below
+    rather than summed in one expression."""
     if not feeds:
         return 0
 
     with ThreadPoolExecutor(max_workers=min(len(feeds), REFRESH_POOL_SIZE)) as pool:
         results = list(pool.map(lambda f: fetch_feed_data(f.id, f.rss_url, f.avatar_url), feeds))
 
-    return sum(apply_feed_data(db, feed, result) for feed, result in zip(feeds, results))
+    new_count = 0
+    for feed, result in zip(feeds, results):
+        try:
+            new_count += apply_feed_data(db, feed, result)
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to apply feed data for feed %s (%s)", feed.id, feed.channel_title)
+    return new_count

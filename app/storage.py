@@ -110,19 +110,6 @@ def clear_all(db: Session, user_id: int) -> int:
     return len(rows)
 
 
-def delete_files_for_feed(db: Session, feed_id: int) -> None:
-    """Remove downloaded audio belonging to a feed.
-
-    Content rows cascade-delete with their feed, but the files they point at do
-    not — call this before deleting a feed so unfollowing doesn't strand audio
-    on disk forever.
-    """
-    rows = db.query(Content).filter(Content.feed_id == feed_id).all()
-    for row in rows:
-        if row.file_path:
-            unlink_if_unshared(db, row.file_path, row.id)
-
-
 def delete_files_for_profile(db: Session, user_id: int) -> None:
     """Remove downloaded audio belonging to every feed under a profile — call
     this before deleting a profile so it doesn't strand audio on disk forever

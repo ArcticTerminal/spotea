@@ -84,6 +84,15 @@ def _playlist_id(channel_id: str, prefix: str) -> str:
     return prefix + channel_id[2:] if channel_id.startswith("UC") else channel_id
 
 
+def channel_feed_url(channel_id: str) -> str:
+    """Canonical RSS feed URL for a channel_id — the single place this shape
+    is built, so every code path that creates or upgrades a Feed row for a
+    given channel_id agrees on its rss_url (see resolve_feed_url and
+    routers/feeds.py's _get_or_create_placeholder_feed, whose dedup lookup
+    depends on this being consistent)."""
+    return RSS_FEED_URL_TEMPLATE.format(channel_id=channel_id)
+
+
 def longform_feed_url(channel_id: str) -> str:
     """RSS feed scoped to a channel's Videos tab (UULF playlist) instead of
     all uploads — entries here are never Shorts, so callers don't need a
@@ -107,7 +116,7 @@ def resolve_feed_url(url: str) -> str:
 
     direct_match = CHANNEL_ID_URL_RE.search(url)
     if direct_match:
-        return RSS_FEED_URL_TEMPLATE.format(channel_id=direct_match.group(1))
+        return channel_feed_url(direct_match.group(1))
 
     try:
         with yt_dlp.YoutubeDL(_CHANNEL_RESOLVE_OPTS) as ydl:
@@ -119,7 +128,7 @@ def resolve_feed_url(url: str) -> str:
     if not channel_id:
         raise ChannelResolutionError("Could not determine a channel ID from this URL")
 
-    return RSS_FEED_URL_TEMPLATE.format(channel_id=channel_id)
+    return channel_feed_url(channel_id)
 
 
 @dataclass

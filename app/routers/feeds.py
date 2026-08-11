@@ -1,3 +1,4 @@
+import logging
 import secrets
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
@@ -14,10 +15,10 @@ from app.models import Content, Feed, User
 from app.rss import (
     ChannelResolutionError,
     InvalidFeedError,
+    channel_feed_url,
     extract_channel_id,
     fetch_channel_all_videos,
     fetch_feed,
-    longform_feed_url,
     resolve_feed_url,
     resolve_video_channel,
     search_channels,
@@ -38,7 +39,9 @@ from app.schemas import (
     VideoAddResult,
     VideoSearchResultOut,
 )
-from app.storage import delete_files_for_feed, unlink_if_unshared
+from app.storage import unlink_if_unshared
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/feeds", tags=["feeds"], dependencies=[Depends(require_login)])
 
@@ -84,36 +87,50 @@ def _run_backfill(feed_id: int, channel_id: str, db: Session) -> None:
         _backfill_progress[feed_id] = ("done", 0, 0)
         return
 
-    existing_ids = {
-        row.video_id for row in db.query(Content.video_id).filter(Content.feed_id == feed_id)
-    }
-    new_entries = [v for v in videos if v.video_id not in existing_ids]
+    try:
+        # user_id-scoped, not feed_id-scoped: a video can already exist under
+        # a different feed_id for this user (e.g. an Explore preview added
+        # before this channel was followed for real) — see the same
+        # reasoning in feed_sync.apply_feed_data. Skipping it here, rather
+        # than inserting a second row, avoids tripping Content's
+        # (user_id, video_id) unique constraint.
+        existing_ids = {
+            row.video_id
+            for row in db.query(Content.video_id).filter(Content.user_id == feed.user_id)
+        }
+        new_entries = [v for v in videos if v.video_id not in existing_ids]
 
-    oldest_known = (
-        db.query(func.min(Content.published_at))
-        .filter(Content.feed_id == feed_id, Content.published_at.isnot(None))
-        .scalar()
-    )
-    anchor = oldest_known or datetime.utcnow()
-
-    total = len(new_entries)
-    _backfill_progress[feed_id] = ("saving", 0, total)
-    for i, entry in enumerate(new_entries, start=1):
-        db.add(
-            Content(
-                feed_id=feed.id,
-                user_id=feed.user_id,
-                video_id=entry.video_id,
-                title=entry.title,
-                thumbnail_url=entry.thumbnail_url,
-                duration_seconds=entry.duration_seconds,
-                published_at=anchor - timedelta(seconds=i),
-            )
+        oldest_known = (
+            db.query(func.min(Content.published_at))
+            .filter(Content.feed_id == feed_id, Content.published_at.isnot(None))
+            .scalar()
         )
-        _backfill_progress[feed_id] = ("saving", i, total)
+        anchor = oldest_known or datetime.utcnow()
 
-    db.commit()
-    _backfill_progress[feed_id] = ("done", total, total)
+        total = len(new_entries)
+        _backfill_progress[feed_id] = ("saving", 0, total)
+        for i, entry in enumerate(new_entries, start=1):
+            db.add(
+                Content(
+                    feed_id=feed.id,
+                    user_id=feed.user_id,
+                    video_id=entry.video_id,
+                    title=entry.title,
+                    thumbnail_url=entry.thumbnail_url,
+                    duration_seconds=entry.duration_seconds,
+                    published_at=anchor - timedelta(seconds=i),
+                )
+            )
+            _backfill_progress[feed_id] = ("saving", i, total)
+
+        db.commit()
+        _backfill_progress[feed_id] = ("done", total, total)
+    except Exception:
+        # Whatever went wrong (DB, disk, anything else), the polling UI must
+        # still terminate instead of spinning on "scanning"/"saving" forever.
+        db.rollback()
+        _backfill_progress[feed_id] = ("done", 0, 0)
+        logger.exception("Backfill failed for feed %s (%s)", feed_id, feed.channel_title)
 
 
 class FeedAlreadyExistsError(Exception):
@@ -321,13 +338,14 @@ def _get_or_create_placeholder_feed(
     is required). followed=False keeps it out of Library and the background
     refresh scheduler (see feed_sync.refresh_feeds's callers) until the user
     follows the channel for real, which upgrades this same row in place (see
-    _create_feed_from_rss_url) instead of creating a duplicate — the rss_url
-    used here is exactly the dedup key that lookup checks.
+    _create_feed_from_rss_url) instead of creating a duplicate — rss_url must
+    be built with the exact same channel_feed_url helper resolve_feed_url
+    uses, since that's the dedup key that lookup checks by equality.
 
     No avatar fetch: a placeholder feed's avatar is never displayed anywhere
     (Library and the channel-hero page are the only avatar consumers, and
     both are followed-only surfaces)."""
-    rss_url = longform_feed_url(channel_id)
+    rss_url = channel_feed_url(channel_id)
     existing = db.query(Feed).filter(Feed.user_id == user_id, Feed.rss_url == rss_url).first()
     if existing:
         return existing
@@ -447,15 +465,42 @@ def get_backfill_status(
 def delete_feed(
     feed_id: int, profile: User = Depends(get_current_profile), db: Session = Depends(get_db)
 ) -> None:
+    """Unfollowing isn't allowed to destroy what the user actually downloaded,
+    played, favorited, or saved — only content nobody ever touched gets
+    purged. Anything kept stays on the feed row, which is downgraded to
+    followed=False (same state as an Explore placeholder — see
+    _get_or_create_placeholder_feed) rather than deleted, so it drops out of
+    Library/New Uploads/background refresh but keeps working everywhere else
+    (Storage, Recently Played, Favorites/Saved, direct playback — none of
+    those filter on Feed.followed). Re-following the same channel later picks
+    this same row back up via _create_feed_from_rss_url's rss_url lookup
+    instead of duplicating it."""
     feed = db.query(Feed).filter(Feed.id == feed_id, Feed.user_id == profile.id).first()
     if not feed:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Feed not found")
 
-    # Content rows cascade with the feed, but their files on disk don't.
-    delete_files_for_feed(db, feed.id)
+    content_rows = db.query(Content).filter(Content.feed_id == feed_id).all()
+    for content in content_rows:
+        keep = (
+            content.status == "ready"
+            or content.last_played_at is not None
+            or content.is_favorite
+            or content.is_saved
+        )
+        if not keep:
+            if content.file_path:
+                unlink_if_unshared(db, content.file_path, content.id)
+            db.delete(content)
 
-    db.delete(feed)
     db.commit()
+
+    remaining = db.query(func.count(Content.id)).filter(Content.feed_id == feed_id).scalar()
+    if remaining == 0:
+        db.delete(feed)
+    else:
+        feed.followed = False
+    db.commit()
+
     _backfill_progress.pop(feed_id, None)
 
 
