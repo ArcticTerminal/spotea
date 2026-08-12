@@ -1043,9 +1043,33 @@ function setupBulkImport() {
   });
 }
 
+// Unlike player.html (whose #player-root always has a server-rendered
+// content id, so prepareAudio's own resume logic just works after ui.js's
+// forced reload), the overlay starts every fresh page load closed and empty
+// — it has to be explicitly reopened before there's anything for that resume
+// logic to attach to.
+function resumeOverlayIfNeeded() {
+  const root = document.getElementById("player-root");
+  if (!root || root.dataset.contentId) return;
+  let raw;
+  try {
+    raw = sessionStorage.getItem("spotea-resume");
+  } catch (err) {
+    return;
+  }
+  if (!raw) return;
+  try {
+    const saved = JSON.parse(raw);
+    if (saved.contentId) openPlayer(saved.contentId);
+  } catch (err) {
+    /* Malformed record — nothing to resume. */
+  }
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   setupTabs();
   setupPlayerOverlay();
+  resumeOverlayIfNeeded();
   setupExploreSearch();
   setupDownloadsOverlay();
   setupBulkImportOverlay();

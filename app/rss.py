@@ -1,4 +1,5 @@
 import re
+import time
 import urllib.parse
 from calendar import timegm
 from collections.abc import Callable
@@ -449,10 +450,27 @@ def _parse_published(entry) -> datetime | None:
 
 
 def fetch_feed(rss_url: str) -> ParsedFeed:
-    try:
-        parsed = feedparser.parse(rss_url)
-    except Exception as exc:
-        raise InvalidFeedError(f"Could not fetch RSS feed: {exc}") from exc
+    # One retry after a beat: feedparser has no timeout/retry of its own, and
+    # a momentary network blip or YouTube-side hiccup fetching the XML looks
+    # identical to a genuinely invalid feed (empty/unparseable response) —
+    # this gives transient failures a second chance before surfacing the
+    # error to the user.
+    last_exc: Exception | None = None
+    parsed = None
+    for attempt in range(2):
+        if attempt:
+            time.sleep(1)
+        try:
+            parsed = feedparser.parse(rss_url)
+            last_exc = None
+        except Exception as exc:
+            last_exc = exc
+            continue
+        if parsed.get("feed") and parsed.feed.get("yt_channelid"):
+            break
+
+    if last_exc is not None:
+        raise InvalidFeedError(f"Could not fetch RSS feed: {last_exc}") from last_exc
 
     if not parsed.get("feed") or not parsed.feed.get("yt_channelid"):
         raise InvalidFeedError("URL is not a valid YouTube channel RSS feed")

@@ -1,9 +1,27 @@
+from datetime import datetime, timedelta
+
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.models import Content, Feed
 
 DEFAULT_PAGE_SIZE = 20
+
+# How far back "New Uploads" reaches — is_new_upload alone (see models.py's
+# Content.is_new_upload) only means "RSS-sourced, not backfilled," which
+# without this stays true forever, so a channel's uploads from months ago
+# never age out of the shelf/list. Shared by every place that means "New
+# Uploads" (this file, routers/pages.py's home shelf, count, and video_count)
+# so they can't drift apart and disagree on what counts as new.
+NEW_UPLOAD_MAX_AGE = timedelta(days=14)
+
+
+def new_upload_cutoff() -> datetime:
+    # Naive UTC, matching Content.published_at's own convention (see e.g.
+    # routers/feeds.py's add_single_video) — SQLite has no timezone type, and
+    # mixing naive/aware datetimes in the same column makes string comparison
+    # unreliable.
+    return datetime.utcnow() - NEW_UPLOAD_MAX_AGE
 
 # Distinct from a plain free-text filter: this is an *exact* channel match
 # (picked from a suggestion, e.g. clicking a Home channel chip), so a video
@@ -48,7 +66,7 @@ def query_content_page(
     if feed_id is not None:
         query = query.filter(Content.feed_id == feed_id)
 
-    needs_feed_join = filter not in ("", "__favorites__", "__saved__", "__played__", "__new_uploads__")
+    needs_feed_join = filter not in ("", "__favorites__", "__saved__", "__played__")
     if needs_feed_join:
         query = query.join(Feed)
 
@@ -59,7 +77,17 @@ def query_content_page(
     elif filter == "__played__":
         query = query.filter(Content.last_played_at.isnot(None))
     elif filter == "__new_uploads__":
-        query = query.filter(Content.is_new_upload.is_(True))
+        # Unfollowing a channel keeps content that was played/favorited/
+        # saved/downloaded (see routers/feeds.py's delete_feed) but is
+        # explicitly meant to drop it out of New Uploads — Feed.followed
+        # (not just is_new_upload) has to hold for this filter, matching the
+        # Home shelf's own Content.feed.has(Feed.followed.is_(True)) check
+        # (routers/pages.py's home_new_uploads).
+        query = query.filter(
+            Content.is_new_upload.is_(True),
+            Content.published_at >= new_upload_cutoff(),
+            Feed.followed.is_(True),
+        )
     elif filter.startswith(CHANNEL_FILTER_PREFIX):
         channel_title = filter[len(CHANNEL_FILTER_PREFIX) :]
         query = query.filter(Feed.channel_title == channel_title)

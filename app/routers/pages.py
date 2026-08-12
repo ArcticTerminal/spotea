@@ -5,7 +5,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.sql.elements import ColumnElement
 
-from app.content_query import DEFAULT_PAGE_SIZE, query_content_page
+from app.content_query import DEFAULT_PAGE_SIZE, new_upload_cutoff, query_content_page
 from app.deps import get_current_profile, get_db, require_login
 from app.formatting import format_duration, format_size
 from app.models import AppSettings, Content, Feed, User
@@ -74,7 +74,11 @@ def home(
     # shouldn't keep showing here as if still followed.
     home_new_uploads = (
         _home_shelf_query(db, profile.id)
-        .filter(Content.is_new_upload.is_(True), Content.feed.has(Feed.followed.is_(True)))
+        .filter(
+            Content.is_new_upload.is_(True),
+            Content.published_at >= new_upload_cutoff(),
+            Content.feed.has(Feed.followed.is_(True)),
+        )
         .order_by(Content.published_at.desc())
         .limit(HOME_SHELF_LIMIT)
         .all()
@@ -131,7 +135,13 @@ def home(
     # with what the page they link to actually lists.
     new_uploads_count = (
         db.query(func.count(Content.id))
-        .filter(Content.user_id == profile.id, Content.is_new_upload.is_(True), Content.is_preview.is_(False))
+        .filter(
+            Content.user_id == profile.id,
+            Content.is_new_upload.is_(True),
+            Content.is_preview.is_(False),
+            Content.published_at >= new_upload_cutoff(),
+            Content.feed.has(Feed.followed.is_(True)),
+        )
         .scalar()
     )
     recently_played_count = (
@@ -250,7 +260,9 @@ def new_uploads_page(
         db,
         user_id=profile.id,
         kind="new-uploads",
-        is_match=Content.is_new_upload.is_(True),
+        is_match=(Content.is_new_upload.is_(True))
+        & (Content.published_at >= new_upload_cutoff())
+        & (Content.feed.has(Feed.followed.is_(True))),
         filter_value="__new_uploads__",
         title="New Uploads",
         empty_message="No new uploads yet.",

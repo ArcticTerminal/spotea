@@ -10,6 +10,17 @@ const STATUS_POLL_MS = 1500;
 // finishes (see prepareAudio's own comment at the top of its body).
 let _activePollTimer = null;
 
+// Same problem as _activePollTimer, for the visibilitychange listener
+// prepareAudio registers below: without tracking and removing the previous
+// call's listener, every track that was ever mid-download during this page
+// session leaves a permanent zombie handler on document. Later, any
+// visibilitychange (backgrounding/foregrounding, or even just switching to
+// yet another track) fires all of them — and a stale one whose track has
+// since finished downloading server-side will call its own startPlayback()
+// and hijack the audio element back to that old track, regardless of what's
+// actually loaded now.
+let _activeVisibilityHandler = null;
+
 // Range inputs can't style their "already played" portion natively, so paint it
 // with a gradient that tracks the current value.
 function paintRange(input) {
@@ -190,6 +201,27 @@ function setupMediaSession(audio) {
   audio.addEventListener("timeupdate", syncPositionState);
 }
 
+// Written by ui.js's pageshow handler right before the reload it forces on
+// every backgrounding/foregrounding cycle — read here (once) so that reload
+// doesn't also silently restart the track from 0:00. Consumed on read so a
+// stale record can never apply to some later, unrelated track load.
+function consumeResumeState(contentId) {
+  let raw;
+  try {
+    raw = sessionStorage.getItem("spotea-resume");
+  } catch (err) {
+    return null;
+  }
+  if (!raw) return null;
+  sessionStorage.removeItem("spotea-resume");
+  try {
+    const saved = JSON.parse(raw);
+    return saved.contentId === contentId ? saved : null;
+  } catch (err) {
+    return null;
+  }
+}
+
 function whenVisible(run) {
   if (document.prerendering) {
     document.addEventListener("prerenderingchange", () => whenVisible(run), { once: true });
@@ -237,6 +269,10 @@ async function prepareAudio(audio, onStart) {
     clearInterval(_activePollTimer);
     _activePollTimer = null;
   }
+  if (_activeVisibilityHandler) {
+    document.removeEventListener("visibilitychange", _activeVisibilityHandler);
+    _activeVisibilityHandler = null;
+  }
   prepare.classList.remove("is-error");
   prepare.querySelector(".spinner").hidden = false;
 
@@ -245,9 +281,16 @@ async function prepareAudio(audio, onStart) {
     transport.classList.remove("is-disabled");
     audio.src = streamUrl;
     if (onStart) onStart();
-    audio.play().catch(() => {
-      /* Autoplay may be blocked; the play button still works. */
-    });
+
+    const resume = consumeResumeState(contentId);
+    if (resume) {
+      audio.addEventListener("loadedmetadata", () => { audio.currentTime = resume.currentTime; }, { once: true });
+    }
+    if (!resume || resume.wasPlaying) {
+      audio.play().catch(() => {
+        /* Autoplay may be blocked; the play button still works. */
+      });
+    }
   };
 
   const fail = (message) => {
@@ -293,6 +336,10 @@ async function prepareAudio(audio, onStart) {
   let consecutiveFailures = 0;
 
   const checkStatus = async () => {
+    // This track may no longer be the one loaded (a later openPlayer() call
+    // superseded it) even if this call's timer/listener somehow still fired —
+    // belt-and-suspenders alongside removing them above.
+    if (root.dataset.contentId !== contentId) return;
     try {
       const res = await fetch(`/content/${contentId}/status`);
       if (!res.ok) throw new Error("status check failed");
@@ -329,9 +376,10 @@ async function prepareAudio(audio, onStart) {
   // interval above may not have ticked in a while by the time the user
   // switches back — check in immediately instead of waiting for the next
   // scheduled tick.
-  document.addEventListener("visibilitychange", () => {
+  _activeVisibilityHandler = () => {
     if (document.visibilityState === "visible") checkStatus();
-  });
+  };
+  document.addEventListener("visibilitychange", _activeVisibilityHandler);
 }
 
 function setupFavorite() {

@@ -12,8 +12,33 @@
 // a page comes back this way is simpler and more robust than trying to track
 // every specific action that could have changed something while away.
 window.addEventListener("pageshow", (event) => {
-  if (event.persisted) window.location.reload();
+  if (!event.persisted) return;
+  saveResumeState();
+  window.location.reload();
 });
+
+// The reload above throws away whatever's currently loaded in the audio
+// element too — a fresh audio.src always starts at 0:00, so without this,
+// every backgrounding/foregrounding cycle (this fires constantly on iOS PWA,
+// which aggressively reloads backgrounded standalone web apps) would restart
+// the current track from the beginning. Snapshotted here, restored by
+// player.js's prepareAudio (player.html) and app.js's DOMContentLoaded
+// handler (the Home/Library/Explore overlay, which starts closed on a fresh
+// load and has to be reopened first).
+function saveResumeState() {
+  const audio = document.getElementById("audio");
+  const root = document.getElementById("player-root");
+  const contentId = root?.dataset.contentId;
+  if (!audio || !contentId) return;
+  try {
+    sessionStorage.setItem(
+      "spotea-resume",
+      JSON.stringify({ contentId, currentTime: audio.currentTime, wasPlaying: !audio.paused })
+    );
+  } catch (err) {
+    /* sessionStorage unavailable (e.g. private browsing) — losing the resume position is harmless. */
+  }
+}
 
 // Mirrors format_duration() in app/formatting.py (M:SS, or H:MM:SS past an
 // hour) — used by both the player's elapsed/duration display and the
