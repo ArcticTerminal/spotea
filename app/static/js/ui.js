@@ -17,6 +17,19 @@ window.addEventListener("pageshow", (event) => {
   window.location.reload();
 });
 
+// pageshow's own saveResumeState call (above) only covers the bfcache-
+// restore case — it runs *after* coming back, on the assumption there's
+// still something to snapshot at that moment. But leaving index.html for a
+// real, non-bfcache-eligible navigation (e.g. tapping a channel's "Library"
+// back-link, or any other in-app link to a standalone page) never restores
+// via pageshow at all when you return — landing back on a *fresh* load of
+// index.html instead, where resumeOverlayIfNeeded (app.js) finds nothing in
+// sessionStorage to resume and the mini-player just doesn't come back.
+// pagehide fires on every departure regardless of whether the page ends up
+// bfcache-eligible, so saving here (in addition to, not instead of, the
+// pageshow save) covers that gap too.
+window.addEventListener("pagehide", saveResumeState);
+
 // The reload above throws away whatever's currently loaded in the audio
 // element too — a fresh audio.src always starts at 0:00, so without this,
 // every backgrounding/foregrounding cycle (this fires constantly on iOS PWA,
@@ -30,10 +43,31 @@ function saveResumeState() {
   const root = document.getElementById("player-root");
   const contentId = root?.dataset.contentId;
   if (!audio || !contentId) return;
+  // No src yet means the track is still downloading/converting and playback
+  // never actually started — audio.paused is true here for that reason
+  // alone, not because anything was deliberately paused. Saving that as
+  // wasPlaying: false would wrongly suppress the auto-play that's supposed
+  // to happen once the download finishes and prepareAudio's startPlayback
+  // runs, leaving a freshly-downloaded track sitting paused at 0:00 instead
+  // of playing — indistinguishable from "restarted from the beginning" to
+  // whoever's listening.
+  if (!audio.src) return;
   try {
+    // Absent (player.html, which has no overlay to collapse) defaults to
+    // NOT expanded. This flag only matters to app.js's resumeOverlayIfNeeded
+    // (index.html-only) — and since pagehide (above) now saves on every
+    // departure, not just a bfcache-driven reload of index.html itself,
+    // leaving the standalone player page for the Home/Library/Explore SPA
+    // (e.g. player.html -> back -> a channel page's "Library" link) goes
+    // through this exact path. Defaulting to expanded there used to hijack
+    // the screen with the full "now playing" overlay just from landing on
+    // the SPA with something already playing; the mini bar alone is the
+    // least surprising way for that playback to follow you in.
+    const overlay = document.getElementById("player-overlay");
+    const wasExpanded = overlay ? !overlay.hidden : false;
     sessionStorage.setItem(
       "spotea-resume",
-      JSON.stringify({ contentId, currentTime: audio.currentTime, wasPlaying: !audio.paused })
+      JSON.stringify({ contentId, currentTime: audio.currentTime, wasPlaying: !audio.paused, wasExpanded })
     );
   } catch (err) {
     /* sessionStorage unavailable (e.g. private browsing) — losing the resume position is harmless. */

@@ -335,6 +335,24 @@ async function prepareAudio(audio, onStart) {
   const MAX_CONSECUTIVE_POLL_FAILURES = 4;
   let consecutiveFailures = 0;
 
+  // Stops both the poll and the visibilitychange check-in below — anything
+  // that ends this track's polling (ready, error, or giving up after too
+  // many failures) needs both gone. Leaving the visibilitychange listener
+  // behind after the interval is cleared turns it into a zombie: the next
+  // foreground/background cycle would still fire it, and since
+  // root.dataset.contentId still matches this same track, it would call
+  // checkStatus() again, see "ready" again, and call startPlayback() a
+  // second time — reassigning audio.src and restarting playback from 0:00
+  // on a track that was already playing fine.
+  const stopPolling = () => {
+    clearInterval(_activePollTimer);
+    _activePollTimer = null;
+    if (_activeVisibilityHandler) {
+      document.removeEventListener("visibilitychange", _activeVisibilityHandler);
+      _activeVisibilityHandler = null;
+    }
+  };
+
   const checkStatus = async () => {
     // This track may no longer be the one loaded (a later openPlayer() call
     // superseded it) even if this call's timer/listener somehow still fired —
@@ -347,13 +365,11 @@ async function prepareAudio(audio, onStart) {
       consecutiveFailures = 0;
 
       if (data.status === "ready") {
-        clearInterval(_activePollTimer);
-        _activePollTimer = null;
+        stopPolling();
         root.dataset.status = "ready";
         startPlayback();
       } else if (data.status === "error") {
-        clearInterval(_activePollTimer);
-        _activePollTimer = null;
+        stopPolling();
         fail(data.error_message ? "Download failed" : "Download failed");
       } else if (data.phase === "converting") {
         prepareText.textContent = "Converting…";
@@ -363,8 +379,7 @@ async function prepareAudio(audio, onStart) {
     } catch (err) {
       consecutiveFailures += 1;
       if (consecutiveFailures >= MAX_CONSECUTIVE_POLL_FAILURES) {
-        clearInterval(_activePollTimer);
-        _activePollTimer = null;
+        stopPolling();
         fail("Lost connection while downloading");
       }
     }

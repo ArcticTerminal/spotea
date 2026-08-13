@@ -56,6 +56,38 @@ function syncRecentlyPlayedShelf(contentId) {
   shelf.hidden = false;
 }
 
+// Same problem again, for the "Downloaded — plays instantly" badge:
+// .downloaded-badge/.track-downloaded are only ever written by the Jinja
+// templates at render time (item.status == "ready"), so a track that was
+// still downloading when its card was rendered never gets one added once
+// the download actually finishes mid-session — it stays looking
+// not-yet-downloaded until the next full reload. Patches every instance of
+// this content currently on the page (it can appear in more than one
+// shelf/list, including a card syncRecentlyPlayedShelf just cloned above).
+function markContentDownloaded(contentId) {
+  document.querySelectorAll(`.card[data-content-id="${contentId}"]`).forEach((card) => {
+    card.dataset.status = "ready";
+    const thumb = card.querySelector(".thumb");
+    if (thumb && !thumb.querySelector(".downloaded-badge")) {
+      thumb.insertAdjacentHTML(
+        "beforeend",
+        '<span class="downloaded-badge" title="Downloaded — plays instantly"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg></span>'
+      );
+    }
+  });
+
+  document.querySelectorAll(`.track-row[data-content-id="${contentId}"]`).forEach((row) => {
+    row.dataset.status = "ready";
+    const durationEl = row.querySelector(".track-duration");
+    if (durationEl && !durationEl.querySelector(".track-downloaded")) {
+      durationEl.insertAdjacentHTML(
+        "afterbegin",
+        '<svg class="track-downloaded" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" title="Downloaded — plays instantly"><polyline points="20 6 9 17 4 12"></polyline></svg>'
+      );
+    }
+  });
+}
+
 function setupHomeChannels() {
   const row = document.getElementById("home-channel-row");
   if (!row) return;
@@ -185,11 +217,18 @@ async function refreshFeeds() {
   try {
     const res = await fetch("/feeds/refresh", { method: "POST" });
     if (!res.ok) throw new Error("refresh failed");
-    const data = await res.json();
-    if (data.new_content_count > 0) {
-      window.location.reload();
-      return;
-    }
+    // Always reload, regardless of new_content_count: that figure only
+    // counts rows this exact call inserted, not rows apply_feed_data
+    // re-marked is_new_upload on an already-existing row (its "self-heal"
+    // path — see feed_sync.py), nor content some other trigger (the
+    // background refresh job, another tab, another device) had already
+    // added since this page was rendered. Gating the reload on it left New
+    // Uploads showing stale data after an explicit refresh whenever either
+    // of those applied. saveResumeState (ui.js) preserves playback across
+    // the reload the same way it does for the forced bfcache one.
+    saveResumeState();
+    window.location.reload();
+    return;
   } catch (err) {
     showToast("Could not refresh feeds");
   } finally {
@@ -510,7 +549,7 @@ function syncMiniPlayerInfo(data) {
   }
 }
 
-async function openPlayer(contentId) {
+async function openPlayer(contentId, { expanded = true } = {}) {
   contentId = String(contentId);
   const root = document.getElementById("player-root");
   const audio = document.getElementById("audio");
@@ -538,6 +577,17 @@ async function openPlayer(contentId) {
     data = await res.json();
   } catch (err) {
     showToast("Could not load this track");
+    // If this call came from resumeOverlayIfNeeded, the sessionStorage
+    // record it read is exactly what just failed to load (e.g. a profile
+    // switch made the old content id inaccessible) — consumeResumeState
+    // (player.js) only ever clears it on a *successful* startPlayback, so
+    // without this a permanently-invalid record would otherwise re-trigger
+    // this same failure on every subsequent page load.
+    try {
+      sessionStorage.removeItem("spotea-resume");
+    } catch (storageErr) {
+      /* sessionStorage unavailable — nothing to clean up. */
+    }
     return;
   }
 
@@ -580,11 +630,18 @@ async function openPlayer(contentId) {
     });
   }
 
-  document.getElementById("player-overlay").hidden = false;
+  // The mini bar always surfaces — only whether the full "now playing" view
+  // is what's on top depends on the caller (resumeOverlayIfNeeded passes
+  // expanded: false to put a track back exactly how it was left: collapsed
+  // to the mini bar, if that's how it was when the resume state was saved).
+  document.getElementById("player-overlay").hidden = !expanded;
   document.getElementById("mini-player").hidden = false;
   document.body.classList.add("has-mini-player");
 
-  prepareAudio(audio, () => syncRecentlyPlayedShelf(contentId));
+  prepareAudio(audio, () => {
+    syncRecentlyPlayedShelf(contentId);
+    markContentDownloaded(contentId);
+  });
 }
 
 function closePlayer() {
@@ -1060,7 +1117,10 @@ function resumeOverlayIfNeeded() {
   if (!raw) return;
   try {
     const saved = JSON.parse(raw);
-    if (saved.contentId) openPlayer(saved.contentId);
+    // wasExpanded !== false (not just "if true") so an older resume record
+    // written before this flag existed still defaults to expanded, matching
+    // what this always did before.
+    if (saved.contentId) openPlayer(saved.contentId, { expanded: saved.wasExpanded !== false });
   } catch (err) {
     /* Malformed record — nothing to resume. */
   }

@@ -7,3 +7,4 @@ jinja2
 python-multipart
 itsdangerous
 pydantic-settings
+bcrypt

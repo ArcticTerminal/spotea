@@ -28,9 +28,11 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from app.auth import hash_password
 from app.config import settings
 from app.database import Base, SessionLocal, engine
 from app.main import app
+from app.models import Account, User
 
 
 def _assert_paths_isolated() -> None:
@@ -55,34 +57,55 @@ def db_session() -> Session:
         yield session
 
 
+DEFAULT_ACCOUNT_ID = 1
+DEFAULT_PROFILE_ID = 1
+DEFAULT_ACCOUNT_EMAIL = "test@example.com"
+DEFAULT_ACCOUNT_PASSWORD = "test-password"
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _init_schema():
     """Runs the app's real startup path once (Base.metadata.create_all +
-    run_migrations + default user) against the isolated test DB, the same
-    way `client` would, so `db_session`-only tests still get a real schema
-    without needing to spin up a TestClient themselves."""
+    run_migrations) against the isolated test DB, the same way `client`
+    would, so `db_session`-only tests still get a real schema without
+    needing to spin up a TestClient themselves. Registration is no longer
+    automatic on startup (see main.py — that was a workaround for the old
+    shared-password model), so the bootstrap account/profile every other
+    test implicitly relies on (id 1 of each) is seeded here directly instead."""
     with TestClient(app):
         pass
+    with SessionLocal() as db:
+        if db.get(Account, DEFAULT_ACCOUNT_ID) is None:
+            account = Account(
+                id=DEFAULT_ACCOUNT_ID,
+                email=DEFAULT_ACCOUNT_EMAIL,
+                password_hash=hash_password(DEFAULT_ACCOUNT_PASSWORD),
+            )
+            db.add(account)
+            db.flush()
+            db.add(User(id=DEFAULT_PROFILE_ID, account_id=DEFAULT_ACCOUNT_ID, name="Default"))
+            db.commit()
     yield
-
-
-DEFAULT_PROFILE_ID = 1
 
 
 @pytest.fixture(autouse=True)
 def _clean_tables(_init_schema):
     """Runs after every test — deletes all rows except the bootstrap default
-    profile (`users.id == DEFAULT_PROFILE_ID`, every test implicitly relies
-    on it existing, same as the app itself always assumes) so tests don't
-    leak state into each other without paying to recreate the DB file each
-    time. Any extra profile a test created (see test_profiles_api.py) is
-    cleaned up here too, not just other tables — otherwise it'd silently
-    carry over into later tests' profile counts."""
+    account/profile (every test implicitly relies on them existing, same as
+    the app itself always assumed of users.id==1 before real accounts
+    existed) so tests don't leak state into each other without paying to
+    recreate the DB file each time. Any extra account/profile a test created
+    is cleaned up here too, not just other tables — otherwise it'd silently
+    carry over into later tests' counts. accounts must be preserved
+    alongside users, not just users — otherwise the preserved profile row is
+    left with a dangling account_id FK after the first test."""
     yield
     with engine.begin() as conn:
         for table in reversed(Base.metadata.sorted_tables):
             if table.name == "users":
                 conn.execute(table.delete().where(table.c.id != DEFAULT_PROFILE_ID))
+            elif table.name == "accounts":
+                conn.execute(table.delete().where(table.c.id != DEFAULT_ACCOUNT_ID))
             else:
                 conn.execute(table.delete())
 
@@ -94,6 +117,6 @@ def client() -> TestClient:
     tests never need to think about auth. See test_auth.py for the
     unauthenticated case."""
     with TestClient(app) as c:
-        res = c.post("/login", data={"password": settings.app_password})
+        res = c.post("/login", data={"email": DEFAULT_ACCOUNT_EMAIL, "password": DEFAULT_ACCOUNT_PASSWORD})
         assert res.status_code == 200
         yield c

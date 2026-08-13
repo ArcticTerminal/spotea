@@ -106,6 +106,17 @@ async function switchProfile(profileId) {
   try {
     const res = await fetch(`/profiles/${profileId}/switch`, { method: "POST" });
     if (res.ok) {
+      // Whatever's loaded belongs to the profile being left — its content id
+      // means nothing under the new one. Without closing it first, the
+      // reload below still fires ui.js's pagehide handler on the way out,
+      // which would snapshot that now-foreign content id into
+      // sessionStorage; the fresh load (already running as the new profile)
+      // then tries to resume it, 404s against /content/{id}, and — since a
+      // failed resume used to never clear its own stale record — repeats
+      // that same failed attempt on every reload after, forever. closePlayer
+      // (app.js) is always defined here: profiles.js only ever loads on
+      // index.html, which always has the player overlay markup.
+      closePlayer();
       window.location.reload();
       return;
     }

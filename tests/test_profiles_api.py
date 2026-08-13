@@ -1,8 +1,15 @@
 import os
 
-from app.models import Content, Feed, User
+from app.auth import hash_password
+from app.models import Account, Content, Feed, User
 from app.storage import unlink_if_unshared
 
+# Must match conftest.py's own DEFAULT_ACCOUNT_ID/DEFAULT_PROFILE_ID (the
+# bootstrap account/profile _init_schema seeds) — duplicated rather than
+# imported since tests/ isn't a real package (no __init__.py) and importing
+# conftest as `tests.conftest` re-executes its module-level setup as a
+# second, different module instance.
+DEFAULT_ACCOUNT_ID = 1
 DEFAULT_PROFILE_ID = 1
 
 
@@ -70,7 +77,7 @@ def test_unlink_if_unshared_keeps_file_referenced_by_another_profile(db_session,
     shared_path = str(tmp_path / "shared.m4a")
     open(shared_path, "w").close()
 
-    other_profile = User(name="Music")
+    other_profile = User(name="Music", account_id=DEFAULT_ACCOUNT_ID)
     db_session.add(other_profile)
     db_session.commit()
     db_session.refresh(other_profile)
@@ -95,3 +102,27 @@ def test_unlink_if_unshared_keeps_file_referenced_by_another_profile(db_session,
     # Only once the last referencing row is gone does the file actually go.
     unlink_if_unshared(db_session, shared_path, content_b.id)
     assert not os.path.exists(shared_path)
+
+
+def test_profiles_are_isolated_between_accounts(client, db_session):
+    other_account = Account(email="other@example.com", password_hash=hash_password("irrelevant1"))
+    db_session.add(other_account)
+    db_session.flush()
+    other_profile = User(name="Other Household", account_id=other_account.id)
+    db_session.add(other_profile)
+    db_session.commit()
+
+    # Another account's profile must never appear in this account's list.
+    profiles = client.get("/profiles").json()
+    assert [p["id"] for p in profiles] == [DEFAULT_PROFILE_ID]
+
+    # Nor be switchable/editable/deletable through this account's session —
+    # 404, not 403, so existence of the other account's profile id isn't leaked.
+    assert client.post(f"/profiles/{other_profile.id}/switch").status_code == 404
+    assert client.put(f"/profiles/{other_profile.id}", json={"name": "Hijacked"}).status_code == 404
+    assert client.delete(f"/profiles/{other_profile.id}").status_code == 404
+
+    # This account's own last-profile guard must be unaffected by the other
+    # account's profile existing (regression test for the count being scoped
+    # by account_id, not counted globally across every account).
+    assert client.delete(f"/profiles/{DEFAULT_PROFILE_ID}").status_code == 409

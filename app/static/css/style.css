@@ -113,6 +113,21 @@ body {
      scroll-container ancestor, so having one on body too breaks any
      position: sticky child (e.g. .app-header-sticky) even though body never
      actually scrolls itself. */
+  /* Flex column so .layout's full-viewport-height rule (below) can be
+     "the rest of the viewport after .app-header-sticky" instead of "a full
+     viewport on top of whatever .app-header-sticky already took" — without
+     this, every tab's document was header-height taller than the actual
+     viewport, which is invisible on tabs with enough real content to already
+     exceed one screen (Home/Library) but on a short one (Explore before
+     searching, Settings) left exactly that much unearned scroll room:
+     scrolling revealed nothing but background past the real content, and
+     dragged the fixed mini-player's docked position along with it visually
+     since the page could now scroll at all when it shouldn't have been able
+     to. */
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  min-height: 100dvh;
 }
 
 /* Form controls don't inherit font-size from the page by default — browsers
@@ -200,6 +215,22 @@ select {
   font-size: 0.85rem;
   text-align: center;
   margin: 0 0 1rem;
+}
+
+.login-alt-action {
+  text-align: center;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  margin: 1rem 0 0;
+}
+
+.login-alt-action a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.login-alt-action a:hover {
+  text-decoration: underline;
 }
 
 /* App shell */
@@ -492,6 +523,16 @@ html[data-active-tab="settings"] .tab-btn[data-tab="settings"] {
   padding: 1rem;
   max-width: 1100px;
   margin: 0 auto;
+  /* A flex item with auto cross-axis margins (margin: 0 auto, above, under
+     body's flex-direction: column) isn't stretched to fill the container by
+     default align-items: stretch — the auto margins opt it out, sizing it to
+     its own content/max-width instead and centering that. Block layout never
+     had this quirk (an auto-width block always fills its containing block
+     before max-width caps it), so without this explicit width, every tab
+     rendered at its content's natural width — up to the full 1100px
+     max-width — instead of the actual (usually much narrower, on mobile)
+     viewport, clipped by html's overflow-x: hidden. */
+  width: 100%;
   /* Explore (before/without search results) and Settings can be shorter
      than the viewport, unlike Home/Library which are always long. On real
      mobile browsers, a page that isn't tall enough to scroll behaves
@@ -499,13 +540,15 @@ html[data-active-tab="settings"] .tab-btn[data-tab="settings"] {
      can show/hide based on scroll capability, which shifts what
      `position: fixed; bottom: 0` (the mini-player) actually renders against
      between tabs, even though nothing about its own CSS changed. Padding
-     every tab out to at least a full viewport keeps that "is this page
-     scrollable" condition consistent across tabs instead of flipping
-     specifically on the short ones. dvh (dynamic viewport height, accounts
-     for that same address-bar chrome) with a vh fallback for browsers
-     without it. */
-  min-height: 100vh;
-  min-height: 100dvh;
+     every tab out to fill whatever's left of the viewport below
+     .app-header-sticky keeps that "is this page scrollable" condition
+     consistent across tabs instead of flipping specifically on the short
+     ones. flex: 1 on body's flex column (rather than min-height: 100vh/dvh
+     directly on this element) is what makes that "whatever's left" — a flat
+     100dvh here would stack on top of the header's own height instead of
+     including it, leaving every tab that much taller than the real
+     viewport. */
+  flex: 1;
 }
 
 .tab-panel[hidden] {

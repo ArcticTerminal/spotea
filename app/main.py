@@ -11,7 +11,7 @@ from app.config import settings
 from app.database import Base, SessionLocal, engine
 from app.deps import NotAuthenticated, require_login
 from app.migrations import run_migrations
-from app.models import AppSettings, User
+from app.models import AppSettings
 from app.routers import auth as auth_router
 from app.routers import content as content_router
 from app.routers import feeds as feeds_router
@@ -21,17 +21,8 @@ from app.routers import settings as settings_router
 from app.routers import storage as storage_router
 from app.scheduler import run_scheduler
 
-DEFAULT_USER_ID = 1
-
 # Fixed id for the single AppSettings row — see app.models.AppSettings.
 APP_SETTINGS_ID = 1
-
-
-def _ensure_default_user() -> None:
-    with SessionLocal() as db:
-        if db.get(User, DEFAULT_USER_ID) is None:
-            db.add(User(id=DEFAULT_USER_ID, name="Default"))
-            db.commit()
 
 
 def _ensure_app_settings() -> None:
@@ -45,7 +36,6 @@ def _ensure_app_settings() -> None:
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     run_migrations(engine)
-    _ensure_default_user()
     _ensure_app_settings()
 
     scheduler_task = asyncio.create_task(run_scheduler())

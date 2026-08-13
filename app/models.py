@@ -8,6 +8,32 @@ from app.database import Base
 CONTENT_STATUSES = ("not_downloaded", "downloading", "ready", "error")
 
 
+class Account(Base):
+    """The real, credentialed login — owns one or more `User` profiles
+    (household model: one account, several family-member profiles). Email is
+    always stored lowercased (normalized at the auth-router call sites), so
+    a plain unique constraint is enough without a case-insensitive collation."""
+
+    __tablename__ = "accounts"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    email: Mapped[str] = mapped_column(String(255), unique=True)
+    password_hash: Mapped[str] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+    # Which profile to land on right after login — session-stored
+    # PROFILE_SESSION_KEY doesn't survive logout (the whole session is
+    # cleared), so without this a fresh login always fell back to the
+    # account's first profile regardless of which one was active before.
+    # Deliberately a plain int, not a relationship/ForeignKey: a real FK to
+    # users.id would make Account and User mutually reference each other,
+    # and Base.metadata.create_all() can't topologically order a table-
+    # creation cycle. Validity (still one of this account's own profiles) is
+    # checked at the application layer instead, in get_current_profile.
+    last_active_profile_id: Mapped[int | None] = mapped_column(default=None)
+
+    profiles: Mapped[list["User"]] = relationship(back_populates="account", cascade="all, delete-orphan")
+
+
 class User(Base):
     __tablename__ = "users"
     __table_args__ = (
@@ -15,9 +41,11 @@ class User(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"))
     name: Mapped[str] = mapped_column(String(100))
     audio_quality: Mapped[str] = mapped_column(String(10), default="high")
 
+    account: Mapped["Account"] = relationship(back_populates="profiles")
     feeds: Mapped[list["Feed"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     content: Mapped[list["Content"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 

@@ -3,6 +3,9 @@ from datetime import datetime, timedelta
 from app.models import Content, Feed, User
 
 USER_ID = 1
+# Must match conftest.py's own DEFAULT_ACCOUNT_ID (duplicated rather than
+# imported — see test_profiles_api.py for why).
+DEFAULT_ACCOUNT_ID = 1
 
 
 def _seed(db_session, count=25):
@@ -127,7 +130,7 @@ def test_get_single_content_404_for_nonexistent_id(client, db_session):
 
 
 def test_get_single_content_404_for_another_users_content(client, db_session):
-    other_profile = User(name="Music")
+    other_profile = User(name="Music", account_id=DEFAULT_ACCOUNT_ID)
     db_session.add(other_profile)
     db_session.commit()
     db_session.refresh(other_profile)
