@@ -1,10 +1,12 @@
 # Spotea — Architecture
 
 A self-hosted, open-source tool for archiving and listening to content from
-YouTube channels via RSS. Users add RSS feeds of YouTube channels they follow,
-the app periodically parses them, lets the user download selected videos as
-audio (via yt-dlp), and play them back from the browser. Designed to be
-shared on GitHub and run by others via Docker on their own servers.
+YouTube channels via RSS. Users register an account, follow channels via
+RSS, the app periodically parses them, lets the user download selected
+videos as audio (via yt-dlp), and play them back from the browser. Designed
+to be shared on GitHub and run by others via Docker on their own servers —
+one deployment can now serve several independent households, each with
+their own login and their own set of profiles.
 
 ## 1. Component diagram
 
@@ -25,47 +27,103 @@ data/avatars/{channel_id}.jpg (Docker volume)
 data/spotea.db                (Docker volume)
 ```
 
+A background asyncio task (`app/scheduler.py`, started/cancelled in
+`main.py`'s lifespan) refreshes every followed feed on a shared interval,
+independent of any request — see §5's Refresh section.
+
 ## 2. Project structure
 
 ```
-spotifrei/
+spotea/
   app/
-    main.py               # FastAPI app + router mount + migrations on startup
+    main.py               # FastAPI app + router mount + startup (create_all,
+                           # migrations, AppSettings bootstrap, scheduler)
     config.py              # env-based settings
     database.py             # SQLAlchemy engine/session
-    migrations.py            # lightweight "add column if missing" patcher
-    content_query.py           # shared filter/paginate query (newest-first), used
-                                # by both the server-rendered page 1 and the AJAX endpoint
-    formatting.py              # Jinja filters (duration, file size)
-    storage.py                  # disk usage, cache clearing, orphan sweep, zip export
-    models.py                    # User, Feed, Content
-    schemas.py                     # Pydantic request/response models
-    auth.py                          # login/session handling
-    deps.py                            # get_db, require_login
+    migrations.py            # lightweight "add column if missing" patcher +
+                              # legacy-account backfill for pre-account installs
+    content_query.py           # shared filter/paginate query (newest-first),
+                                # backs every per-channel/virtual-playlist page
+    feed_sync.py                # network+DB feed refresh, shared by the
+                                 # on-demand /feeds/refresh route and the
+                                 # background scheduler
+    scheduler.py                 # background feed-refresh loop, on
+                                  # AppSettings.feed_refresh_interval_minutes
+    formatting.py                 # Jinja filters (duration, file size),
+                                   # filesystem-safe filenames
+    storage.py                     # disk usage, cache clearing, orphan
+                                    # sweep, zip export
+    models.py                       # Account, User, AppSettings, Feed, Content
+    schemas.py                       # Pydantic request/response models
+    auth.py                           # password hashing (bcrypt), session-key
+                                      # constants
+    deps.py                            # get_db, require_login,
+                                        # get_current_account, get_current_profile
     rss.py                               # feedparser + yt-dlp metadata helpers,
-                                          # channel search, avatar/duration lookups,
-                                          # full-history backfill scan
+                                          # channel/video search, avatar/duration
+                                          # lookups, full-history backfill scan
     downloader.py                          # yt-dlp wrapper + background download +
-                                          # channel avatar fetch
+                                            # channel avatar fetch
     routers/
-      auth.py
-      feeds.py                               # feeds, search, refresh, backfill status
-      content.py                               # download/status/stream/favorite/save/delete
-      storage.py                                 # clear-all + zip export endpoints
-      settings.py                                # per-user audio quality
-      pages.py                                   # home (shelves) + player page rendering
+      auth.py                                # login/register/logout
+      profiles.py                            # profile CRUD + switch,
+                                              # account-scoped
+      feeds.py                               # feeds, channel/video search,
+                                              # refresh, backfill status, bulk
+                                              # import, single-video add
+      content.py                             # list/get/download/status/stream/
+                                              # favorite/save/delete
+      storage.py                             # clear-all + zip export endpoints
+      settings.py                            # per-profile audio quality +
+                                              # deployment-wide refresh interval
+      pages.py                               # home (shelves), favorites/saved/
+                                              # new-uploads/recently-played,
+                                              # channel, and player page rendering
     templates/
       login.html
-      index.html                                   # Home/Library/Manage/Settings tabs
-      _content_card.html                           # single card partial, reused per item
-      player.html
+      register.html
+      index.html                                   # Home/Library/Explore/Settings
+                                                     # tabs (a single-page app)
+      _player_overlay.html                          # Home/Library/Explore's
+                                                     # persistent in-page player
+                                                     # + mini-player bar
+      _content_card.html                           # grid card partial (Home
+                                                     # shelves, Library's pinned
+                                                     # virtual-playlist tiles)
+      _content_row.html                             # list-row partial (channel
+                                                     # page, virtual-playlist pages)
+      _pagination.html
+      channel.html                                 # one channel's track list
+                                                     # (real navigation, not the
+                                                     # overlay — see §5)
+      content_list.html                            # Favorites/Saved/New
+                                                     # Uploads/Recently Played
+                                                     # (same partials as channel.html)
+      player.html                                  # standalone full-page player
+                                                     # (real navigation)
     static/
-      js/ui.js                                       # shared confirm modal + toast (loaded first)
-      js/app.js                                        # tabs, search, server-side filter/
-                                                        # pagination fetches, polling,
-                                                        # download/save/delete triggers
-      js/player.js                                       # custom audio player controls
+      js/ui.js                                       # shared confirm modal +
+                                                       # toast + playback-state
+                                                       # persistence across
+                                                       # navigation (loaded first)
+      js/app.js                                        # tabs, Explore search,
+                                                        # in-page player overlay,
+                                                        # Settings, bulk import,
+                                                        # backfill polling
+      js/player.js                                       # custom audio player
+                                                          # controls, shared by
+                                                          # player.html and the
+                                                          # overlay
+      js/profiles.js                                       # profile switcher +
+                                                            # manage-profiles UI
+      js/channel.js                                          # channel.html's
+                                                              # Unfollow button
+      js/sw.js                                                 # PWA service
+                                                                # worker (install-
+                                                                # ability only,
+                                                                # not offline-first)
       css/style.css
+      manifest.json                                              # PWA manifest
   data/                                 # mounted as Docker volume
     storage/{video_id}.{AUDIO_FORMAT}
     avatars/{channel_id}.jpg              # cached channel avatars, re-served via
@@ -83,15 +141,42 @@ spotifrei/
 
 ## 3. Data model
 
-**users** — `id PK`, `name`, `audio_quality` (`high`/`medium`/`low`, default
-`high` — see Settings below). Single row (`id=1`, "local"). The app
-currently has one shared login gate rather than per-account identity; this
-table stays in place so real multi-account support can be layered on later
-without a schema change.
+**accounts** — `id PK`, `email` (unique, always stored lowercased —
+normalized at the auth-router call sites, so no case-insensitive collation
+is needed), `password_hash` (bcrypt), `created_at`,
+`last_active_profile_id` (nullable, plain int — see below). The real,
+credentialed login: owns one or more `users` profiles (household model, one
+account, several family-member profiles).
+
+`last_active_profile_id` is deliberately **not** a real foreign key. Session-
+stored `PROFILE_SESSION_KEY` doesn't survive logout (the whole session is
+cleared), so without persisting it *somewhere* durable, logging back in
+always fell back to the account's first profile regardless of which one was
+active before. A real FK to `users.id` would make `accounts` and `users`
+reference each other, and `Base.metadata.create_all()` can't topologically
+order a table-creation cycle — so it's a plain column, and its validity
+(still one of this account's own profiles) is checked at the application
+layer in `get_current_profile` instead.
+
+**users** — `id PK`, `account_id FK`, `name`, `audio_quality` (`high`/`low`,
+default `high` — see Settings below; the CHECK constraint on a *pre-existing*
+database can still say `high`/`medium`/`low`, since SQLite can't alter a
+CHECK constraint in place — see Schema evolution). A profile: owns its own
+feeds/content, but authenticates through its owning account, not on its own.
+
+**app_settings** — `id PK` (fixed singleton row, `id=1`),
+`feed_refresh_interval_minutes` (default 30). Deployment-wide, not per-
+account or per-profile — one background refresh loop shared by every
+account's feeds. Making this per-account was considered and deliberately
+deferred (see Roadmap): it's a minor operational knob, and doing it properly
+would need per-account last-refreshed tracking in the scheduler, not just an
+extra column.
 
 **feeds** — `id PK`, `user_id FK`, `rss_url`, `channel_title` (auto-filled on
 first parse), `avatar_url` (nullable — same-origin path under `/avatars/`,
-fetched once per channel), `added_at`.
+fetched once per channel), `added_at`, `followed` (default `True` — `False`
+only for placeholder feeds auto-created to hold a single video added via
+Explore's song search; see §5).
 Unique: `(user_id, rss_url)`.
 
 **content** — `id PK`, `feed_id FK`, `user_id FK` (denormalized for query
@@ -99,13 +184,17 @@ convenience), `video_id` (YouTube ID), `title`, `thumbnail_url`,
 `duration_seconds` (nullable — backfilled from the channel's uploads
 playlist, not in the RSS feed), `published_at`, `status`, `file_path`,
 `error_message`, `added_at`, `downloaded_at`, `last_played_at` (nullable —
-set on stream, not on download; drives the "Recently played" home shelf),
-`is_favorite`, `is_saved`.
+set on stream, not on download; drives "Recently played"/"Recently Played"),
+`is_favorite`, `is_saved`, `is_preview` (default `False` — `True` for a
+just-added Explore song preview that hasn't been favorited/saved yet, see
+§5), `is_new_upload` (default `False` — `True` for a row inserted or
+re-matched by an RSS parse, as opposed to a full-history backfill scan; this
+is what "New Uploads" actually means, see §5).
 `is_favorite` and `is_saved` are separate on purpose: **saving** is a
-lightweight "come back to this" bookmark, toggled from the Library grid
-without opening anything; **favoriting** is a considered "I liked this",
-toggled from the player while you're actually listening. Both are filter
-options in the Library.
+lightweight "come back to this" bookmark, toggled from a card without
+opening anything; **favoriting** is a considered "I liked this," toggled
+from the player while actually listening. Both are pinned virtual playlists
+in Library.
 Unique: `(user_id, video_id)`.
 Index: `(user_id, status)`, `(user_id, published_at DESC)`.
 
@@ -118,99 +207,248 @@ not_downloaded ──▶ downloading ──▶ ready
 ```
 
 **Schema evolution** — `Base.metadata.create_all()` (in `main.py`'s startup)
-only creates tables that don't exist yet; it never alters existing ones. Each
-column added after the initial release (`is_favorite`, `duration_seconds`,
-`is_saved`, `audio_quality`, `last_played_at`, `avatar_url`) is also
-registered in `app/migrations.py`, which runs on every startup and adds
-the column via `ALTER TABLE ... ADD COLUMN` if it's missing — a lightweight
-stand-in for a real migration framework (Alembic would be overkill at this
-scale). New installs get every column for free via `create_all()`; upgrading
-existing installs is what `migrations.py` is for. It also does one data
-backfill: existing `ready` rows predating `last_played_at` get it set from
-`downloaded_at` as the closest proxy for "this was actually played," so the
-Home page's "Recently played" shelf doesn't wrongly treat already-downloaded
-content as never played.
+only creates tables that don't exist yet; it never alters existing ones, so
+a brand-new table (like `accounts`) needs no extra work here — new installs
+get it for free. Each *column* added to an existing table after its initial
+release is registered in `app/migrations.py`'s `_COLUMN_MIGRATIONS` list,
+which runs on every startup and adds it via `ALTER TABLE ... ADD COLUMN` if
+missing — a lightweight stand-in for a real migration framework (Alembic
+would be overkill at this scale).
+
+Two data backfills run alongside the column patcher:
+- Existing `ready` rows predating `last_played_at` get it set from
+  `downloaded_at` as the closest proxy for "this was actually played" (so
+  "Recently played" doesn't wrongly treat already-downloaded content as
+  never played), and any profile still on the retired `medium` audio-quality
+  tier falls back to `low` (see Audio quality in §5).
+- **The account backfill**: a pre-existing single-tenant database has
+  `users` rows with no owning `account_id` (that column didn't exist before
+  accounts did). `migrations.py` folds every such orphaned profile into one
+  new legacy `Account` — email `owner@local`, password hashed from whatever
+  `APP_PASSWORD` was already set in `.env` — so an existing deployment keeps
+  working immediately after upgrading, no data re-entry needed. If orphaned
+  profiles exist but `APP_PASSWORD` is unset, this raises loudly at startup
+  rather than silently creating an account with no usable password (a
+  quiet-lockout footgun). A fresh install has no orphaned rows, so this is a
+  no-op and `APP_PASSWORD` isn't required at all — see §7.
 
 ## 4. Endpoints
+
+**Auth**
 
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/login` | Login page |
-| POST | `/login` | Check password, set session cookie |
+| POST | `/login` | Verify email+password (bcrypt), set session cookie |
+| GET | `/register` | Registration page |
+| POST | `/register` | Create an Account + its first profile, log in |
 | POST | `/logout` | Clear session |
-| GET | `/` | Home page (Home/Library/Manage/Settings tabs), requires login |
-| GET | `/feeds/search?q=` | Search YouTube channels by name (for the Manage tab) |
+
+**Profiles** (all account-scoped — see §6)
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/profiles` | List the current account's profiles |
+| POST | `/profiles` | Create a profile, auto-switch into it |
+| PUT | `/profiles/{id}` | Rename |
+| DELETE | `/profiles/{id}` | Delete (refuses the account's last remaining profile) |
+| POST | `/profiles/{id}/switch` | Switch the active profile |
+
+**Feeds**
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/feeds/search?q=` | Search YouTube channels by name (Explore) |
+| GET | `/feeds/search-videos?q=` | Search YouTube videos/songs by name (Explore) |
 | POST | `/feeds` | Add a channel by URL (resolved to RSS via yt-dlp), run first parse, kick off background history backfill |
 | GET | `/feeds` | List followed feeds |
-| DELETE | `/feeds/{id}` | Unfollow (deletes cached audio for the feed first) |
-| POST | `/feeds/refresh` | Re-parse all feeds in parallel, insert new content rows, backfill durations/avatar |
+| DELETE | `/feeds/{id}` | Unfollow (keeps anything downloaded/played/favorited/saved, downgrades the rest) |
+| POST | `/feeds/refresh` | Re-parse this profile's feeds, insert new content rows |
 | GET | `/feeds/{id}/backfill-status` | Poll progress of the one-time full channel history scan |
-| GET | `/content?page=&filter=` | JSON content page, newest-first (server-side filter/pagination; also used for polling) |
+| POST | `/feeds/import` | Start a bulk import job (many channels at once) |
+| GET | `/feeds/import/{job_id}/status` | Poll bulk import progress |
+| POST | `/feeds/videos` | Add one video without following its channel (Explore song search) |
+| DELETE | `/feeds/videos/{content_id}` | Remove a video added this way |
+
+**Content**
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/content?page=&filter=` | JSON content page, newest-first (server-side filter/pagination; not currently called by the UI, but kept as a tested API surface — see §5) |
+| GET | `/content/{id}` | Single-item JSON fetch, powers the Home/Library/Explore overlay |
+| DELETE | `/content/recently-played` | Clear the "Recently played" shelf (doesn't delete downloads) |
 | POST | `/content/{id}/download` | Start yt-dlp download in the background |
 | GET | `/content/{id}/status` | Current status (+ download/convert progress) |
 | GET | `/content/{id}/stream?download=` | Serve the audio file (Range-request support); `download=1` skips the `last_played_at` update |
-| POST | `/content/{id}/favorite` | Mark as favorite (from the player) |
-| DELETE | `/content/{id}/favorite` | Unmark as favorite |
-| POST | `/content/{id}/save` | Save for later (from the Library grid) |
-| DELETE | `/content/{id}/save` | Un-save |
-| DELETE | `/storage` | Delete every downloaded file ("Clear all" in the Manage downloads modal) |
-| GET | `/storage/export` | Download every ready file as one uncompressed zip |
+| POST/DELETE | `/content/{id}/favorite` | Mark/unmark as favorite |
+| POST/DELETE | `/content/{id}/save` | Save/un-save for later |
 | DELETE | `/content/{id}` | Delete file, reset status to `not_downloaded` |
-| GET | `/settings` | Current per-user settings (audio quality) |
-| PUT | `/settings` | Update audio quality |
-| GET | `/player/{id}` | Player page |
-| GET | `/avatars/{filename}` | Serve a cached channel avatar from our own origin |
 
-All routes except `/login` and static assets require an active session
-(enforced via a `require_login` dependency).
+**Storage / Settings / static**
+
+| Method | Path | Purpose |
+|---|---|---|
+| DELETE | `/storage` | Delete every downloaded file for this profile |
+| GET | `/storage/export` | Download every ready file as one uncompressed zip |
+| GET | `/settings` | Current profile's audio quality + the deployment's refresh interval |
+| PUT | `/settings` | Update either |
+| GET | `/avatars/{filename}` | Serve a cached channel avatar from our own origin |
+| GET | `/sw.js` | Service worker (no login required — installability checks may fetch it pre-session) |
+| GET | `/health` | Liveness check |
+
+**Pages**
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/` | Home/Library/Explore/Settings SPA |
+| GET | `/favorites`, `/saved`, `/new-uploads`, `/recently-played` | Pinned virtual-playlist pages (paginated) |
+| GET | `/channel/{feed_id}` | One channel's track list (paginated) |
+| GET | `/player/{content_id}` | Standalone full-page player |
+
+All routes except `/login`, `/register`, `/health`, `/sw.js`, and static
+assets require an active session (enforced via `require_login` or, where the
+handler needs the account/profile object, `get_current_account`/
+`get_current_profile`).
 
 ## 5. User flows
 
-**Login** — Single shared password, set via the `APP_PASSWORD` env var. On
-`POST /login`, the submitted password is compared with `secrets.compare_digest`
-against `APP_PASSWORD`; on match, a signed session cookie is set (Starlette
-`SessionMiddleware`, backed by `SECRET_KEY`). No per-user accounts — this is a
-gate for the whole instance, appropriate for a small self-hosted deployment.
+**Register** — `GET/POST /register`: email, password, confirm password.
+Validated server-side (`routers/auth.py`): a light regex for email shape
+(no `email-validator`/`EmailStr` dependency added just for this), password
+8–72 bytes (bcrypt silently truncates past 72, so the upper bound matters
+too, not just a minimum), passwords must match, email not already
+registered. On success, an `Account` and its first `User` profile ("My
+Profile") are created in the same transaction, `db.flush()`'d so their ids
+exist before `db.commit()`; a concurrent duplicate-email registration racing
+past the pre-check is still caught by the `IntegrityError` on `Account.email`'s
+unique constraint. The new session is logged in immediately (both
+`ACCOUNT_SESSION_KEY` and `PROFILE_SESSION_KEY` set) — no separate confirm
+step.
 
-**Page load** — The page renders immediately with existing DB content. JS
-then triggers `POST /feeds/refresh` behind a full-screen loading overlay
-(dark backdrop + spinner) and reloads the page if new content arrived — no
-blank-screen wait for RSS fetches, and no layout-shifting inline "Refreshing…"
-text competing with the filter controls. Refreshing every followed
-channel's RSS is several network calls per channel, so this auto-refresh
-only fires once per browser session (`sessionStorage`, `maybeAutoRefresh()`
-in `app.js`), not on every reload — a manual refresh button covers
-everything else.
+**Login** — `GET/POST /login`: email+password, verified with
+`bcrypt.checkpw` against the stored hash. Failure is one generic "Invalid
+email or password" either way (unregistered email vs. wrong password aren't
+distinguished, so a login attempt can't be used to enumerate registered
+emails). On success, `ACCOUNT_SESSION_KEY` is set to the real `Account.id`;
+`PROFILE_SESSION_KEY` is seeded from `Account.last_active_profile_id` if
+set, so a fresh login lands back on whichever profile was active before
+logout rather than always defaulting to the first one. If that stored
+profile id is stale (deleted since), `get_current_profile`'s self-heal
+(see §6) picks the account's first profile on the next profile-scoped
+request — no forced re-login.
 
-**Tabs** — The home page is split into **Home** (shelves: followed channels,
-new uploads, recently played, favorites, saved), **Library** (the full,
-searchable/filterable/paginated content grid), **Manage** (channel search,
-add-by-URL, followed list) and **Settings** (audio quality + a "Manage
-downloads" modal, which is where the old standalone Storage tab moved) —
-`<section>` panels toggled via `hidden`, not separate routes. The active tab
-persists in `localStorage` across visits.
+**Page load & background refresh** — The page renders immediately with
+existing DB content; there's no client-triggered "refresh once per session"
+step anymore (an earlier version had one — see §11 — superseded once the
+background scheduler existed). `app/scheduler.py`'s `run_scheduler()` runs
+for the app's lifetime: it sleeps for `AppSettings.feed_refresh_interval_minutes`
+(a presets-only Settings control — 15/30/60/120 — see Audio quality/refresh
+interval below), then refreshes every `followed=True` feed across every
+account/profile via `feed_sync.refresh_feeds`. Changing the interval in
+Settings calls `scheduler.request_reschedule()`, which cuts the current
+sleep short via an `asyncio.Event` (recreated per run — a module-level
+singleton would be bound to whichever event loop created it, which breaks
+across the test suite's per-test fresh app lifespan) so the new interval
+takes effect immediately instead of after the old one finishes. A manual
+"Refresh feeds" button (topbar / mobile menu) still exists for "I want it
+now": `POST /feeds/refresh`, profile-scoped, unconditionally followed by a
+full page reload (see the Refresh section below for why *unconditionally*).
 
-**Home page** — Four shelves (`app/templates/index.html`, data assembled in
-`pages.py`'s `home()`), each its own bounded query capped at 12 items rather
-than one big query sliced in Python — that used to get slow once full-channel
-backfills pushed a user's content well past a few thousand rows:
-- **Followed channels** — avatar chips; clicking one jumps to the Library
-  tab pre-filtered to that channel.
-- **New uploads** — most recent by `published_at`.
-- **Recently played** — most recent by `last_played_at` (set on stream, not
-  on download — see Play below); hidden if empty.
-- **Favorites** / **Saved for later** — same as their Library filters;
+**Tabs** — The SPA is split into **Home** (shelves), **Library** (a grid of
+followed channels plus four pinned virtual-playlist tiles), **Explore**
+(channel/song search + add, merged from an earlier standalone "Manage" tab),
+and **Settings** — `<section>` panels toggled via the `hidden` attribute
+driven by `html[data-active-tab]` (see style.css), not separate routes. An
+inline `<head>` script resolves the active tab (URL hash, falling back to
+`localStorage`) and sets it on `<html>` *before first paint*, so a reload
+never flashes the wrong tab; `setupTabs()` (app.js) just syncs button/URL
+state to match afterward. Tab switches use `history.replaceState` (not
+`pushState`) so cycling tabs doesn't spam back-button history — except
+`setupHomeChannels()`'s channel-chip navigation, which does `pushState`
+once, so back correctly returns to the tab you were on.
+
+**Home page** — Assembled in `pages.py`'s `home()`, each shelf its own
+bounded query (`HOME_SHELF_LIMIT = 12`) rather than one big query sliced in
+Python — that used to get slow once full-channel backfills pushed a
+profile's content well past a few thousand rows:
+- **Recently followed** — avatar chips, most-recently-followed few (not
+  every channel — with 100+ followed, the full list made this an endless
+  scroll; Library's channel grid still lists every channel).
+- **New uploads** — RSS-sourced content (`is_new_upload=True`) published
+  within the last 14 days (`content_query.NEW_UPLOAD_MAX_AGE`) from a still-
+  followed channel.
+- **Recently played** — most recent by `last_played_at`; hidden if empty.
+  Live-patched in without a reload when something plays via the overlay
+  (see `syncRecentlyPlayedShelf` below) — this shelf used to always end up
+  fresh "for free" because playing anything meant navigating to
+  `/player/{id}` and back, which isn't true anymore now that Home/Library/
+  Explore play through the in-page overlay instead.
+- **Favorites** / **Saved for later** — same as their pinned-playlist pages;
   hidden if empty.
 
-**Search & add a channel** — Typing in the Manage tab's search box
-(debounced ~400ms) hits `GET /feeds/search?q=` → `search_channels()` (in
-`rss.py`) runs a `yt-dlp` flat extraction of YouTube's channel-filtered
-search results (`sp=EgIQAg%3D%3D` query param) and returns channel_id,
-title, thumbnail, and subscriber count. Clicking "Add" on a result — or
-pasting a URL directly in the "Add by URL" form — both hit the same
-`POST /feeds {channel_url}`. Search-result thumbnails get the same
-same-origin avatar caching treatment described below, so a channel seen in
+**New Uploads, in depth** — `Content.is_new_upload` alone would mean "RSS-
+sourced, ever" forever, so it's always paired with a 14-day
+`published_at` cutoff (`content_query.new_upload_cutoff()`) — the single
+place that age limit is defined, shared by the Home shelf, the
+`/new-uploads` page, and Library's New Uploads tile count, so they can never
+disagree on what counts as new. `feed_sync.apply_feed_data` is the only
+place a row is ever marked `is_new_upload=True`: both a channel's initial
+follow and every later routine refresh set it on newly-inserted rows, and —
+this is the self-healing part — also re-mark any *already-existing* row
+that's still part of the channel's current RSS window but wasn't flagged yet
+(e.g. it predates this column, or came in through backfill). That's what
+lets New Uploads populate itself from whatever a channel's feed currently
+shows, rather than staying permanently empty for anything older than the
+column. `_run_backfill`'s own inserts bypass `apply_feed_data` entirely,
+which is what keeps historical backfill out of "New Uploads" by design.
+
+**Library** — No longer a searchable/filterable video grid (see §11 — an
+earlier version worked that way). It's a grid of channel cards
+(`channel-grid`): four pinned tiles (Favorites, Saved for later, New
+Uploads, Recently Played, each linking to its own paginated page) followed
+by every followed channel, each linking to `/channel/{id}`. The only
+client-side filtering left here is `setupLibrarySearch()` matching channel
+*names* — no server round trip, since every card is already in the DOM.
+Per-video browsing (search substring against title-or-channel, an exact
+channel filter, pagination) all lives server-side now in
+`content_query.query_content_page()`, shared by `channel.html`'s
+`GET /channel/{id}` and the four virtual-playlist pages'
+`GET /favorites`/`/saved`/`/new-uploads`/`/recently-played` (all through
+`pages.py`'s `_content_list_page()` helper → `content_list.html`, the same
+track-list/pagination partials `channel.html` uses, minus its single-channel
+avatar hero). The JSON `GET /content?page=&filter=` endpoint that used to
+back an AJAX-swapped grid still exists and is exercised by the test suite,
+but nothing in the current UI calls it — every list is server-rendered per
+page now, not fetched and spliced into a shared grid.
+
+**Search & add a channel** — Explore's one search box (debounced ~400ms)
+fires both `GET /feeds/search-videos?q=` and `GET /feeds/search?q=` in
+parallel (`Promise.allSettled`, so one slow/failed leg doesn't block the
+other) and renders two sections, Songs and Channels. `search_channels()`
+(`rss.py`) runs a `yt-dlp` flat extraction of YouTube's channel-filtered
+search results and returns channel_id/title/thumbnail/subscriber count.
+Clicking "Add" on a channel result — or a URL pasted into `POST /feeds`
+directly — both hit the same add-feed path. Search-result thumbnails get
+the same same-origin avatar caching described below, so a channel seen in
 search and then followed doesn't re-fetch its avatar.
+
+**Search & play a song** — `search_videos()` (`rss.py`) is a separate,
+untyped YouTube search (no channel-type filter — Explore already wants mixed
+video results). Clicking a song result hits `POST /feeds/videos`
+(`add_single_video`), which resolves the video's authoritative channel via a
+real (non-flat) yt-dlp lookup — a flat search result's `channel_id` can be
+missing or ambiguous for a collab video — attaches it to a placeholder
+`Feed` (`followed=False`, created on demand by
+`_get_or_create_placeholder_feed`, invisible in Library and skipped by the
+background scheduler until the channel is actually followed for real), and
+inserts the `Content` row as `is_preview=True`. A preview plays normally
+through the overlay like anything else, but stays out of Library/New
+Uploads until the user favorites or saves it (`add_favorite`/`add_saved`
+clear `is_preview` as a side effect) — otherwise "just tried a song" would
+look identical to "deliberately added this." If the video already has a
+`Content` row for this profile (an earlier preview, or a real upload from a
+followed channel), this is a no-op that just hands back that row's id and
+plays it.
 
 **Add feed** — `POST /feeds {channel_url}` → the user pastes any regular
 YouTube channel URL (`/@handle`, `/channel/UC..`, `/c/..`, `/user/..`), not a
@@ -218,246 +456,376 @@ raw RSS link. `resolve_feed_url()` (in `rss.py`) resolves that to a
 `channel_id`: a `/channel/UC..` URL is matched directly via regex (no
 network call), anything else goes through yt-dlp (`extract_flat`,
 `playlist_items=0` — fast, no video listing). An already-direct RSS feed
-link is passed through unchanged. The resolved RSS URL is then validated
-with feedparser (400 on failure either way) → feed saved → first parse run
-immediately, writing new content rows (this initial parse is just the RSS
-feed's normal ~15 most recent entries). If the URL resolved to a
-`channel_id`, a one-time **backfill** (see below) is then kicked off in the
+link is passed through unchanged. If a matching `Feed` already exists with
+`followed=False` (a placeholder from Explore's song search — see above),
+following it for real *upgrades that same row in place* instead of creating
+a duplicate — same `rss_url` shape (`channel_feed_url()`) is what makes that
+lookup reliable. Otherwise a new row is created. Either way: RSS validated
+with feedparser (400 on failure) → first parse run immediately (the RSS
+feed's normal ~15 most recent entries) → if the URL resolved to a
+`channel_id`, a one-time **backfill** (see below) is kicked off in the
 background to pull in the rest of the channel's history.
 
-**Refresh** (`POST /feeds/refresh`, also run automatically once per browser
-session — see Page load above) — Feeds are synced in two passes so DB writes
-never happen off the request's own session:
-1. `_fetch_feed_data()` (network-only, no DB writes) runs across all feeds
-   in parallel via a small thread pool (`_REFRESH_POOL_SIZE = 8`, kept
-   modest to stay polite to YouTube's unauthenticated scraping). For a feed
-   with a known `channel_id` it fetches RSS scoped to the channel's
-   Videos-tab playlist (`longform_feed_url()`, the `UULF` playlist) instead
-   of the plain channel feed — Shorts are excluded there for free, no
-   separate Shorts-tab check needed. Durations
-   (`fetch_channel_video_durations()`, same `UULF` playlist — chosen over
-   the `/videos` tab because some channels override that tab's default
-   sort, e.g. "Popular", which can silently drop recent uploads from a
-   bounded flat listing) are only fetched when some incoming video is new
-   or some existing row is still missing `duration_seconds`. A channel
-   avatar is fetched (and cached, see below) once per channel, ever —
-   skipped as soon as the feed already has `avatar_url`.
-2. `_apply_feed_data()` (DB-only, always sequential on the request's own
-   session) inserts new content rows, backfills missing durations onto
-   existing rows, and stores a newly fetched avatar path.
+**Refresh** (`POST /feeds/refresh`, on-demand; the background scheduler
+above runs the same underlying `feed_sync.refresh_feeds()`) — Feeds are
+synced in two passes so DB writes never happen off the calling session:
+1. `fetch_feed_data()` (network-only, no DB writes) runs across all feeds in
+   parallel via a small thread pool (`REFRESH_POOL_SIZE = 8`, kept modest to
+   stay polite to YouTube's unauthenticated scraping). For a feed with a
+   known `channel_id` it fetches RSS scoped to the channel's Videos-tab
+   playlist (`longform_feed_url()`, the `UULF` playlist) instead of the
+   plain channel feed — Shorts are excluded there for free. Durations
+   (`fetch_channel_video_durations()`, same `UULF` playlist) are only
+   fetched when some incoming video is new or some existing row is still
+   missing `duration_seconds`. A channel avatar is fetched (and cached, see
+   below) once per channel, ever.
+2. `apply_feed_data()` (DB-only, always sequential on the caller's own
+   session) inserts new content rows, marks/re-marks `is_new_upload` (see
+   above), backfills missing durations onto existing rows, and stores a
+   newly fetched avatar path. One feed's failure here is caught and logged
+   per-feed (`refresh_feeds`), not summed in one expression — so it can't
+   abort every other feed's refresh in the same batch, whether that batch is
+   one profile's on-demand click or the scheduler's every-profile sweep.
+   `new_content_count` in the response only counts freshly-*inserted* rows,
+   not re-marked-as-new-upload existing ones or content some other trigger
+   (another tab, another device, the background scheduler) already added —
+   which is why the client-side refresh button always reloads unconditionally
+   rather than gating on that count (see the JS side note below).
+
+**Bulk import** (Settings → Channels → Import) — `POST /feeds/import` with a
+newline-separated blob (bare `@handle`s, full URLs, or rows copied straight
+from a Google Takeout `subscriptions.csv` export). Two phases, tracked
+against an in-memory job id (`_import_progress`, polled via
+`GET /feeds/import/{job_id}/status`): every line's channel URL is *resolved*
+in parallel first (`ThreadPoolExecutor`, same pool-size reasoning as
+routine refresh), then feeds are *created* strictly sequentially on one
+session (SQLite doesn't handle concurrent writers well, and this is also
+where duplicate detection naturally lives — a feed created earlier in the
+same batch is already visible to a later line's existence check). Each
+line's initial parse + backfill runs inline as part of that sequential pass,
+not deferred to a background task the way a single add is — bulk import is
+already running off the request thread. Original line order is preserved in
+the results regardless of resolution order.
 
 **Channel avatars** — Not present in the RSS feed or any playlist
 extraction, so `fetch_channel_avatar_url()` does a separate lightweight
 `yt-dlp` fetch of the channel page (`playlist_items=0`, no video listing).
-Hotlinking Google's CDN URL directly from the browser (`<img src=googleusercontent-url>`)
-turned out to intermittently fail Chrome's Opaque Response Blocking (ORB)
-even for a URL that loaded fine moments earlier — so `downloader.download_avatar()`
-fetches the bytes once server-side and saves them to `data/avatars/{channel_id}.jpg`,
-re-served same-origin via `GET /avatars/{filename}` (path-traversal guarded:
-rejects any name containing `/`, `\`, or a leading `.`). Channel search
-results get the same caching (`_cached_or_downloaded_avatar()` in `rss.py`),
-so a channel seen in search and then followed doesn't re-fetch its avatar.
+Hotlinking Google's CDN URL directly from the browser turned out to
+intermittently fail Chrome's Opaque Response Blocking (ORB) even for a URL
+that loaded fine moments earlier — so `downloader.download_avatar()` fetches
+the bytes once server-side and saves them to
+`data/avatars/{channel_id}.jpg`, re-served same-origin via
+`GET /avatars/{filename}` (path-traversal guarded). Channel search results
+get the same caching (`_cached_or_downloaded_avatar()` in `rss.py`).
 
 **Backfill** — A one-time full-history scan (`_run_backfill()` in
-`routers/feeds.py`, background task), separate from routine refreshes which
-stay RSS-only (RSS only exposes recent entries). `fetch_channel_all_videos()`
-does a single flat `yt-dlp` extraction of the channel's `UULF` playlist
-(same one refresh uses for durations) to get every long-form video's id,
-title, thumbnail, and duration in one pass. The uploads playlist doesn't
-expose per-video publish dates, so backfilled rows get synthetic
-`published_at` values — one second apart, counting back from the oldest
-`published_at` already known for the feed — which preserves the true
-newest-to-oldest order for date sort/filter without claiming a real date.
-Progress is tracked in-memory per feed (`_backfill_progress`, phases
-`scanning` → `saving` → `done`) and polled via
-`GET /feeds/{id}/backfill-status`; the UI shows this behind a full-screen
-overlay (`#backfill-overlay`) so a large channel's slow initial scan doesn't
-read as the app being broken.
+`routers/feeds.py`, background task), separate from routine refreshes (RSS
+only exposes recent entries). `fetch_channel_all_videos()` does a single
+flat `yt-dlp` extraction of the channel's `UULF` playlist to get every
+long-form video's id, title, thumbnail, and duration in one pass. The
+uploads playlist doesn't expose per-video publish dates, so backfilled rows
+get synthetic `published_at` values — one second apart, counting back from
+the oldest date already known for the feed — preserving true newest-to-
+oldest order without claiming a real date. Progress
+(`scanning` → `saving` → `done`) is tracked in-memory per feed and polled
+via `GET /feeds/{id}/backfill-status`, shown behind a full-screen overlay.
 
-**Audio quality** — A per-user setting (`Settings` tab, `GET`/`PUT
-/settings`) applied at download time, not retroactively — files already on
-disk keep whatever quality they were downloaded at. `high` and `low` both
-download YouTube's native `mp4a`/AAC stream (remux only, no local
-transcoding); `low` additionally caps to YouTube's own ≤64kbps pre-encoded
-stream where available. `medium` has no matching YouTube-native tier, so it
-downloads the same high-quality source and re-encodes it locally to mp3 at
-96kbps — the only tier that pays a transcode cost, which the Settings copy
-calls out ("takes a bit longer to prepare").
+**Audio quality** — A per-profile setting (`GET`/`PUT /settings`), applied
+at download time, not retroactively. Only two tiers now: `high` and `low`,
+both downloading YouTube's native `mp4a`/AAC stream (remux only, no local
+transcoding) — `low` additionally caps to YouTube's own ≤64kbps pre-encoded
+stream where available. The earlier third tier, `medium` (locally
+re-encoded to mp3, the only tier that ever paid a transcode cost), has been
+dropped entirely: `routers/settings.py`'s `AUDIO_QUALITIES = ("high", "low")`
+rejects it going forward, and the migration backfill downgrades any profile
+still set to it to `low` (the closer match in intent — smaller files — of
+the two remaining tiers). A pre-existing database's CHECK constraint still
+technically allows `medium` (SQLite can't alter it in place), but nothing
+ever sets it again.
+
+**Feed refresh interval** — A deployment-wide setting (not per-profile —
+see `AppSettings` in §3), same `GET`/`PUT /settings` endpoint. Presets only
+(`FEED_REFRESH_INTERVALS = (15, 30, 60, 120)` minutes) rather than a
+free-form number, ruling out a value aggressive enough to risk YouTube
+rate-limiting the unauthenticated RSS/yt-dlp calls. Changing it calls
+`scheduler.request_reschedule()` (see Page load above).
 
 **Export** — `GET /storage/export` streams every `ready` item as one
 uncompressed (`ZIP_STORED`) zip — audio is already compressed, so
-re-zipping it would just burn CPU for no size benefit. Duplicate filenames
-(same sanitized title) get a `(2)`, `(3)`, … suffix. A single item can also
-be exported individually via `GET /content/{id}/stream?download=1`, which
-skips the `last_played_at` update a real playback triggers.
+re-zipping it would just burn CPU. Duplicate filenames (same sanitized
+title) get a `(2)`, `(3)`, … suffix. A single item can also be exported via
+`GET /content/{id}/stream?download=1`, which skips the `last_played_at`
+update a real playback triggers.
 
-**Library controls (filter / pagination)** — Always newest-first
-(`Content.published_at.desc()`, hardcoded); there's no sort control. An
-earlier version had one (newest/oldest/title A–Z/Z–A/channel A–Z), but once
-the filter box could search titles too, alphabetical sort mostly duplicated
-"search for the thing you want," and oldest-first duplicated one click on
-"Last »" — dropped rather than kept as unused surface. `content_query.py`'s
-`query_content_page()` is the single shared implementation, used both for
-the server-rendered page 1 (`pages.py`'s `home()`) and for every subsequent
-filter/page change, so the two never disagree on what "page 1, no filter"
-contains. `app.js`'s `refreshGridView()` calls `GET /content?page=&filter=`,
-swaps `#content-grid`'s innerHTML with the returned page, and re-renders
-pagination controls from the response's `total_pages` — no client-side
-comparator or slicing logic. A monotonically increasing request sequence
-number (`gridRequestSeq`) drops any response that arrives after a newer
-request was already sent, so a slow stale fetch (e.g. after rapidly typing
-into the search box) can't overwrite a newer one.
-- **Filter** is two controls sharing one piece of state
-  (`currentChannelFilter` in `app.js`), kept mutually exclusive — picking one
-  clears the other:
-  - A dropdown for the non-text filters: "All channels" (`filter=""`), "★
-    Favorites" (`filter=__favorites__`), "Saved for later"
-    (`filter=__saved__`), "Previously played" (`filter=__played__`,
-    `Content.last_played_at IS NOT NULL` — set on stream, not on download).
-  - A debounced (~300ms) search box matching, case-insensitively, either the
-    video title or the channel title (`Feed.channel_title.ilike()` OR
-    `Content.title.ilike()`) — so searching doesn't require knowing which
-    field the match is in. Clicking a channel chip on Home
-    (`setupHomeChannels()`) fills this box with that channel's name rather
-    than picking it from a dropdown list of every followed channel.
-- **Pagination**: `DEFAULT_PAGE_SIZE = 20`; `hidden` attribute toggles page
-  visibility (see the CSS gotcha note below). Prev/Next scroll the window
-  back to the top. An out-of-range page is clamped server-side.
-- The filter persists to `localStorage` (the current page number resets on
-  reload); `initializeLibraryGrid()` only re-fetches on load if a restored
-  filter differs from the server-rendered default (page 1, no filter) —
-  otherwise it just seeds pagination state from what's already in the DOM,
-  avoiding a redundant fetch.
+**Save for later** — A bookmark toggle (`POST`/`DELETE /content/{id}/save`)
+present on both card and row layouts, matched by `data-content-id`/
+`data-saved` attributes so every instance of the same item across shelves,
+Library tiles, and track lists stays in sync from one click, not just the
+one it happened in.
 
-  > **CSS gotcha to remember**: any element whose class sets `display`
-  > (`.card`, `.pagination`, `.tab-panel`, `.overlay` all set `display: flex`)
-  > needs an explicit `.the-class[hidden] { display: none; }` rule. The
-  > native `hidden` attribute and an author class rule both have equal CSS
-  > specificity, and the author rule wins — so `element.hidden = true` alone
-  > silently does nothing if the class already sets `display`. This caused a
-  > real bug where pagination didn't actually hide the previous page's
-  > cards. Any new toggle-visibility element needs this pattern from the
-  > start.
-
-**Save for later** — A bookmark toggle at the right end of each card's action
-row (`margin-left: auto`, so it lines up across every card regardless of
-whether the card shows Download / Play+delete / a spinner) calls
-`POST`/`DELETE /content/{id}/save`. It deliberately does *not* float over the
-artwork — an icon pinned onto a busy thumbnail reads as a stray artifact
-rather than a control. Because the save toggle shares the action row, the
-`updateCard()` re-render on any status change has to re-emit it, which is why
-`cardActionHtml()` is composed of `statusActionHtml() + saveButtonHtml()`.
-
-**Confirm dialogs & toasts** — Native `window.confirm`/`window.alert` are not
-used anywhere. `static/js/ui.js` loads before the page script on every page
-and exposes `confirmDialog(message, label) -> Promise<boolean>` (centered
-modal, backdrop-click and Escape both cancel, focus lands on the *safe*
-button so a reflexive Enter never confirms a destructive action) and
+**Confirm dialogs & toasts** — Native `window.confirm`/`window.alert` are
+never used. `static/js/ui.js` loads before every page-specific script and
+exposes `confirmDialog(message, label) -> Promise<boolean>` (backdrop-click
+and Escape both cancel, focus lands on the *safe* button) and
 `showToast(message)` (bottom-centre, auto-dismissing). Both lazily create
-their own DOM, so no template needs to carry markup for them.
+their own DOM.
+
+**In-page player overlay & playback-state persistence across navigation** —
+Home/Library/Explore play through a persistent overlay + mini-player bar
+(`_player_overlay.html`, `GET /content/{id}` JSON, `app.js`'s `openPlayer()`)
+instead of navigating to `/player/{id}` — reuses `player.html`'s exact
+markup/element ids, so `player.js`'s `setupPlayer`/`prepareAudio`/
+`setupMediaSession`/`setupFavorite` work against it unmodified.
+`channel.html`, `content_list.html`, and the standalone `player.html` are
+**deliberately still real navigations**, not wired into the overlay — those
+are comparatively infrequent, "landing page"-style visits (following a link
+into a specific channel or track list), not worth the added complexity of
+making every page in the app aware of a shared, cross-page player state.
+
+That split creates a real seam, though: something has to carry playback
+position (and whether the player was expanded or just the mini bar) across
+an actual page navigation, since the audio element itself doesn't survive
+one. `ui.js` listens for both:
+- `pageshow` with `event.persisted` — fires when a page is restored from the
+  browser's back/forward cache (bfcache) without a real server round trip,
+  which would otherwise silently show stale server-rendered data (Recently
+  Played, storage usage, a track list, …) with no signal anything's wrong.
+  The handler snapshots playback state, then forces one real
+  `window.location.reload()` — simpler and more robust than trying to track
+  every specific action that could have changed something while away.
+- `pagehide` — fires on *any* departure, bfcache-eligible or not (e.g.
+  tapping a channel page's "Library" back-link, a plain in-app navigation
+  that never restores via `pageshow` at all when you return). Without this,
+  landing back on a *fresh* load of `index.html` had nothing in
+  `sessionStorage` to resume, and the mini-player just silently didn't come
+  back.
+
+Both call the same `saveResumeState()`, writing `{contentId, currentTime,
+wasPlaying, wasExpanded}` to `sessionStorage['spotea-resume']` — but only if
+`audio.src` is actually set (still-downloading playback that never started
+has `audio.paused === true` for a reason that has nothing to do with an
+intentional pause; saving that as `wasPlaying: false` would wrongly suppress
+autoplay once the download finishes). `wasExpanded` reflects whether
+`#player-overlay` was visible; on `player.html`, which has no such overlay,
+it defaults to **not** expanded — landing on the SPA with something already
+playing surfaces it as the mini bar, not a screen-hijacking full-screen
+takeover.
+
+Two different consumers read this record back, for two different reasons:
+- `player.js`'s `consumeResumeState(contentId)` — called once, deep inside
+  `prepareAudio`'s `startPlayback()`, right as `audio.src` is (re-)assigned
+  after a reload — restores `currentTime`/`wasPlaying` so a forced reload
+  (from the `pageshow` case above) doesn't restart the track from 0:00.
+  Removed from `sessionStorage` on read, so a stale record can never apply
+  to some later, unrelated track load.
+- `app.js`'s `resumeOverlayIfNeeded()` (called on every `index.html`
+  `DOMContentLoaded`) — the overlay always starts closed/empty on a fresh
+  load, unlike `player.html`, which has its content id server-rendered.
+  Reads the same record (without consuming it itself) and calls
+  `openPlayer(contentId, { expanded: wasExpanded !== false })` to reopen
+  whatever was playing, correctly collapsed or expanded. If that fetch
+  fails (e.g. the content id no longer resolves for the now-active profile
+  — see the profile-switch note below), the stale record is explicitly
+  cleared right there; otherwise a permanently-invalid record would
+  re-trigger the same "Could not load this track" failure on every
+  subsequent reload forever, since nothing else would ever consume it.
+
+**Profile switch and this same mechanism** — `switchProfile()`
+(`profiles.js`) calls `closePlayer()` (clearing `#player-root`'s dataset and
+the audio element) *before* reloading, specifically so `pagehide`'s
+`saveResumeState()` can't snapshot a track that's about to belong to a
+profile it no longer exists under — without that, the reload's fresh
+session (now the new profile) would try to resume a content id scoped to
+the *old* profile, 404, and hit the same "repeats forever" failure mode the
+paragraph above guards against from the other direction.
 
 **Download** — There is no download button. Every card just says **Play**;
-opening the player is what fetches the audio, so downloads are a side effect
-of listening rather than a separate chore, and the downloaded files are
-treated as a disposable cache (see Downloaded audio below). Cards that are already on
-disk get a small check badge on the artwork so you can tell what will start
-instantly.
+opening the player is what fetches the audio. Cards already on disk get a
+small check badge — live-patched onto every matching card/row on the page
+the moment a download completes (`markContentDownloaded`, since the overlay
+plays without a page reload, so a badge only ever painted at server-render
+time would stay stale for the rest of the session otherwise), not just
+server-rendered once.
 
 `POST /content/{id}/download` → 409 if already `downloading` →
 `status='downloading'` set synchronously → yt-dlp job dispatched to the
-background → response returns immediately. On completion: `status='ready'` +
-`file_path`; on failure: `status='error'` + `error_message`.
+background → response returns immediately. On completion: `status='ready'`
++ `file_path`; on failure: `status='error'` + `error_message`.
 
 > **Never start a download on plain page load.** Browsers speculatively load
 > links — a prerender executes the target page's JavaScript — so simply having
 > `<a href="/player/{id}">` on a card is enough for the browser to open the
 > player behind your back and, if the player downloads unconditionally, fill
-> the user's disk with things they never clicked. This actually happened
-> during development (server logs showed `GET /player/N` + `POST
-> /content/N/download` for pages nobody visited). `player.js` therefore gates
+> the user's disk with things they never clicked. `player.js` therefore gates
 > `prepareAudio()` behind `whenVisible()`, which waits out
 > `document.prerendering` and a non-`visible` `visibilityState`.
 
 **Polling** — While the player is preparing, it polls
-`GET /content/{id}/status` every 1.5s until `ready` or `error`.
+`GET /content/{id}/status` every 1.5s until `ready` or `error`. The poll
+timer and a `visibilitychange` re-check-in listener (mobile browsers
+throttle/suspend timers for a backgrounded tab, so the interval alone might
+not have ticked in a while by the time you switch back) are both tracked in
+module-level variables and explicitly torn down — by a new `prepareAudio()`
+call switching tracks, *and* by the poll's own terminal states (ready,
+error, or giving up after repeated failures) — so a finished download can
+never hijack whatever's playing now, and a stale `visibilitychange` handler
+can never fire `startPlayback()` a second time on a track that's already
+playing fine (which would reset it to 0:00).
 
-**Downloaded audio** — The Settings tab's "Manage downloads" modal
-(`#downloads-overlay`) lists everything on disk with per-item sizes, a
-total, per-item removal, per-item export, and "Clear all"/"Export all".
-Sizes are read from disk at render time rather than stored, so a file
-deleted behind the app's back reports 0 instead of inflating the total. Two
-things to keep in mind:
+**Downloaded audio** — Settings' "Manage downloads" modal lists everything
+on disk with per-item sizes (read from disk at render time, so a file
+deleted behind the app's back reports 0), a total, per-item removal, per-
+item export, and "Clear all"/"Export all". Two things to keep in mind:
 - Content rows cascade-delete with their feed, but **files do not** —
-  `delete_files_for_feed()` runs before a feed is deleted, otherwise
-  unfollowing a channel strands its audio on disk permanently.
-- `clear_all()` also sweeps any `*.{AUDIO_FORMAT}` in the storage directory
-  that no row points at, so "Clear all" really does free everything it
-  claims (older builds leaked exactly these orphans).
+  cleanup functions run before the DB rows they depend on are gone.
+- `clear_all()` also sweeps any orphaned audio files in the storage
+  directory that no row points at.
+- Files can be **shared across profiles** (`unlink_if_unshared` — keyed by
+  `file_path`/`video_id`, not scoped to one profile): two profiles that both
+  follow an overlapping channel at the same audio quality can point at the
+  same physical file, so deleting one profile's copy only actually unlinks
+  it from disk once no other `ready` row anywhere still references it.
 
-**Play** — `GET /player/{id}` renders a custom player rather than a native
-`<audio controls>` bar (which renders as a light pill that clashes badly with
-the dark theme). The `<audio>` element is hidden and driven by
-`static/js/player.js`: large artwork, title/channel, a seek bar with
-elapsed/total times, ±15s skip buttons flanking a large round play/pause
-button, and a footer row with volume and the favorite toggle. Keyboard:
-Space toggles playback, ←/→ skip. `<input type=range>` can't style its
-already-played portion, so both sliders paint it with a gradient driven by a
-`--fill` custom property that the JS keeps in sync.
+**Play** — Both `player.html` and the overlay render the same custom player
+(no native `<audio controls>`, which renders as a light pill clashing with
+the dark theme): large artwork, title/channel, a seek bar, ±15s skip
+buttons, a large round play/pause, volume, and the favorite toggle.
+Keyboard: Space toggles playback, ←/→ skip. Media Session API integration
+(`setupMediaSession`) drives lock-screen/notification-shade transport
+controls and Bluetooth/headset buttons; `openPlayer()` re-sets its metadata
+explicitly on every track switch since `setupMediaSession` itself only reads
+the DOM once, at page-load time.
 
 The stream endpoint returns 409 if `status != ready`; the file path always
-comes from the DB, never from the request (prevents path traversal). Every
-stream request stamps `last_played_at = now()` (skipped for a plain
-`?download=1` export, which isn't the user actually listening) — this is
-what feeds the Home page's "Recently played" shelf.
+comes from the DB, never the request. Every real stream request stamps
+`last_played_at = now()` (skipped for `?download=1`) — this is what feeds
+"Recently played".
 
-**Delete** — Removing a download (Manage downloads modal, per item or in
-bulk) deletes the file and resets the row to `status='not_downloaded'` +
-`file_path=NULL`. The row is kept, so the item stays in the Library and
-comes back just by playing it again. Confirmed through the shared modal, not
-`window.confirm`.
+**Delete** — Removing a download deletes the file and resets the row to
+`status='not_downloaded'` + `file_path=NULL`. The row is kept, so the item
+stays in the Library and comes back just by playing it again.
+
+**Unfollowing a channel** — `DELETE /feeds/{id}` doesn't blindly delete
+everything: content that was actually downloaded, played, favorited, or
+saved is *kept*, and the feed row itself is downgraded to `followed=False`
+(same state a placeholder feed starts in) rather than deleted outright — it
+drops out of Library/New Uploads/background refresh but keeps working
+everywhere else (Storage, Recently Played, Favorites/Saved, direct
+playback). Only content nobody ever touched is purged. Re-following the
+same channel later picks the same row back up (see Add feed above) instead
+of duplicating it.
+
+**Profiles (switch/manage)** — Two separate, deliberately non-overlapping
+overlays (`profiles.js`): "Switch profile" (topbar/mobile menu) is just a
+click-to-switch list — no edit/delete/add there, that's not what someone
+reaching for the header button mid-browse wants. "Manage profiles"
+(Settings) is the reverse — rename/delete/add, no switching. Renaming reuses
+the same "New profile name…" input as adding (its submit button relabels to
+"Save" while `editingProfileId` is set) rather than a separate inline
+editor. Deleting a profile removes its feeds/content (DB cascade) and its
+downloaded files (`delete_files_for_profile`, since files don't cascade with
+rows) — refused outright if it's the account's last remaining profile.
+
+**PWA** — `static/manifest.json` + `static/js/sw.js` make the app
+installable (Chrome/Android requires an active service worker with a fetch
+handler before offering "Install app"), registered from every page (not
+just `index.html`) so installing works regardless of which page happens to
+be open when the browser offers the prompt. The service worker is
+network-first, not offline-first: it exists purely for installability, and
+only falls back to its cache when the network genuinely fails. It
+deliberately never caches anything under `/content/`, `/feeds/`,
+`/profiles/`, `/settings/`, or `/storage/` — the `<audio>` element issues
+Range requests while seeking, and the Cache API keys purely on URL with no
+concept of Range, so a cached response for one byte range would get
+replayed for a request asking for a different one; a dynamic GET here can
+also legitimately 404/409, and nothing in the fetch handler checks
+`response.ok` before caching. A transient network hiccup hitting the
+`catch()` fallback would otherwise be indistinguishable, to the `<audio>`
+tag, from a real playback error. The cache name is versioned (`spotea-v2`)
+specifically so an older client holding a cache that *did* cache API traffic
+gets it purged on activate, not just left alone because nothing else
+changed.
 
 ## 6. Concurrency & security
 
 - yt-dlp is called via its **Python API** (`yt_dlp.YoutubeDL`), not a raw
-  subprocess — cleaner error handling, and progress hooks can be added later.
+  subprocess.
 - The download URL is always constructed as
-  `https://www.youtube.com/watch?v={video_id}` by the server;
-  `video_id` is validated against `^[a-zA-Z0-9_-]{11}$` — user input never
-  reaches a shell command directly.
-- No concurrent-download limit in the MVP (personal/small-scale use); a
-  semaphore can be added later if needed.
-- Session cookies are signed and HttpOnly; `SECRET_KEY` and `APP_PASSWORD`
-  are required env vars with no insecure defaults baked into the image.
-- README will recommend running behind HTTPS (reverse proxy) for anyone
-  exposing the instance beyond their local network.
+  `https://www.youtube.com/watch?v={video_id}` by the server; `video_id` is
+  validated against `^[a-zA-Z0-9_-]{11}$` — user input never reaches a shell
+  command directly.
+- No concurrent-download limit (personal/small-scale use).
+- **Passwords** are hashed with bcrypt (`app/auth.py`), never stored or
+  compared in plaintext; the shared `secrets.compare_digest`-based single-
+  password gate from before accounts existed is gone entirely.
+- **Session cookies** are signed and HttpOnly (Starlette `SessionMiddleware`,
+  `SECRET_KEY`).
+- **Account isolation is the security-critical addition this session.**
+  Before accounts existed, `get_current_profile`'s self-heal fell back to
+  "the first profile, period" (`db.query(User).order_by(User.id).first()`)
+  across *every* profile in the database — harmless when there was only ever
+  one shared login, but a live cross-tenant leak once real, separate
+  accounts share a deployment. Now:
+  - `get_current_account` (`deps.py`) resolves the account from the session
+    and **never self-heals to a different account** — a missing, stale, or
+    forged account id is simply not authenticated. (Contrast with
+    `get_current_profile` below, which *does* self-heal, but only ever
+    within the caller's own account.)
+  - `get_current_profile` scopes both its direct session lookup and its
+    self-heal fallback by `account_id` — a stale/forged `profile_id` in the
+    session can never resolve to another account's profile, even
+    transiently.
+  - Every handler in `routers/profiles.py` (list/create/update/delete/
+    switch) explicitly checks `profile.account_id == current account's id`
+    after loading a profile by id, returning a plain 404 (never 403) on
+    mismatch so a probing request can't even learn whether that id exists.
+  - `delete_profile`'s "can't delete the last profile" guard counts profiles
+    scoped to the caller's `account_id` — an earlier, single-tenant-era
+    version of this check counted *every* profile in the database, which
+    would have let one account's profile count block (or fail to block)
+    another account's deletion.
+  - Registration is open (no invite code, no admin approval) — anyone who
+    can reach the instance can create an account. This is a deliberate
+    choice for a self-hosted deployment the operator controls network
+    access to (see README's "Exposing it beyond your local network"), not
+    an oversight.
+- Known, currently-accepted gaps (see Roadmap): no password reset flow (no
+  outbound email capability exists anywhere in the app), no email
+  verification, no rate limiting on `/login` or `/register`.
 
 ## 7. Config & dependencies
 
 Environment variables (`.env`, documented in `.env.example`):
-- `APP_PASSWORD` — shared login password (required)
 - `SECRET_KEY` — session signing key (required)
+- `APP_PASSWORD` — **optional**. Only consulted by `migrations.py`'s one-time
+  legacy-account backfill (§3) for a pre-existing single-tenant deployment;
+  a fresh install never needs it, since real accounts register themselves.
 - `DATABASE_URL` — default `sqlite:////app/data/spotea.db`
 - `STORAGE_DIR` — default `/app/data/storage`
-- `AUDIO_FORMAT` — default `m4a` (the `high`/`low` audio-quality tiers'
-  extraction target; matches YouTube's native audio stream for almost every
-  video, so extraction is a fast remux rather than a re-encode — see Audio
-  quality above. `medium` always re-encodes to mp3 regardless of this
-  setting)
-- `HOST_PORT` — default `8000`; docker-compose–only (publishes the container's
-  fixed internal port 8000 on this host port), not read by the app itself
-
-Also configurable (not currently exposed in `.env.example`, code default
-only): `AVATARS_DIR` — default `/app/data/avatars`.
+- `AVATARS_DIR` — default `/app/data/avatars` (not currently exposed in
+  `.env.example`, code default only)
+- `AUDIO_FORMAT` — default `m4a` (the `high`/`low` tiers' extraction target;
+  matches YouTube's native audio stream for almost every video, so
+  extraction is a fast remux rather than a re-encode — see Audio quality in
+  §5)
+- `HOST_PORT` — default `8000`; docker-compose–only, not read by the app
+  itself
 
 `requirements.txt`: `fastapi`, `uvicorn[standard]`, `sqlalchemy`,
 `feedparser`, `yt-dlp`, `jinja2`, `python-multipart`, `itsdangerous`,
-`pydantic-settings`
+`pydantic-settings`, `bcrypt`. `bcrypt` ships prebuilt manylinux wheels for
+the `python:3.12-slim` base image the `Dockerfile` uses — no build tooling
+needed to add it.
 
 ## 8. Error scenarios
 
 | Case | Behavior |
 |---|---|
-| No/invalid session | 401 → redirect to `/login` |
+| No/invalid session | Redirected to `/login` (`NotAuthenticated` exception handler in `main.py`) |
+| Wrong email/password at login | 401, generic "Invalid email or password" |
+| Invalid/duplicate email at registration, mismatched or too-short/long password | 400 + specific message |
+| Profile id belonging to another account | 404 (never 403 — doesn't confirm the id exists) |
+| Deleting an account's last remaining profile | 409 |
 | Invalid RSS URL | 400 + message |
 | yt-dlp download failure | `status=error`, `error_message` stored |
 | Duplicate download request | 409 |
@@ -465,34 +833,45 @@ only): `AVATARS_DIR` — default `/app/data/avatars`.
 
 ## 9. Deployment (Docker)
 
-- `Dockerfile`: `python:3.12-slim` base, installs `ffmpeg` (required by
-  yt-dlp for audio extraction), installs `requirements.txt`, copies `app/`,
-  runs `uvicorn app.main:app --host 0.0.0.0 --port 8000`.
-- `docker-compose.yml`: single `app` service, builds from the Dockerfile,
-  maps `${HOST_PORT:-8000}:8000` (override `HOST_PORT` in `.env` if 8000 is
-  taken on the host), mounts `./data:/app/data` (persists the SQLite DB and
-  downloaded audio across container restarts/upgrades), reads env vars from
-  `.env`.
+- `Dockerfile`: `python:3.12-slim` base, installs a static `ffmpeg` binary
+  (avoids Debian's package dragging in ~450MB of unrelated GPU/TTS/SMT
+  libraries), installs `requirements.txt`, copies `app/`, runs
+  `uvicorn app.main:app --host 0.0.0.0 --port 8000`.
+- `docker-compose.yml`: single `app` service, maps `${HOST_PORT:-8000}:8000`,
+  mounts `./data:/app/data` (persists the SQLite DB and downloaded audio
+  across restarts/upgrades), reads env vars from `.env`.
 - **Static assets are served with `Cache-Control: no-cache`**
   (`RevalidatingStaticFiles` in `main.py`). Starlette's `StaticFiles` sends
   ETag/Last-Modified but no `Cache-Control`, and browsers then fall back to
-  *heuristic* freshness — serving cached CSS/JS for a while without asking the
-  server at all. After `docker compose up -d --build` that means a user can be
-  running new templates against stale CSS/JS, which renders as a subtly or
-  completely broken UI (buttons unpositioned, dialogs invisible) with nothing
-  in the logs. `no-cache` still permits caching, it just forces revalidation;
-  unchanged files come back as a cheap 304. Do not "optimise" this into a long
-  max-age without adding content-hashed asset URLs first.
+  heuristic freshness — serving cached CSS/JS for a while without asking the
+  server at all, which after an upgrade means a user could keep running new
+  templates against stale CSS/JS. `no-cache` still permits caching, it just
+  forces revalidation; unchanged files come back as a cheap 304.
+- **Upgrading a pre-accounts deployment**: keep `APP_PASSWORD` set in `.env`
+  for the one upgrade so the legacy-account migration (§3) has a password to
+  hash — see README's "Updating" section. It can be unset afterward.
 - `.env.example` ships in the repo so users copy it to `.env` and fill in
-  `APP_PASSWORD` / `SECRET_KEY` before first run.
-- README will document: `docker compose up -d`, how to set the password, and
-  how to update (pull + rebuild, volume persists data).
+  `SECRET_KEY` (and, only if upgrading, `APP_PASSWORD`) before first run.
 
 ## 10. Roadmap
 
-- Real multi-account support (distinct logins, per-account feed/content
-  isolation) is deferred; today's `user_id` columns and shared-password gate
-  make that a later addition, not a rewrite.
+Real multi-account support shipped this session (see §6) — accounts own one
+or more profiles, fully isolated from each other, with a migration path for
+existing single-tenant deployments. What's still deliberately deferred:
+
+- **Per-account feed refresh interval.** `AppSettings` is a single
+  deployment-wide row (§3) — every account shares one background-refresh
+  cadence. Making it per-account is a bigger change than a schema tweak (the
+  scheduler would need per-account last-refreshed tracking, not just a
+  config value to read), and wasn't part of what this pass of work was
+  actually asked to solve.
+- **No password reset / no email verification.** The app has no outbound
+  email capability at all — `register`/`login` treat email purely as a
+  unique login identifier, never verified or used to deliver anything. A
+  locked-out user's only recovery today is direct database access.
+- **No rate limiting** on `/login` or `/register` — acceptable for a small
+  self-hosted deployment behind the operator's own network/reverse-proxy
+  controls, not something to expose broadly without adding it.
 - License: MIT.
 
 ## 11. Implementation milestones
@@ -547,7 +926,9 @@ Post-MVP additions, same one-at-a-time/test-then-continue approach:
     cleanup of audio orphaned by unfollowing a channel
 23. Refresh only on first load per session (not every visit), download
     progress percentage surfaced during download/convert, faster conversion
-24. Per-user audio quality setting (`high`/`medium`/`low`, `Settings` tab)
+    (later superseded — see 33)
+24. Per-user audio quality setting, originally three tiers:
+    `high`/`medium`/`low` (later reduced to two — see 35)
 25. One-time full channel history backfill on adding a feed (RSS alone only
     exposes recent entries), with a progress overlay; ArcticTerminal branding
 26. **Home** tab added: curated shelves (followed channels, new uploads,
@@ -557,8 +938,9 @@ Post-MVP additions, same one-at-a-time/test-then-continue approach:
     origin instead of hotlinked (Chrome's Opaque Response Blocking made
     direct hotlinking unreliable); **Manage**/**Settings** tabs replacing
     the old Channels/Storage tabs (Storage folded into a "Manage downloads"
-    modal off Settings); feed refresh parallelized across a thread pool;
-    zip export of all downloaded audio, and per-item export
+    modal off Settings, later itself renamed/restructured — see 34); feed
+    refresh parallelized across a thread pool; zip export of all downloaded
+    audio, and per-item export
 28. Same local-avatar caching applied to channel search results, not just
     followed channels
 29. Library pagination (and sort/filter) moved server-side
@@ -577,14 +959,62 @@ Post-MVP additions, same one-at-a-time/test-then-continue approach:
     "Previously played" filter; removed the sort control entirely — once
     the search box covered "find a specific thing," alphabetical sort mostly
     duplicated it, and oldest-first duplicated one click on "Last »"
+33. Explore video search added alongside channel search (search for a
+    specific song, add+play it without following the channel — `is_preview`
+    content); background feed refresh scheduler replacing the old "once per
+    session" client-triggered refresh entirely; PWA support (manifest,
+    service worker, installability)
+34. "Manage" tab merged into a restructured **Explore** (one unified search
+    box, sectioned Songs/Channels results); bulk import moved from an
+    always-open Manage textarea into Settings; Explore/Settings full-width
+    layout
+35. Multiple profiles per (at-the-time single, shared-password) login,
+    Netflix-style switcher; Library rebuilt from a video grid into a grid of
+    channel cards, with per-video browsing (search/filter/pagination) moved
+    to dedicated per-channel and per-virtual-playlist pages
+    (`channel.html`/`content_list.html`); audio-quality tiers reduced from
+    three to two (`medium` dropped — no YouTube-native tier matched it, so
+    it was the only one paying a local re-encode cost)
+36. In-page player overlay + mini-player bar for Home/Library/Explore
+    (`_player_overlay.html`), replacing full-page navigation to
+    `/player/{id}` for those three tabs specifically — reusing player.js's
+    existing controls unmodified; `channel.html`/`content_list.html`/
+    standalone `player.html` deliberately kept as real navigations
+37. New Uploads and Recently Played promoted from Home-only shelves to full
+    pinned virtual-playlist pages in Library (`Content.is_new_upload`,
+    14-day window, self-healing re-mark on refresh); Home shelves live-patch
+    without a reload now that playback no longer navigates away
+38. A round of playback/navigation correctness fixes surfaced by the
+    overlay + bfcache-reload interaction: stale resume state applying to a
+    track that hadn't started playing yet, a zombie `visibilitychange`
+    listener re-triggering playback on an already-finished download, the
+    manual refresh button silently no-op'ing when content had actually
+    changed, the "downloaded" badge not live-patching, the mini-player
+    force-expanding (or disappearing entirely) when returning from a
+    channel/playlist page instead of staying collapsed — see §5's
+    "In-page player overlay & playback-state persistence" for how this
+    settled
+39. Real multi-tenant accounts (`Account`: email/password, bcrypt-hashed)
+    layered on top of the existing profile system — each account owns one
+    or more profiles (household model, unchanged); open registration; a
+    one-time migration folds a pre-existing single-tenant deployment's
+    profiles into one legacy account seeded from `APP_PASSWORD`; several
+    latent cross-account data-isolation gaps fixed as part of this (see §6);
+    `Account.last_active_profile_id` added so re-login returns to whichever
+    profile was active before logout instead of always the first one
 
 ### Verifying UI work
 
-Browser tooling isn't wired into this environment, and reasoning about CSS
-without rendering it has produced shipped-broken UI before. The reliable loop
-is a headless screenshot: drive the locally installed Chromium-based browser
-with `puppeteer-core` (`executablePath` pointed at it — no browser download
-needed), log in, navigate, optionally click through to a state (modal open,
-filter applied), and screenshot. Check both desktop and phone viewports, and
-assert on real post-interaction state (`dataset` values after a reload) rather
-than assuming the handler worked.
+Reasoning about CSS/JS without actually rendering it has produced
+shipped-broken UI before, so real-browser verification is standard practice
+here, not optional. This machine has a system-installed Chromium-based
+browser (Helium) usable as a Playwright driver
+(`chromium.launch(executable_path="/usr/bin/helium-browser")`) without a
+separate ~300MB browser download — check for it before falling back to
+`playwright install`. Log in, navigate, click through to a state (modal
+open, filter applied, a track playing), and screenshot; check both desktop
+and phone viewports. Assert on real post-interaction state (`dataset`
+values, `sessionStorage` contents, response status codes after a reload or
+a simulated back/forward-cache restore) rather than assuming a handler
+worked — a passing screenshot alone doesn't prove the underlying state is
+correct.
