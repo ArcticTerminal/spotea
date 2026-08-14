@@ -18,6 +18,11 @@ _COLUMN_MIGRATIONS = [
     ("feeds", "followed", "BOOLEAN NOT NULL DEFAULT 1"),
     ("content", "is_preview", "BOOLEAN NOT NULL DEFAULT 0"),
     ("content", "is_new_upload", "BOOLEAN NOT NULL DEFAULT 0"),
+    # Nullable with no backfill here: NULL means "not measured yet", which
+    # storage.collect_usage fills in from disk the first time it sees the
+    # row. Doing it there rather than as a bulk UPDATE keeps startup from
+    # stat'ing every downloaded file on an install with a large library.
+    ("content", "file_size_bytes", "INTEGER"),
     # Nullable — unlike the other entries above there's no single sane
     # default across pre-existing rows here; backfilled explicitly below
     # instead, once there's a legacy Account to point them at.

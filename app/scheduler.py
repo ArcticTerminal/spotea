@@ -61,7 +61,7 @@ async def run_scheduler() -> None:
             # Woke early because the interval setting changed — reschedule
             # with the new value rather than refreshing right now.
             continue
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass  # interval elapsed naturally — time to refresh
 
         try:

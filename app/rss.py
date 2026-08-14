@@ -5,7 +5,7 @@ from calendar import timegm
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import feedparser
 import yt_dlp
@@ -206,7 +206,7 @@ def search_channels(query: str) -> list[ChannelSearchResult]:
         )
 
     results: list[ChannelSearchResult] = []
-    for (channel_id, entry, _), thumbnail_url in zip(entries, thumbnail_urls):
+    for (channel_id, entry, _), thumbnail_url in zip(entries, thumbnail_urls, strict=True):
         results.append(
             ChannelSearchResult(
                 channel_id=channel_id,
@@ -446,7 +446,9 @@ def _parse_published(entry) -> datetime | None:
     parsed = entry.get("published_parsed")
     if parsed is None:
         return None
-    return datetime.fromtimestamp(timegm(parsed), tz=timezone.utc)
+    # Naive UTC, matching app.timeutil.utcnow — see its docstring for why
+    # every datetime reaching a model column has to agree on this.
+    return datetime.fromtimestamp(timegm(parsed), tz=UTC).replace(tzinfo=None)
 
 
 def fetch_feed(rss_url: str) -> ParsedFeed:

@@ -1,0 +1,48 @@
+# Lint/format config only — the app is run from the repo (see Dockerfile),
+# not installed as a package, so there's no [project] table here.
+
+[tool.ruff]
+# Matches the longest line already in the codebase rather than forcing a
+# reflow of every module: this is a linter being adopted mid-project, and a
+# formatting-only diff across every file would bury real changes.
+line-length = 110
+target-version = "py312"  # matches the Dockerfile's python:3.12-slim
+extend-exclude = [".venv", "data"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes — unused imports/names, the ones that actually rot
+    "I",   # import sorting, which this codebase already follows by hand
+    "UP",  # pyupgrade — keeps syntax at the target-version baseline
+    "B",   # bugbear — mutable defaults, loop-variable capture, ...
+    "SIM", # obvious simplifications
+]
+ignore = [
+    # `filter` and `id` as parameter names are part of the public query
+    # string / path API (GET /content?filter=...), so they can't be renamed
+    # without changing the URLs.
+    "A002",
+    # Long explanatory comments are load-bearing here (see any module's
+    # header) and wrapping them to fit is worse than letting them run on.
+    "E501",
+]
+
+[tool.ruff.lint.flake8-bugbear]
+# `def route(db: Session = Depends(get_db))` is FastAPI's entire dependency
+# idiom — B008 ("function call in default argument") is aimed at accidental
+# shared mutable defaults, not this, and would otherwise fire on every
+# single route handler in the app.
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Form",
+    "fastapi.Query",
+    "fastapi.Path",
+    "fastapi.Body",
+    "fastapi.Header",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# conftest.py sets os.environ before importing anything from app/ — the
+# import order is deliberate and documented there, not an oversight.
+"tests/conftest.py" = ["E402"]

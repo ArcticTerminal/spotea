@@ -4,6 +4,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.models import Content, Feed
+from app.timeutil import utcnow
 
 DEFAULT_PAGE_SIZE = 20
 
@@ -21,7 +22,7 @@ def new_upload_cutoff() -> datetime:
     # routers/feeds.py's add_single_video) — SQLite has no timezone type, and
     # mixing naive/aware datetimes in the same column makes string comparison
     # unreliable.
-    return datetime.utcnow() - NEW_UPLOAD_MAX_AGE
+    return utcnow() - NEW_UPLOAD_MAX_AGE
 
 # Distinct from a plain free-text filter: this is an *exact* channel match
 # (picked from a suggestion, e.g. clicking a Home channel chip), so a video

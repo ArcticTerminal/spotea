@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 
 from app.content_query import CHANNEL_FILTER_PREFIX, query_content_page
 from app.models import Content, Feed
+from app.timeutil import utcnow
 
 USER_ID = 1
 
@@ -180,7 +181,7 @@ def test_filter_new_uploads(db_session):
     # (content_query.py) is a rolling window off the real current time, so a
     # hardcoded past date eventually ages out of it and starts failing on its
     # own regardless of anything this test is actually checking.
-    now = datetime.utcnow()
+    now = utcnow()
     db_session.add_all(
         [
             Content(

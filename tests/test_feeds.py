@@ -236,7 +236,7 @@ def test_run_backfill_marks_done_on_unexpected_failure(db_session, monkeypatch):
 
     feeds_module._run_backfill(feed.id, channel_id, db_session)
 
-    assert feeds_module._backfill_progress[feed.id][0] == "done"
+    assert feeds_module._backfill_progress.get(feed.id)[0] == "done"
 
 
 def test_run_backfill_does_not_mark_entries_as_new_upload(db_session, monkeypatch):

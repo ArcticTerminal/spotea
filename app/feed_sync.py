@@ -153,7 +153,7 @@ def apply_feed_data(db: Session, feed: Feed, result: FeedFetchResult) -> int:
     # currently shows on the next refresh, rather than staying permanently
     # empty for every video that existed before this column did. Same
     # Shorts guard as new inserts, using whatever duration is on file.
-    for video_id, row in existing_rows.items():
+    for row in existing_rows.values():
         if row.is_new_upload:
             continue
         if row.duration_seconds is not None and row.duration_seconds <= SHORT_MAX_DURATION_SECONDS:
@@ -179,7 +179,7 @@ def refresh_feeds(db: Session, feeds: list[Feed]) -> int:
         results = list(pool.map(lambda f: fetch_feed_data(f.id, f.rss_url, f.avatar_url), feeds))
 
     new_count = 0
-    for feed, result in zip(feeds, results):
+    for feed, result in zip(feeds, results, strict=True):
         try:
             new_count += apply_feed_data(db, feed, result)
         except Exception:

@@ -1,7 +1,7 @@
 import logging
 import secrets
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy import func
@@ -12,6 +12,7 @@ from app.deps import get_current_profile, get_db, require_login
 from app.feed_sync import REFRESH_POOL_SIZE, apply_feed_data, fetch_feed_data
 from app.feed_sync import refresh_feeds as sync_refresh_feeds
 from app.models import Content, Feed, User
+from app.progress import ProgressRegistry
 from app.rss import (
     SHORT_MAX_DURATION_SECONDS,
     ChannelResolutionError,
@@ -41,6 +42,7 @@ from app.schemas import (
     VideoSearchResultOut,
 )
 from app.storage import unlink_if_unshared, unlink_thumbnail_if_unshared
+from app.timeutil import utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +55,7 @@ router = APIRouter(prefix="/feeds", tags=["feeds"], dependencies=[Depends(requir
 # first poll; if we just deleted the key, that client would see "nothing
 # happening" and have no way to tell "finished with nothing new" apart from
 # "never ran". Entries are dropped when their feed is deleted (see delete_feed).
-_backfill_progress: dict[int, tuple[str, int, int]] = {}
+_backfill_progress: ProgressRegistry[int, tuple[str, int, int]] = ProgressRegistry()
 
 
 def _run_backfill(feed_id: int, channel_id: str, db: Session) -> None:
@@ -72,7 +74,7 @@ def _run_backfill(feed_id: int, channel_id: str, db: Session) -> None:
     if feed is None:
         return
 
-    _backfill_progress[feed_id] = ("scanning", 0, 0)
+    _backfill_progress.set(feed_id, ("scanning", 0, 0))
 
     def on_scan_progress(progress: tuple[str, int, int]) -> None:
         # progress is ("listing", page_number, 0) while yt-dlp is still
@@ -80,12 +82,12 @@ def _run_backfill(feed_id: int, channel_id: str, db: Session) -> None:
         # done, total) once the full list is in and it's processing entries.
         # Either way (done, total) is meaningful to show as scanning progress.
         _, done, total = progress
-        _backfill_progress[feed_id] = ("scanning", done, total)
+        _backfill_progress.set(feed_id, ("scanning", done, total))
 
     try:
         videos = fetch_channel_all_videos(channel_id, on_progress=on_scan_progress)
     except ChannelResolutionError:
-        _backfill_progress[feed_id] = ("done", 0, 0)
+        _backfill_progress.set(feed_id, ("done", 0, 0))
         return
 
     try:
@@ -115,10 +117,10 @@ def _run_backfill(feed_id: int, channel_id: str, db: Session) -> None:
             .filter(Content.feed_id == feed_id, Content.published_at.isnot(None))
             .scalar()
         )
-        anchor = oldest_known or datetime.utcnow()
+        anchor = oldest_known or utcnow()
 
         total = len(new_entries)
-        _backfill_progress[feed_id] = ("saving", 0, total)
+        _backfill_progress.set(feed_id, ("saving", 0, total))
         for i, entry in enumerate(new_entries, start=1):
             # Stored as-is (still a remote ytimg.com URL) — no need to fetch
             # it here. Whichever page first renders this row (channel page,
@@ -138,16 +140,32 @@ def _run_backfill(feed_id: int, channel_id: str, db: Session) -> None:
                     published_at=anchor - timedelta(seconds=i),
                 )
             )
-            _backfill_progress[feed_id] = ("saving", i, total)
+            _backfill_progress.set(feed_id, ("saving", i, total))
 
         db.commit()
-        _backfill_progress[feed_id] = ("done", total, total)
+        _backfill_progress.set(feed_id, ("done", total, total))
     except Exception:
         # Whatever went wrong (DB, disk, anything else), the polling UI must
         # still terminate instead of spinning on "scanning"/"saving" forever.
         db.rollback()
-        _backfill_progress[feed_id] = ("done", 0, 0)
+        _backfill_progress.set(feed_id, ("done", 0, 0))
         logger.exception("Backfill failed for feed %s (%s)", feed_id, feed.channel_title)
+
+
+def _run_backfill_task(feed_id: int, channel_id: str) -> None:
+    """BackgroundTasks entry point for _run_backfill, on a session of its own.
+
+    The request's `Depends(get_db)` session must not be used here: since
+    FastAPI 0.106 a yield-dependency's exit code (get_db's `db.close()`)
+    runs before the response is sent, so it's already closed by the time a
+    background task starts. That matters more for a backfill than anywhere
+    else — this can run for minutes on a worker thread, long after the
+    request that scheduled it is gone. Bulk import calls _run_backfill
+    directly instead, since it already owns a session of its own (see
+    _run_bulk_import) and wants each channel's backfill to finish before
+    starting the next."""
+    with SessionLocal() as db:
+        _run_backfill(feed_id, channel_id, db)
 
 
 class FeedAlreadyExistsError(Exception):
@@ -220,14 +238,18 @@ def add_feed(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     if channel_id:
-        background_tasks.add_task(_run_backfill, feed.id, channel_id, db)
+        background_tasks.add_task(_run_backfill_task, feed.id, channel_id)
 
     return FeedAddResult(feed=FeedOut.model_validate(feed), new_content_count=new_count)
 
 
 # In-memory only, same rationale as _backfill_progress above. Keyed by a
-# random job id (not a feed id — one job spans many feeds).
-_import_progress: dict[str, dict] = {}
+# random job id (not a feed id — one job spans many feeds). Unlike a feed's
+# backfill entry there's no later event that means "this job's tracking can
+# go" the way delete_feed does, so its entries live purely on the
+# registry's expiry — which is the whole reason that expiry exists (a plain
+# dict here grew by one entry per import, forever).
+_import_progress: ProgressRegistry[str, dict] = ProgressRegistry()
 
 
 def _normalize_bulk_entry(line: str) -> str:
@@ -254,8 +276,12 @@ def _resolve_bulk_entry(line: str) -> dict:
         return {"line": line, "rss_url": None, "error": str(exc)}
 
 
-def _run_bulk_import(job_id: str, lines: list[str], user_id: int) -> None:
-    progress = _import_progress[job_id]
+def _run_bulk_import(job_id: str, progress: dict, lines: list[str], user_id: int) -> None:
+    """`progress` is the same dict start_bulk_import registered, handed over
+    directly rather than looked up again — this mutates it in place and
+    re-registers it after each step, which is what keeps the entry from
+    expiring under a long import (see ProgressRegistry, whose expiry tracks
+    `set()` calls and not in-place mutation)."""
 
     # Phase 1: resolve every line in parallel (see _resolve_bulk_entry) —
     # capped the same as REFRESH_POOL_SIZE, for the same reason (stay polite
@@ -267,6 +293,7 @@ def _run_bulk_import(job_id: str, lines: list[str], user_id: int) -> None:
             resolved = future.result()
             resolved_by_line[resolved["line"]] = resolved
             progress["resolved"] += 1
+            _import_progress.set(job_id, progress)
 
     # Phase 2: create feeds and run each one's initial parse + backfill
     # sequentially, on a single session — SQLite doesn't handle concurrent
@@ -298,6 +325,7 @@ def _run_bulk_import(job_id: str, lines: list[str], user_id: int) -> None:
 
             progress["results"].append(entry)
             progress["done"] += 1
+            _import_progress.set(job_id, progress)
 
 
 @router.post("/import", response_model=BulkImportStartOut, status_code=status.HTTP_202_ACCEPTED)
@@ -311,8 +339,9 @@ def start_bulk_import(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No channels given")
 
     job_id = secrets.token_urlsafe(8)
-    _import_progress[job_id] = {"total": len(lines), "resolved": 0, "done": 0, "results": []}
-    background_tasks.add_task(_run_bulk_import, job_id, lines, profile.id)
+    progress = {"total": len(lines), "resolved": 0, "done": 0, "results": []}
+    _import_progress.set(job_id, progress)
+    background_tasks.add_task(_run_bulk_import, job_id, progress, lines, profile.id)
     return BulkImportStartOut(job_id=job_id, total=len(lines))
 
 
@@ -418,7 +447,7 @@ def add_single_video(
         # Flat search results don't reliably expose a real upload date, and
         # NULL sorts last in SQLite's ORDER BY ... DESC (every Home shelf) —
         # "just added" as the effective date is also the correct intent here.
-        published_at=datetime.utcnow(),
+        published_at=utcnow(),
         is_preview=True,
     )
     db.add(content)
@@ -524,7 +553,7 @@ def delete_feed(
         feed.followed = False
     db.commit()
 
-    _backfill_progress.pop(feed_id, None)
+    _backfill_progress.discard(feed_id)
 
 
 @router.post("/refresh", response_model=RefreshResult)

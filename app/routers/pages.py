@@ -1,4 +1,4 @@
-from typing import Iterable
+from collections.abc import Iterable
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse

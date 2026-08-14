@@ -1,4 +1,3 @@
-import datetime as dt
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
@@ -6,20 +5,27 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session, joinedload
 
 from app.content_query import query_content_page
+from app.database import SessionLocal
 from app.deps import get_current_profile, get_db, require_login
 from app.downloader import DownloadError, download_audio
 from app.feed_sync import cache_thumbnail
 from app.formatting import safe_filename
 from app.models import Content, User
+from app.progress import ProgressRegistry
 from app.rss import VIDEO_ID_RE
 from app.schemas import ContentOut, ContentPageOut, FavoriteOut, SavedOut, StatusOut
 from app.storage import unlink_if_unshared
+from app.timeutil import utcnow
 
 router = APIRouter(prefix="/content", tags=["content"], dependencies=[Depends(require_login)])
 
 # In-memory only: fine for a single-process app, and progress ticks too
-# frequently to justify a DB write on every hook call.
-_download_progress: dict[int, tuple[str, int | None]] = {}
+# frequently to justify a DB write on every hook call. Entries are dropped
+# as soon as the download settles (see _run_download's finally), so the
+# registry's expiry never actually comes into play here — it's the same
+# type the backfill/import trackers use (see app/progress.py) rather than a
+# fourth hand-rolled dict.
+_download_progress: ProgressRegistry[int, tuple[str, int | None]] = ProgressRegistry()
 
 # Keyed by extension rather than the configured AUDIO_FORMAT so files
 # downloaded under a previous format setting still get a correct Content-Type.
@@ -40,28 +46,56 @@ def _get_content_or_404(db: Session, content_id: int, user_id: int) -> Content:
     return content
 
 
-def _run_download(content_id: int, video_id: str, quality: str, db: Session) -> None:
+def _set_download_outcome(content_id: int, **fields) -> None:
+    """Write a finished download's result on a session of this task's own.
+
+    Deliberately NOT the request's `Depends(get_db)` session: since FastAPI
+    0.106 a yield-dependency's exit code (get_db's `db.close()`) runs before
+    the response is sent, i.e. before any BackgroundTask starts — so the
+    session handed to a background task is already closed. SQLAlchemy
+    happens to re-acquire a connection on next use, which is the only reason
+    passing it here ever appeared to work; nothing guarantees that keeps
+    being true. Opening a session inside the task is also what makes it safe
+    to run for minutes on a worker thread, independent of the request that
+    scheduled it."""
+    with SessionLocal() as db:
+        content = db.get(Content, content_id)
+        if content is None:
+            return
+        for field, value in fields.items():
+            setattr(content, field, value)
+        db.commit()
+
+
+def _run_download(content_id: int, video_id: str, quality: str) -> None:
     def on_progress(phase: str, percent: int | None) -> None:
-        _download_progress[content_id] = (phase, percent)
+        _download_progress.set(content_id, (phase, percent))
 
     try:
         file_path = download_audio(video_id, quality=quality, on_progress=on_progress)
     except DownloadError as exc:
-        content = db.get(Content, content_id)
-        if content is not None:
-            content.status = "error"
-            content.error_message = str(exc)[:1000]
-            db.commit()
+        _set_download_outcome(content_id, status="error", error_message=str(exc)[:1000])
         return
     finally:
-        _download_progress.pop(content_id, None)
+        _download_progress.discard(content_id)
 
-    content = db.get(Content, content_id)
-    if content is not None:
-        content.status = "ready"
-        content.file_path = str(file_path)
-        content.downloaded_at = dt.datetime.utcnow()
-        db.commit()
+    # Measured here, once, rather than on every render that wants a storage
+    # total — see Content.file_size_bytes. The file is guaranteed to exist
+    # at this point (download_audio raises otherwise), but a stat failure
+    # still shouldn't lose the download itself, so it falls back to
+    # "unmeasured" and lets collect_usage's lazy backfill retry later.
+    try:
+        size_bytes = file_path.stat().st_size
+    except OSError:
+        size_bytes = None
+
+    _set_download_outcome(
+        content_id,
+        status="ready",
+        file_path=str(file_path),
+        file_size_bytes=size_bytes,
+        downloaded_at=utcnow(),
+    )
 
 
 @router.get("", response_model=ContentPageOut)
@@ -175,7 +209,7 @@ def start_download(
     content.error_message = None
     db.commit()
 
-    background_tasks.add_task(_run_download, content.id, content.video_id, profile.audio_quality, db)
+    background_tasks.add_task(_run_download, content.id, content.video_id, profile.audio_quality)
 
     return StatusOut(id=content.id, status=content.status, error_message=content.error_message)
 
@@ -259,7 +293,7 @@ def stream_content(
     # Skipped for a plain file export (?download=1) — that's not the user
     # actually listening, so it shouldn't count toward "recently played".
     if not download:
-        content.last_played_at = dt.datetime.utcnow()
+        content.last_played_at = utcnow()
         db.commit()
 
     media_type = AUDIO_MEDIA_TYPES.get(file_path.suffix, "application/octet-stream")
@@ -279,6 +313,7 @@ def delete_content(
 
     content.status = "not_downloaded"
     content.file_path = None
+    content.file_size_bytes = None
     content.error_message = None
     content.downloaded_at = None
     db.commit()

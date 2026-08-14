@@ -1,6 +1,12 @@
 import pytest
 
-from app.rss import _absolute_thumbnail_url, _playlist_id, channel_feed_url, extract_channel_id, resolve_feed_url
+from app.rss import (
+    _absolute_thumbnail_url,
+    _playlist_id,
+    channel_feed_url,
+    extract_channel_id,
+    resolve_feed_url,
+)
 
 
 @pytest.mark.parametrize(

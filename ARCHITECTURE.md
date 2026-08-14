@@ -51,6 +51,11 @@ spotea/
                                   # AppSettings.feed_refresh_interval_minutes
     formatting.py                 # Jinja filters (duration, file size),
                                    # filesystem-safe filenames
+    timeutil.py                    # utcnow() — the single naive-UTC source
+                                    # every datetime column agrees on
+    progress.py                     # ProgressRegistry: expiring in-memory
+                                     # progress for downloads, backfills and
+                                      # bulk imports (single-process only)
     storage.py                     # disk usage, cache clearing, orphan
                                     # sweep, zip export
     models.py                       # Account, User, AppSettings, Feed, Content
@@ -183,6 +188,12 @@ Unique: `(user_id, rss_url)`.
 convenience), `video_id` (YouTube ID), `title`, `thumbnail_url`,
 `duration_seconds` (nullable — backfilled from the channel's uploads
 playlist, not in the RSS feed), `published_at`, `status`, `file_path`,
+`file_size_bytes` (nullable — recorded once when a download finishes;
+`NULL` means "not measured yet" and is filled in from disk the first time
+`storage.collect_usage` sees the row. Stored rather than stat'ed on demand
+because `collect_usage` runs on every Home render, and reading it from disk
+cost one syscall per downloaded track just to show a total. Cleared
+alongside `file_path` whenever a download is removed),
 `error_message`, `added_at`, `downloaded_at`, `last_played_at` (nullable —
 set on stream, not on download; drives "Recently played"/"Recently Played"),
 `is_favorite`, `is_saved`, `is_preview` (default `False` — `True` for a
@@ -816,6 +827,19 @@ Environment variables (`.env`, documented in `.env.example`):
 `pydantic-settings`, `bcrypt`. `bcrypt` ships prebuilt manylinux wheels for
 the `python:3.12-slim` base image the `Dockerfile` uses — no build tooling
 needed to add it.
+
+Everything except `yt-dlp` (and its `bgutil-ytdlp-pot-provider` plugin) is
+pinned to an exact version. Unpinned, every `docker compose up --build`
+silently picked up whatever was newest on PyPI, which is how a framework
+behaviour change lands in production with no change to this repo — FastAPI
+0.106 closing a yield-dependency's session *before* background tasks run
+being the concrete example this codebase was exposed to. `yt-dlp` stays
+floating on purpose: YouTube changes extraction constantly and a pin there
+means downloads break until someone notices.
+
+Lint/format config lives in `pyproject.toml` (`ruff`, dev-only — see
+`requirements-dev.txt`). There's no `[project]` table: the app is run from
+the repo, not installed as a package.
 
 ## 8. Error scenarios
 

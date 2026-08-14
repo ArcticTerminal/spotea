@@ -1,11 +1,22 @@
-fastapi
-uvicorn[standard]
-sqlalchemy
-feedparser
+# Pinned so `docker compose up -d --build` rebuilds the same app it built
+# last time. Unpinned, every rebuild silently picked up whatever was newest
+# on PyPI — which is how a framework behaviour change (e.g. FastAPI 0.106
+# closing yield-dependency sessions before background tasks run) lands in
+# production without a single line of this repo having changed.
+# Bump these deliberately: edit, rebuild, run the test suite.
+fastapi==0.141.1
+uvicorn[standard]==0.52.0
+sqlalchemy==2.0.51
+pydantic-settings==2.14.2
+jinja2==3.1.6
+python-multipart==0.0.32
+itsdangerous==2.2.0
+bcrypt==5.0.0
+feedparser==6.0.13
+
+# Deliberately NOT pinned. YouTube changes its player/extraction constantly
+# and yt-dlp ships fixes within days; a pin here means downloads start
+# failing until someone notices and bumps it. The pot-provider plugin
+# tracks yt-dlp's own extractor API, so it floats with it.
 yt-dlp
 bgutil-ytdlp-pot-provider
-jinja2
-python-multipart
-itsdangerous
-pydantic-settings
-bcrypt

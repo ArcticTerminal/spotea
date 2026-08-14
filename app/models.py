@@ -4,6 +4,7 @@ from sqlalchemy import CheckConstraint, ForeignKey, Index, String, UniqueConstra
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
+from app.timeutil import utcnow
 
 CONTENT_STATUSES = ("not_downloaded", "downloading", "ready", "error")
 
@@ -19,7 +20,7 @@ class Account(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     email: Mapped[str] = mapped_column(String(255), unique=True)
     password_hash: Mapped[str] = mapped_column(String(255))
-    created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
     # Which profile to land on right after login — session-stored
     # PROFILE_SESSION_KEY doesn't survive logout (the whole session is
     # cleared), so without this a fresh login always fell back to the
@@ -71,7 +72,7 @@ class Feed(Base):
     rss_url: Mapped[str] = mapped_column(String(500))
     channel_title: Mapped[str | None] = mapped_column(String(200), default=None)
     avatar_url: Mapped[str | None] = mapped_column(String(500), default=None)
-    added_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+    added_at: Mapped[datetime] = mapped_column(default=utcnow)
     # False only for placeholder feeds auto-created to hold a single video
     # added via Explore (see routers/feeds.py's _get_or_create_placeholder_feed)
     # — invisible in Library, skipped by the background refresh scheduler,
@@ -104,8 +105,16 @@ class Content(Base):
     published_at: Mapped[datetime | None] = mapped_column(default=None)
     status: Mapped[str] = mapped_column(String(20), default="not_downloaded")
     file_path: Mapped[str | None] = mapped_column(String(500), default=None)
+    # Size of file_path on disk, recorded once when the download finishes
+    # (see routers/content.py's _run_download). Stored rather than stat'ed
+    # on demand because storage.collect_usage runs on every Home render —
+    # reading it from disk meant one stat syscall per downloaded track just
+    # to render a total. Cleared alongside file_path whenever a download is
+    # removed, and backfilled lazily for rows downloaded before this column
+    # existed (see collect_usage).
+    file_size_bytes: Mapped[int | None] = mapped_column(default=None)
     error_message: Mapped[str | None] = mapped_column(String(1000), default=None)
-    added_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+    added_at: Mapped[datetime] = mapped_column(default=utcnow)
     downloaded_at: Mapped[datetime | None] = mapped_column(default=None)
     is_favorite: Mapped[bool] = mapped_column(default=False)
     is_saved: Mapped[bool] = mapped_column(default=False)

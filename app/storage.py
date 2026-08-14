@@ -25,11 +25,29 @@ class StorageUsage:
         return len(self.items)
 
 
-def collect_usage(db: Session, user_id: int) -> StorageUsage:
-    """Downloaded content plus the disk each file actually occupies.
+def _size_on_disk(file_path: str | None) -> int:
+    """A file's size, or 0 if it's gone — a file removed out from under the
+    app should read as 0 rather than inflate the total."""
+    if not file_path:
+        return 0
+    try:
+        return Path(file_path).stat().st_size
+    except OSError:
+        return 0
 
-    Sizes are read from disk rather than stored, so a file removed out from
-    under the app simply reports 0 instead of inflating the total.
+
+def collect_usage(db: Session, user_id: int) -> StorageUsage:
+    """Downloaded content plus the disk each file occupies.
+
+    Sizes come from Content.file_size_bytes, recorded once when the download
+    finished. They used to be stat'ed from disk on every call instead —
+    which is one syscall per downloaded track on every single Home render
+    (pages.py calls this to show one total), for a number that only ever
+    changes when a download starts or is removed.
+
+    Rows downloaded before that column existed have NULL and are measured
+    here, once, then written back. That write is why this otherwise-read-only
+    function commits.
     """
     rows = (
         db.query(Content)
@@ -40,20 +58,22 @@ def collect_usage(db: Session, user_id: int) -> StorageUsage:
     )
 
     items: list[StoredItem] = []
+    needs_backfill = False
     for row in rows:
-        size = 0
-        if row.file_path:
-            path = Path(row.file_path)
-            if path.exists():
-                size = path.stat().st_size
+        if row.file_size_bytes is None:
+            row.file_size_bytes = _size_on_disk(row.file_path)
+            needs_backfill = True
         items.append(
             StoredItem(
                 id=row.id,
                 title=row.title,
                 channel_title=row.feed.channel_title,
-                size_bytes=size,
+                size_bytes=row.file_size_bytes,
             )
         )
+
+    if needs_backfill:
+        db.commit()
 
     return StorageUsage(items=items, total_bytes=sum(item.size_bytes for item in items))
 
@@ -110,6 +130,7 @@ def clear_all(db: Session, user_id: int) -> int:
             unlink_if_unshared(db, row.file_path, row.id)
         row.status = "not_downloaded"
         row.file_path = None
+        row.file_size_bytes = None
         row.error_message = None
         row.downloaded_at = None
 
