@@ -135,26 +135,34 @@ spotea/
       player.html                                  # standalone full-page player
                                                      # (real navigation)
     static/
-      js/ui.js                                       # shared confirm modal +
-                                                       # toast + playback-state
-                                                       # persistence across
-                                                       # navigation (loaded first)
-      js/app.js                                        # tabs, Explore search,
-                                                        # in-page player overlay,
-                                                        # Settings, bulk import,
-                                                        # backfill polling
-      js/player.js                                       # custom audio player
-                                                          # controls, shared by
-                                                          # player.html and the
-                                                          # overlay
-      js/profiles.js                                       # profile switcher +
-                                                            # manage-profiles UI
-      js/channel.js                                          # channel.html's
-                                                              # Unfollow button
-      js/sw.js                                                 # PWA service
-                                                                # worker (install-
-                                                                # ability only,
-                                                                # not offline-first)
+      js/                                    # ES modules; each page loads one
+                                              # entry point via <script type="module">
+        core.js                              # escaping/formatting, the api()
+                                              # JSON helper, toast, confirm
+                                              # dialog, overlay open/close
+        resume.js                            # playback resume across loads,
+                                              # the bfcache reload rule, service
+                                              # worker registration
+        player.js                            # the audio player, shared by
+                                              # player.html and the overlay
+        live-updates.js                      # patching the rendered page after
+                                              # a save/favorite/play/download
+        content-actions.js                   # save toggle + unfollow, on every
+                                              # page that shows content
+        home/tabs.js                         # Home/Library/Explore/Settings panels
+        home/library.js                      # channel chips, library search,
+                                              # drag-scroll rows, mobile menu,
+                                              # manual refresh
+        home/overlay.js                      # in-page player + mini bar
+        home/explore.js                      # search, add channel, backfill
+                                              # progress overlay
+        home/settings.js                     # settings controls + downloads modal
+        home/bulk-import.js                  # paste-a-list import modal
+        home/profiles.js                     # profile switcher + manage UI
+        pages/{index,player,channel,list}.js # per-page entry points
+        sw.js                                # PWA service worker (installability
+                                              # only, not offline-first; a classic
+                                              # script, not a module)
       css/style.css
       manifest.json                                              # PWA manifest
   data/                                 # mounted as Docker volume

@@ -22,7 +22,7 @@ def get_usage(
     """Same data pages.py's settings route renders server-side — used to
     live-patch the Settings/Downloads storage summary after a track finishes
     downloading mid-session, instead of leaving it stale until reload (see
-    app.js's refreshStorageUsage)."""
+    home/settings.js's refreshStorageUsage)."""
     usage = collect_usage(db, profile.id)
     return StorageUsageOut(
         total_formatted=format_size(usage.total_bytes),

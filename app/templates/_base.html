@@ -15,7 +15,7 @@
      {% block body %}             — the page itself
      {% block scripts %}          — deliberately empty by default: login and
                                     register load no JS at all, and a page
-                                    silently inheriting ui.js (service worker
+                                    silently inheriting the shared modules (service worker
                                     registration, the bfcache reload) is a
                                     worse default than one that has to ask.
 #}

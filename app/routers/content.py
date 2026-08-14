@@ -120,7 +120,7 @@ def get_content(
     profile: User = Depends(get_current_profile),
     db: Session = Depends(get_db),
 ) -> ContentOut:
-    """Single-item fetch — used by the Home player overlay (see app.js's
+    """Single-item fetch — used by the Home player overlay (see home/overlay.js's
     openPlayer) to populate itself for a track without a full page
     navigation. joinedload's needed here (unlike _get_content_or_404, whose
     other callers never touch .feed) since channel_title comes from it."""

@@ -1,3 +1,6 @@
+import { api, confirmDialog, escapeHtml, setupOverlay } from "../core.js";
+import { closePlayer } from "./overlay.js";
+
 // Profile management. Only wired up on index.html — the drill-down pages
 // (channel/player/content list) have no topbar and switching/managing
 // profiles mid-drill-down would just orphan the page underneath, so they
@@ -21,6 +24,9 @@
 const USER_ICON_SVG =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-user" /></svg>';
 
+// The switch-profile overlay's handle, so the mobile menu can open it too.
+let switchOverlay = null;
+
 let cachedProfiles = [];
 // Set while the manage overlay's add/rename form is mid-rename (its "Add"
 // button becomes "Save" and submitting calls renameProfile instead of
@@ -28,13 +34,8 @@ let cachedProfiles = [];
 let editingProfileId = null;
 
 async function fetchProfiles() {
-  try {
-    const res = await fetch("/profiles");
-    if (!res.ok) return [];
-    return await res.json();
-  } catch (err) {
-    return [];
-  }
+  const { ok, data } = await api("/profiles");
+  return ok ? data : [];
 }
 
 // Current profile gets the same accent border/tint treatment as a checked
@@ -103,68 +104,46 @@ async function loadProfiles() {
 }
 
 async function switchProfile(profileId) {
-  try {
-    const res = await fetch(`/profiles/${profileId}/switch`, { method: "POST" });
-    if (res.ok) {
-      // Whatever's loaded belongs to the profile being left — its content id
-      // means nothing under the new one. Without closing it first, the
-      // reload below still fires ui.js's pagehide handler on the way out,
-      // which would snapshot that now-foreign content id into
-      // sessionStorage; the fresh load (already running as the new profile)
-      // then tries to resume it, 404s against /content/{id}, and — since a
-      // failed resume used to never clear its own stale record — repeats
-      // that same failed attempt on every reload after, forever. closePlayer
-      // (app.js) is always defined here: profiles.js only ever loads on
-      // index.html, which always has the player overlay markup.
-      closePlayer();
-      window.location.reload();
-      return;
-    }
-    showToast("Could not switch profile");
-  } catch (err) {
-    showToast("Could not switch profile");
-  }
+  const { ok } = await api(`/profiles/${profileId}/switch`, {
+    method: "POST",
+    errorMessage: "Could not switch profile",
+  });
+  if (!ok) return;
+
+  // Whatever's loaded belongs to the profile being left — its content id
+  // means nothing under the new one. Without closing it first, the reload
+  // below still fires resume.js's pagehide handler on the way out, which
+  // would snapshot that now-foreign content id into sessionStorage; the
+  // fresh load (already running as the new profile) then tries to resume it,
+  // 404s against /content/{id}, and — since a failed resume used to never
+  // clear its own stale record — repeats that same failed attempt on every
+  // reload after, forever.
+  closePlayer();
+  window.location.reload();
 }
 
 async function createProfile(name) {
-  try {
-    const res = await fetch("/profiles", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
-    });
-    if (res.ok) {
-      // The new profile auto-becomes active (see profiles.py) — a reload is
-      // simplest, same "create and go" flow as adding a channel.
-      window.location.reload();
-      return;
-    }
-    const data = await res.json().catch(() => ({}));
-    showToast(data.detail || "Could not create profile");
-  } catch (err) {
-    showToast("Could not create profile");
-  }
+  const { ok } = await api("/profiles", {
+    method: "POST",
+    body: { name },
+    errorMessage: "Could not create profile",
+  });
+  // The new profile auto-becomes active (see routers/profiles.py) — a reload
+  // is simplest, same "create and go" flow as adding a channel.
+  if (ok) window.location.reload();
 }
 
 // Returns whether the rename went through, so the caller can decide whether
 // to leave the form in "editing" mode (e.g. on failure, so the typed name
 // isn't lost) or reset it back to "add a new profile" mode.
 async function renameProfile(profileId, name) {
-  try {
-    const res = await fetch(`/profiles/${profileId}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
-    });
-    if (res.ok) {
-      await loadProfiles();
-      return true;
-    }
-    showToast("Could not rename profile");
-  } catch (err) {
-    showToast("Could not rename profile");
-  }
-  return false;
+  const { ok } = await api(`/profiles/${profileId}`, {
+    method: "PUT",
+    body: { name },
+    errorMessage: "Could not rename profile",
+  });
+  if (ok) await loadProfiles();
+  return ok;
 }
 
 async function deleteProfile(profileId) {
@@ -174,58 +153,22 @@ async function deleteProfile(profileId) {
   );
   if (!confirmed) return;
 
-  try {
-    const res = await fetch(`/profiles/${profileId}`, { method: "DELETE" });
-    if (res.status === 204) {
-      const wasCurrent = cachedProfiles.find((p) => p.id === profileId)?.is_current;
-      // Deleting the profile you're currently viewing needs a full reload so
-      // the page doesn't keep showing now-deleted content until the next
-      // natural navigation — deleting some other profile just needs the
-      // lists refreshed in place.
-      if (wasCurrent) window.location.reload();
-      else await loadProfiles();
-      return;
-    }
-    const data = await res.json().catch(() => ({}));
-    showToast(data.detail || "Could not delete profile");
-  } catch (err) {
-    showToast("Could not delete profile");
-  }
-}
-
-// Sets up a simple overlay: one or more triggers open it, a close button /
-// backdrop click / Escape close it. Returns the close function so a caller
-// (setupManageOverlay) can layer extra behavior onto it.
-function setupOverlay(overlayId, closeBtnId, triggerIds) {
-  const overlay = document.getElementById(overlayId);
-  if (!overlay) return null;
-  const closeBtn = document.getElementById(closeBtnId);
-
-  const open = () => {
-    overlay.hidden = false;
-  };
-  const close = () => {
-    overlay.hidden = true;
-  };
-
-  for (const triggerId of triggerIds) {
-    document.getElementById(triggerId)?.addEventListener("click", open);
-  }
-  closeBtn?.addEventListener("click", close);
-  overlay.addEventListener("click", (event) => {
-    if (event.target === overlay) close();
+  const { ok } = await api(`/profiles/${profileId}`, {
+    method: "DELETE",
+    errorMessage: "Could not delete profile",
   });
-  document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && !overlay.hidden) close();
-  });
+  if (!ok) return;
 
-  return close;
+  // Deleting the profile you're currently viewing needs a full reload so the
+  // page doesn't keep showing now-deleted content until the next natural
+  // navigation — deleting some other profile just needs the lists refreshed
+  // in place.
+  if (cachedProfiles.find((p) => p.id === profileId)?.is_current) window.location.reload();
+  else await loadProfiles();
 }
 
 function setupSwitchOverlay() {
-  setupOverlay("profiles-overlay", "profiles-close", ["profile-switcher-btn"]);
-  // The collapsed mobile menu's own profile item opens this overlay
-  // directly too — see setupMobileMenu in app.js.
+  switchOverlay = setupOverlay("profiles-overlay", "profiles-close", ["profile-switcher-btn"]);
 
   const switchList = document.getElementById("profiles-switch-list");
   switchList?.addEventListener("click", (event) => {
@@ -236,10 +179,10 @@ function setupSwitchOverlay() {
 }
 
 function setupManageOverlay() {
-  const baseClose = setupOverlay("profiles-manage-overlay", "profiles-manage-close", [
+  const manageOverlay = setupOverlay("profiles-manage-overlay", "profiles-manage-close", [
     "open-profiles-settings",
   ]);
-  if (!baseClose) return;
+  if (!manageOverlay) return;
 
   const manageList = document.getElementById("profiles-manage-list");
   const addForm = document.getElementById("profiles-add-form");
@@ -268,8 +211,8 @@ function setupManageOverlay() {
     if (event.key !== "Escape") return;
     if (document.getElementById("profiles-manage-overlay").hidden) return;
     // While mid-rename, the first Escape just backs out of that (so a typed
-    // edit isn't lost to an accidental double-press); baseClose (already
-    // wired to Escape by setupOverlay) handles the second press.
+    // edit isn't lost to an accidental double-press); core.js's shared
+    // Escape handler closes the overlay on the second press.
     if (editingProfileId !== null) stopEditing();
   });
 
@@ -302,8 +245,14 @@ function setupManageOverlay() {
   });
 }
 
-document.addEventListener("DOMContentLoaded", () => {
+/** Opens the switch-profile overlay — the collapsed mobile menu's profile
+    row is a second entry point to the same dialog (see home/library.js). */
+export function openProfileSwitcher() {
+  switchOverlay?.open();
+}
+
+export function setupProfiles() {
   setupSwitchOverlay();
   setupManageOverlay();
   loadProfiles();
-});
+}
