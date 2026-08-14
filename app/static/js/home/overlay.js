@@ -9,10 +9,9 @@
 // several tracks in one page load instead of once per load.
 
 import { api, formatDuration, showToast } from "../core.js";
-import { bumpLibraryCount, markContentDownloaded, syncRecentlyPlayedShelf } from "../live-updates.js";
+import { refreshFragments } from "../fragments.js";
 import { paintRange, prepareAudio } from "../player.js";
 import { clearResumeState, readResumeState } from "../resume.js";
-import { refreshStorageUsage } from "./settings.js";
 
 function expandPlayer() {
   document.getElementById("player-overlay").hidden = false;
@@ -115,17 +114,12 @@ export async function openPlayer(contentId, { expanded = true } = {}) {
   document.body.classList.add("has-mini-player");
 
   prepareAudio(audio, () => {
-    syncRecentlyPlayedShelf(contentId);
-    markContentDownloaded(contentId);
-    // data.is_played reflects state as of the GET above, i.e. before *this*
-    // play — the server only marks last_played_at once /stream actually
-    // starts. Replays of already-played content don't grow the list
-    // server-side, so the Library tile must only bump on a genuine first play.
-    if (!data.is_played) bumpLibraryCount("library-count-recently-played", 1);
-    // Same "before this play" signal reused: "ready" here means the track was
-    // already downloaded and this callback fired from a plain replay —
-    // nothing was added to disk, so there's nothing to refetch.
-    if (data.status !== "ready") refreshStorageUsage();
+    // The server records the play when /stream is requested, which only
+    // happens after audio.src is assigned — refreshing right here would race
+    // it and re-render shelves that don't know about this play yet.
+    // loadedmetadata fires once the first bytes are back, by which point the
+    // server has already written last_played_at.
+    audio.addEventListener("loadedmetadata", refreshFragments, { once: true });
   });
 }
 

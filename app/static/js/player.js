@@ -4,7 +4,7 @@
 // know which one it's running in.
 
 import { api, formatDuration, showToast } from "./core.js";
-import { bumpLibraryCount, syncFavoritesShelf } from "./live-updates.js";
+import { refreshFragments } from "./fragments.js";
 import { consumeResumeState } from "./resume.js";
 
 const SKIP_SECONDS = 15;
@@ -393,11 +393,7 @@ export function setupFavorite() {
       btn.setAttribute("aria-pressed", String(data.is_favorite));
       btn.querySelector("svg").setAttribute("fill", data.is_favorite ? "currentColor" : "none");
 
-      document.querySelectorAll(`.card[data-content-id="${btn.dataset.contentId}"]`).forEach((card) => {
-        card.dataset.favorite = String(data.is_favorite);
-      });
-      syncFavoritesShelf(btn.dataset.contentId, data.is_favorite);
-      bumpLibraryCount("library-count-favorites", data.is_favorite ? 1 : -1);
+      refreshFragments();
     } finally {
       btn.disabled = false;
     }

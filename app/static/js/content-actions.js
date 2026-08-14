@@ -4,7 +4,7 @@
 // rather than under home/.
 
 import { api, confirmDialog } from "./core.js";
-import { bumpLibraryCount, syncSavedShelf } from "./live-updates.js";
+import { refreshFragments } from "./fragments.js";
 
 function applySavedState(button, isSaved) {
   button.classList.toggle("is-on", isSaved);
@@ -29,14 +29,15 @@ async function toggleSaved(contentId, button) {
   });
   if (!ok) return;
 
+  // Applied immediately so the button the user pressed responds at once;
+  // the shelves and counts follow from the server's own render below.
   cards.forEach((card) => {
     card.dataset.saved = String(data.is_saved);
     const saveBtn = card.querySelector(".btn-save");
     if (saveBtn) applySavedState(saveBtn, data.is_saved);
   });
 
-  syncSavedShelf(contentId, data.is_saved);
-  bumpLibraryCount("library-count-saved", data.is_saved ? 1 : -1);
+  refreshFragments();
 }
 
 /**

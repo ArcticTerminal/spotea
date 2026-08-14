@@ -1,0 +1,8 @@
+{# Wrapper that GET /partials/downloads returns. Two targets from one render:
+   the same storage figures appear in the Downloads modal and as a one-line
+   summary in Settings, and re-querying for each would be the same work twice.
+   See routers/partials.py. #}
+<template data-target="downloads-body">
+{% include "_downloads.html" %}
+</template>
+<template data-target="settings-storage-desc">{{ usage.total_bytes | filesize }} across {{ usage.count }} item{{ '' if usage.count == 1 else 's' }}</template>

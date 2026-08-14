@@ -3,13 +3,13 @@
 // refresh those last two both trigger.
 
 import { api, showToast } from "../core.js";
-import { saveResumeState } from "../resume.js";
+import { onFragmentsSwapped, refreshFragments } from "../fragments.js";
 
+// Delegated from the panel rather than the chip row: the row lives inside
+// the Home fragment and is replaced wholesale on every refresh, which would
+// take a listener bound to it along.
 export function setupHomeChannels() {
-  const row = document.getElementById("home-channel-row");
-  if (!row) return;
-
-  row.addEventListener("click", (event) => {
+  document.getElementById("tab-home")?.addEventListener("click", (event) => {
     const chip = event.target.closest(".channel-chip");
     if (!chip) return;
     window.location.href = `/channel/${chip.dataset.feedId}`;
@@ -18,30 +18,49 @@ export function setupHomeChannels() {
 
 // Every card is already server-rendered in the DOM, so filtering is just a
 // show/hide over what's there — no round trip needed.
-export function setupLibrarySearch() {
+//
+// The cards are looked up on each keystroke rather than captured once: the
+// grid is inside the Library fragment and is replaced on every refresh, so a
+// captured list would go stale (and the grid is a handful of nodes, so
+// re-querying costs nothing).
+function applyLibraryFilter() {
   const input = document.getElementById("library-search-input");
-  const grid = document.querySelector("#tab-library .channel-grid");
+  const grid = document.querySelector("#library-grid .channel-grid");
   const emptyState = document.getElementById("channel-search-empty");
   if (!input || !grid) return;
 
-  const cards = Array.from(grid.querySelectorAll(".channel-card"));
+  const query = input.value.trim().toLowerCase();
+  let visibleCount = 0;
 
-  input.addEventListener("input", () => {
-    const query = input.value.trim().toLowerCase();
-    let visibleCount = 0;
-
-    cards.forEach((card) => {
-      const title = card.querySelector(".channel-card-title")?.textContent.toLowerCase() ?? "";
-      const matches = !query || title.includes(query);
-      card.hidden = !matches;
-      if (matches) visibleCount++;
-    });
-
-    if (emptyState) emptyState.hidden = visibleCount > 0;
+  grid.querySelectorAll(".channel-card").forEach((card) => {
+    const title = card.querySelector(".channel-card-title")?.textContent.toLowerCase() ?? "";
+    const matches = !query || title.includes(query);
+    card.hidden = !matches;
+    if (matches) visibleCount++;
   });
+
+  if (emptyState) emptyState.hidden = visibleCount > 0;
+}
+
+export function setupLibrarySearch() {
+  const input = document.getElementById("library-search-input");
+  if (!input) return;
+  input.addEventListener("input", applyLibraryFilter);
+  // A refreshed grid comes back unfiltered, so whatever is in the box has to
+  // be applied again.
+  onFragmentsSwapped(applyLibraryFilter);
 }
 
 export function setupHorizontalScrollers() {
+  wireScrollers();
+  // Rows inside the Home fragment are replaced on every refresh, so newly
+  // swapped-in ones need wiring too. Registered here, once, rather than from
+  // inside wireScrollers — doing it there would add another callback on every
+  // swap.
+  onFragmentsSwapped(wireScrollers);
+}
+
+function wireScrollers() {
   // Shelf/channel rows are wider than their container by design. Genuine
   // horizontal gestures (trackpad two-finger swipe, shift+wheel, a tilt
   // wheel) already scroll these natively via overflow-x:auto — no JS needed.
@@ -50,6 +69,9 @@ export function setupHorizontalScrollers() {
   // horizontal movement, but that hijacked normal page scrolling anywhere the
   // cursor was over a row, effectively freezing it — removed.)
   document.querySelectorAll(".shelf-row, .channel-row").forEach((row) => {
+    if (row.dataset.scrollerReady) return;
+    row.dataset.scrollerReady = "true";
+
     // The grab cursor (and drag-to-scroll below) should only kick in once a
     // row actually has overflow to scroll through — otherwise it's a false
     // affordance for a gesture that does nothing. Card widths are fixed by
@@ -130,21 +152,17 @@ async function refreshFeeds() {
 
   const { ok } = await api("/feeds/refresh", { method: "POST" });
 
-  if (ok) {
-    // Always reload, regardless of new_content_count: that figure only counts
-    // rows this exact call inserted, not rows apply_feed_data re-marked
-    // is_new_upload on an already-existing row (its "self-heal" path — see
-    // feed_sync.py), nor content some other trigger (the background refresh
-    // job, another tab, another device) had already added since this page was
-    // rendered. Gating the reload on it left New Uploads showing stale data
-    // after an explicit refresh whenever either of those applied.
-    // saveResumeState preserves playback across the reload.
-    saveResumeState();
-    window.location.reload();
-    return;
-  }
+  // Always re-render, regardless of new_content_count: that figure only
+  // counts rows this exact call inserted, not rows apply_feed_data re-marked
+  // is_new_upload on an already-existing row (its "self-heal" path — see
+  // feed_sync.py), nor content some other trigger (the background refresh
+  // job, another tab, another device) had already added since this page was
+  // rendered. This used to be a full page reload, which meant saving and
+  // restoring playback around it; re-rendering the shelves in place leaves
+  // the player alone entirely.
+  if (ok) await refreshFragments();
+  else showToast("Could not refresh feeds");
 
-  showToast("Could not refresh feeds");
   if (overlay) overlay.hidden = true;
   if (btn) {
     btn.disabled = false;

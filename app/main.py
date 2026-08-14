@@ -17,6 +17,7 @@ from app.routers import content as content_router
 from app.routers import explore as explore_router
 from app.routers import feeds as feeds_router
 from app.routers import pages as pages_router
+from app.routers import partials as partials_router
 from app.routers import profiles as profiles_router
 from app.routers import settings as settings_router
 from app.routers import storage as storage_router
@@ -82,6 +83,7 @@ app.include_router(content_router.router)
 app.include_router(storage_router.router)
 app.include_router(settings_router.router)
 app.include_router(profiles_router.router)
+app.include_router(partials_router.router)
 app.include_router(pages_router.router)
 
 

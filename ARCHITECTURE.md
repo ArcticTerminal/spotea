@@ -47,6 +47,9 @@ spotea/
     app_settings.py             # the singleton AppSettings row, created on
                                  # first access
     templating.py                # the one Jinja environment (filters included)
+    page_context.py               # template context for index.html's
+                                   # re-renderable regions, shared by the full
+                                    # page render and the fragment endpoints
     feed_sync.py                  # network+DB feed refresh, shared by the
                                    # on-demand /feeds/refresh route and the
                                    # background scheduler
@@ -101,6 +104,8 @@ spotea/
       pages.py                               # home (shelves), favorites/saved/
                                               # new-uploads/recently-played,
                                               # channel, and player page rendering
+      partials.py                            # re-render one region of index.html
+                                              # on demand (see §4's Partials)
     templates/
       _base.html                                   # page shell every full page
                                                      # extends (head/PWA meta,
@@ -120,6 +125,14 @@ spotea/
                                                      # favorite half of the
                                                      # player, shared verbatim by
                                                      # player.html and the overlay
+      _home_shelves.html                           # Home's chips + four shelves
+                                                     # (also GET /partials/home)
+      _library_grid.html                           # Library's channel grid
+                                                     # (also GET /partials/library)
+      _downloads.html                              # Downloads modal body
+                                                     # (also GET /partials/downloads)
+      _fragment_{home,library,downloads}.html      # the <template data-target>
+                                                     # wrappers those endpoints return
       _content_card.html                           # grid card partial (Home
                                                      # shelves, Library's pinned
                                                      # virtual-playlist tiles)
@@ -145,8 +158,9 @@ spotea/
                                               # worker registration
         player.js                            # the audio player, shared by
                                               # player.html and the overlay
-        live-updates.js                      # patching the rendered page after
-                                              # a save/favorite/play/download
+        fragments.js                         # re-render page regions from the
+                                              # server after an action, instead
+                                              # of patching the DOM by hand
         content-actions.js                   # save toggle + unfollow, on every
                                               # page that shows content
         home/tabs.js                         # Home/Library/Explore/Settings panels
@@ -316,6 +330,20 @@ Two data backfills run alongside the column patcher:
 | GET | `/feeds/import/{job_id}/status` | Poll bulk import progress |
 | POST | `/feeds/videos` | Add one video without following its channel (Explore song search) |
 | DELETE | `/feeds/videos/{content_id}` | Remove a video added this way |
+
+**Partials** — server-rendered fragments of index.html
+
+Every one of these returns the same markup the full page renders for that
+region, from the same context functions (`app/page_context.py`). The client
+swaps them in after an action instead of hand-patching the DOM; see
+`routers/partials.py` for why. Each response is one or more
+`<template data-target="…">` blocks.
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/partials/home` | Home's channel chips and its four shelves |
+| GET | `/partials/library` | Library's channel grid and virtual-playlist counts |
+| GET | `/partials/downloads` | Downloads modal body + the Settings storage line |
 
 **Content**
 

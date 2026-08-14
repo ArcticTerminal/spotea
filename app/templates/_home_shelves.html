@@ -1,0 +1,84 @@
+{# Home's channel chips and the four content shelves.
+
+   Rendered both inside index.html and on its own by GET /partials/home, so a
+   save/favorite/play can re-render this region from the server instead of
+   being hand-patched into the DOM. Everything here is derived state — which
+   is exactly why hand-patching it kept going subtly wrong.
+
+   `has_content` rather than a count: this branch only asks "does this profile
+   have anything at all yet".
+#}
+{% if home_recent_channels %}
+    <div class="shelf">
+      <div class="shelf-header">
+        <h2 class="shelf-title">Recently followed</h2>
+        <a class="shelf-see-more" href="/#library">See more ›</a>
+      </div>
+      <div class="channel-row" id="home-channel-row">
+        {% for feed in home_recent_channels %}
+        <button type="button" class="channel-chip{{ ' has-avatar' if feed.avatar_url else '' }}" data-feed-id="{{ feed.id }}">
+          {% if feed.avatar_url %}<img class="channel-chip-avatar" src="{{ feed.avatar_url }}" alt="" />{% endif %}
+          <span>{{ feed.channel_title or feed.rss_url }}</span>
+        </button>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    {% if not has_content %}
+    <p class="muted">No content yet — add a channel in the Explore tab to get started.</p>
+    {% else %}
+
+    <div class="shelf">
+      <div class="shelf-header">
+        <h2 class="shelf-title">New uploads</h2>
+        <a class="shelf-see-more" href="/new-uploads">See more ›</a>
+      </div>
+      {% if home_new_uploads %}
+      <div class="shelf-row" id="home-new-uploads-row">
+        {% for item in home_new_uploads %}
+        {% include "_content_card.html" %}
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="muted shelf-empty">Nothing here yet.</p>
+      {% endif %}
+    </div>
+
+    <div class="shelf" id="home-shelf-recently-played" {% if not home_recently_played %}hidden{% endif %}>
+      <div class="shelf-header">
+        <h2 class="shelf-title">Recently played</h2>
+        <a class="shelf-see-more" href="/recently-played">See more ›</a>
+      </div>
+      <div class="shelf-row" id="home-recently-played-row">
+        {% for item in home_recently_played %}
+        {% include "_content_card.html" %}
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="shelf" id="home-shelf-favorites" {% if not home_favorites %}hidden{% endif %}>
+      <div class="shelf-header">
+        <h2 class="shelf-title">Favorites</h2>
+        <a class="shelf-see-more" href="/favorites">See more ›</a>
+      </div>
+      <div class="shelf-row" id="home-favorites-row">
+        {% for item in home_favorites %}
+        {% include "_content_card.html" %}
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="shelf" id="home-shelf-saved" {% if not home_saved %}hidden{% endif %}>
+      <div class="shelf-header">
+        <h2 class="shelf-title">Saved for later</h2>
+        <a class="shelf-see-more" href="/saved">See more ›</a>
+      </div>
+      <div class="shelf-row" id="home-saved-row">
+        {% for item in home_saved %}
+        {% include "_content_card.html" %}
+        {% endfor %}
+      </div>
+    </div>
+
+    {% endif %}

@@ -1,0 +1,66 @@
+{# Library's channel grid: four pinned virtual-playlist tiles, then one card
+   per followed channel.
+
+   Rendered inside index.html and on its own by GET /partials/library. The
+   search input above it deliberately stays in index.html: it holds what the
+   user has typed, and the only things that would change its presence (the
+   first channel ever added, or unfollowing the last one) both navigate away
+   anyway.
+#}
+{% if feeds %}
+    <div class="channel-grid">
+      <a class="channel-card" href="/favorites">
+        <span class="channel-card-avatar channel-card-icon is-favorites">
+          <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-heart" /></svg>
+        </span>
+        <span class="channel-card-info">
+          <span class="channel-card-title">Favorites</span>
+          <span class="channel-card-count" id="library-count-favorites">{{ favorites_count }} video{{ '' if favorites_count == 1 else 's' }}</span>
+        </span>
+      </a>
+      <a class="channel-card" href="/saved">
+        <span class="channel-card-avatar channel-card-icon is-saved">
+          <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-bookmark" /></svg>
+        </span>
+        <span class="channel-card-info">
+          <span class="channel-card-title">Saved for later</span>
+          <span class="channel-card-count" id="library-count-saved">{{ saved_count }} video{{ '' if saved_count == 1 else 's' }}</span>
+        </span>
+      </a>
+      <a class="channel-card" href="/new-uploads">
+        <span class="channel-card-avatar channel-card-icon is-new-uploads">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-upload" /></svg>
+        </span>
+        <span class="channel-card-info">
+          <span class="channel-card-title">New Uploads</span>
+          <span class="channel-card-count">{{ new_uploads_count }} video{{ '' if new_uploads_count == 1 else 's' }}</span>
+        </span>
+      </a>
+      <a class="channel-card" href="/recently-played">
+        <span class="channel-card-avatar channel-card-icon is-recently-played">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-clock" /></svg>
+        </span>
+        <span class="channel-card-info">
+          <span class="channel-card-title">Recently Played</span>
+          <span class="channel-card-count" id="library-count-recently-played">{{ recently_played_count }} video{{ '' if recently_played_count == 1 else 's' }}</span>
+        </span>
+      </a>
+      {% for feed in feeds %}
+      {% set video_count = channel_video_counts.get(feed.id, 0) %}
+      <a class="channel-card" href="/channel/{{ feed.id }}">
+        {% if feed.avatar_url %}
+        <img class="channel-card-avatar" src="{{ feed.avatar_url }}" alt="" />
+        {% else %}
+        <span class="channel-card-avatar"></span>
+        {% endif %}
+        <span class="channel-card-info">
+          <span class="channel-card-title" title="{{ feed.channel_title or feed.rss_url }}">{{ feed.channel_title or feed.rss_url }}</span>
+          <span class="channel-card-count">{{ video_count }} video{{ '' if video_count == 1 else 's' }}</span>
+        </span>
+      </a>
+      {% endfor %}
+    </div>
+    <p id="channel-search-empty" class="muted" hidden>No channels match your search.</p>
+    {% else %}
+    <p class="muted">No content yet — add a channel in the Explore tab to get started.</p>
+    {% endif %}

@@ -42,7 +42,7 @@ export function installBfcacheReload() {
 // player.js's prepareAudio (player.html) and home/overlay.js's
 // resumeOverlayIfNeeded (the Home/Library/Explore overlay, which starts
 // closed on a fresh load and has to be reopened first).
-export function saveResumeState() {
+function saveResumeState() {
   const audio = document.getElementById("audio");
   const root = document.getElementById("player-root");
   const contentId = root?.dataset.contentId;

@@ -86,80 +86,9 @@
 
   <main class="layout">
     <section id="tab-home" class="tab-panel" data-tab-panel="home">
-      {% if home_recent_channels %}
-      <div class="shelf">
-        <div class="shelf-header">
-          <h2 class="shelf-title">Recently followed</h2>
-          <a class="shelf-see-more" href="/#library">See more ›</a>
-        </div>
-        <div class="channel-row" id="home-channel-row">
-          {% for feed in home_recent_channels %}
-          <button type="button" class="channel-chip{{ ' has-avatar' if feed.avatar_url else '' }}" data-feed-id="{{ feed.id }}">
-            {% if feed.avatar_url %}<img class="channel-chip-avatar" src="{{ feed.avatar_url }}" alt="" />{% endif %}
-            <span>{{ feed.channel_title or feed.rss_url }}</span>
-          </button>
-          {% endfor %}
-        </div>
+      <div id="home-shelves">
+        {% include "_home_shelves.html" %}
       </div>
-      {% endif %}
-
-      {% if not channel_video_counts %}
-      <p class="muted">No content yet — add a channel in the Explore tab to get started.</p>
-      {% else %}
-
-      <div class="shelf">
-        <div class="shelf-header">
-          <h2 class="shelf-title">New uploads</h2>
-          <a class="shelf-see-more" href="/new-uploads">See more ›</a>
-        </div>
-        {% if home_new_uploads %}
-        <div class="shelf-row">
-          {% for item in home_new_uploads %}
-          {% include "_content_card.html" %}
-          {% endfor %}
-        </div>
-        {% else %}
-        <p class="muted shelf-empty">Nothing here yet.</p>
-        {% endif %}
-      </div>
-
-      <div class="shelf" id="home-shelf-recently-played" {% if not home_recently_played %}hidden{% endif %}>
-        <div class="shelf-header">
-          <h2 class="shelf-title">Recently played</h2>
-          <a class="shelf-see-more" href="/recently-played">See more ›</a>
-        </div>
-        <div class="shelf-row" id="home-recently-played-row">
-          {% for item in home_recently_played %}
-          {% include "_content_card.html" %}
-          {% endfor %}
-        </div>
-      </div>
-
-      <div class="shelf" id="home-shelf-favorites" {% if not home_favorites %}hidden{% endif %}>
-        <div class="shelf-header">
-          <h2 class="shelf-title">Favorites</h2>
-          <a class="shelf-see-more" href="/favorites">See more ›</a>
-        </div>
-        <div class="shelf-row" id="home-favorites-row">
-          {% for item in home_favorites %}
-          {% include "_content_card.html" %}
-          {% endfor %}
-        </div>
-      </div>
-
-      <div class="shelf" id="home-shelf-saved" {% if not home_saved %}hidden{% endif %}>
-        <div class="shelf-header">
-          <h2 class="shelf-title">Saved for later</h2>
-          <a class="shelf-see-more" href="/saved">See more ›</a>
-        </div>
-        <div class="shelf-row" id="home-saved-row">
-          {% for item in home_saved %}
-          {% include "_content_card.html" %}
-          {% endfor %}
-        </div>
-      </div>
-
-      {% endif %}
     </section>
 
     <section id="tab-library" class="tab-panel" data-tab-panel="library">
@@ -178,63 +107,9 @@
         />
         {% endif %}
       </div>
-      {% if feeds %}
-      <div class="channel-grid">
-        <a class="channel-card" href="/favorites">
-          <span class="channel-card-avatar channel-card-icon is-favorites">
-            <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-heart" /></svg>
-          </span>
-          <span class="channel-card-info">
-            <span class="channel-card-title">Favorites</span>
-            <span class="channel-card-count" id="library-count-favorites">{{ favorites_count }} video{{ '' if favorites_count == 1 else 's' }}</span>
-          </span>
-        </a>
-        <a class="channel-card" href="/saved">
-          <span class="channel-card-avatar channel-card-icon is-saved">
-            <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-bookmark" /></svg>
-          </span>
-          <span class="channel-card-info">
-            <span class="channel-card-title">Saved for later</span>
-            <span class="channel-card-count" id="library-count-saved">{{ saved_count }} video{{ '' if saved_count == 1 else 's' }}</span>
-          </span>
-        </a>
-        <a class="channel-card" href="/new-uploads">
-          <span class="channel-card-avatar channel-card-icon is-new-uploads">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-upload" /></svg>
-          </span>
-          <span class="channel-card-info">
-            <span class="channel-card-title">New Uploads</span>
-            <span class="channel-card-count">{{ new_uploads_count }} video{{ '' if new_uploads_count == 1 else 's' }}</span>
-          </span>
-        </a>
-        <a class="channel-card" href="/recently-played">
-          <span class="channel-card-avatar channel-card-icon is-recently-played">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-clock" /></svg>
-          </span>
-          <span class="channel-card-info">
-            <span class="channel-card-title">Recently Played</span>
-            <span class="channel-card-count" id="library-count-recently-played">{{ recently_played_count }} video{{ '' if recently_played_count == 1 else 's' }}</span>
-          </span>
-        </a>
-        {% for feed in feeds %}
-        {% set video_count = channel_video_counts.get(feed.id, 0) %}
-        <a class="channel-card" href="/channel/{{ feed.id }}">
-          {% if feed.avatar_url %}
-          <img class="channel-card-avatar" src="{{ feed.avatar_url }}" alt="" />
-          {% else %}
-          <span class="channel-card-avatar"></span>
-          {% endif %}
-          <span class="channel-card-info">
-            <span class="channel-card-title" title="{{ feed.channel_title or feed.rss_url }}">{{ feed.channel_title or feed.rss_url }}</span>
-            <span class="channel-card-count">{{ video_count }} video{{ '' if video_count == 1 else 's' }}</span>
-          </span>
-        </a>
-        {% endfor %}
+      <div id="library-grid">
+        {% include "_library_grid.html" %}
       </div>
-      <p id="channel-search-empty" class="muted" hidden>No channels match your search.</p>
-      {% else %}
-      <p class="muted">No content yet — add a channel in the Explore tab to get started.</p>
-      {% endif %}
     </section>
 
     <section id="tab-explore" class="tab-panel" data-tab-panel="explore" hidden>
@@ -367,34 +242,9 @@
         <button type="button" id="downloads-close" class="modal-close" aria-label="Close">×</button>
       </div>
 
-      <div class="storage-summary">
-        <div>
-          <span class="storage-total" id="storage-total">{{ usage.total_bytes | filesize }}</span>
-          <span class="muted" id="storage-count">across {{ usage.count }} item{{ '' if usage.count == 1 else 's' }}</span>
-        </div>
-        <div class="storage-summary-actions" id="storage-summary-actions" {% if not usage.count %}hidden{% endif %}>
-          <a href="/storage/export" download class="btn-quiet">Export all</a>
-          <button type="button" id="clear-storage" class="btn-danger">Clear all</button>
-        </div>
+      <div id="downloads-body">
+        {% include "_downloads.html" %}
       </div>
-
-      <ul id="storage-list" class="storage-list" {% if not usage.count %}hidden{% endif %}>
-        {% for item in usage.items %}
-        <li data-content-id="{{ item.id }}">
-          <div class="storage-item-info">
-            <span class="storage-item-title">{{ item.title }}</span>
-            <span class="storage-item-meta">{{ item.channel_title }} · {{ item.size_bytes | filesize }}</span>
-          </div>
-          <a class="storage-export" href="/content/{{ item.id }}/stream?download=1" download aria-label="Export">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-download" /></svg>
-          </a>
-          <button type="button" class="storage-remove" data-content-id="{{ item.id }}" aria-label="Remove download">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-trash" /></svg>
-          </button>
-        </li>
-        {% endfor %}
-      </ul>
-      <p class="muted" id="storage-empty" {% if usage.count %}hidden{% endif %}>Nothing downloaded yet. Anything you play gets cached here.</p>
     </div>
   </div>
 
