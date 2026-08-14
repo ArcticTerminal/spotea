@@ -14,3 +14,16 @@ data/thumbnails/*
 !data/thumbnails/.gitkeep
 data/.cache/
 .claude/
+
+# Sandbox/home-dir artifacts, not part of the app
+.bash_profile
+.bashrc
+.gitconfig
+.gitmodules
+.idea
+.mcp.json
+.profile
+.ripgreprc
+.vscode
+.zprofile
+.zshrc
