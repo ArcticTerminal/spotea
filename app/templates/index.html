@@ -160,19 +160,17 @@
         </div>
       </div>
 
-      {% if home_favorites %}
-      <div class="shelf">
+      <div class="shelf" id="home-shelf-favorites" {% if not home_favorites %}hidden{% endif %}>
         <div class="shelf-header">
           <h2 class="shelf-title">Favorites</h2>
           <a class="shelf-see-more" href="/favorites">See more ›</a>
         </div>
-        <div class="shelf-row">
+        <div class="shelf-row" id="home-favorites-row">
           {% for item in home_favorites %}
           {% include "_content_card.html" %}
           {% endfor %}
         </div>
       </div>
-      {% endif %}
 
       <div class="shelf" id="home-shelf-saved" {% if not home_saved %}hidden{% endif %}>
         <div class="shelf-header">
@@ -213,7 +211,7 @@
           </span>
           <span class="channel-card-info">
             <span class="channel-card-title">Favorites</span>
-            <span class="channel-card-count">{{ favorites_count }} video{{ '' if favorites_count == 1 else 's' }}</span>
+            <span class="channel-card-count" id="library-count-favorites">{{ favorites_count }} video{{ '' if favorites_count == 1 else 's' }}</span>
           </span>
         </a>
         <a class="channel-card" href="/saved">
@@ -222,7 +220,7 @@
           </span>
           <span class="channel-card-info">
             <span class="channel-card-title">Saved for later</span>
-            <span class="channel-card-count">{{ saved_count }} video{{ '' if saved_count == 1 else 's' }}</span>
+            <span class="channel-card-count" id="library-count-saved">{{ saved_count }} video{{ '' if saved_count == 1 else 's' }}</span>
           </span>
         </a>
         <a class="channel-card" href="/new-uploads">
@@ -240,7 +238,7 @@
           </span>
           <span class="channel-card-info">
             <span class="channel-card-title">Recently Played</span>
-            <span class="channel-card-count">{{ recently_played_count }} video{{ '' if recently_played_count == 1 else 's' }}</span>
+            <span class="channel-card-count" id="library-count-recently-played">{{ recently_played_count }} video{{ '' if recently_played_count == 1 else 's' }}</span>
           </span>
         </a>
         {% for feed in feeds %}
@@ -310,7 +308,7 @@
         <div class="settings-row">
           <div class="settings-row-info">
             <span class="settings-row-label">Storage used</span>
-            <span class="settings-row-desc">{{ usage.total_bytes | filesize }} across {{ usage.count }} item{{ '' if usage.count == 1 else 's' }}</span>
+            <span class="settings-row-desc" id="settings-storage-desc">{{ usage.total_bytes | filesize }} across {{ usage.count }} item{{ '' if usage.count == 1 else 's' }}</span>
           </div>
           <button type="button" id="open-downloads" class="btn-quiet">Manage downloads</button>
         </div>
@@ -396,19 +394,16 @@
 
       <div class="storage-summary">
         <div>
-          <span class="storage-total">{{ usage.total_bytes | filesize }}</span>
-          <span class="muted">across {{ usage.count }} item{{ '' if usage.count == 1 else 's' }}</span>
+          <span class="storage-total" id="storage-total">{{ usage.total_bytes | filesize }}</span>
+          <span class="muted" id="storage-count">across {{ usage.count }} item{{ '' if usage.count == 1 else 's' }}</span>
         </div>
-        {% if usage.count %}
-        <div class="storage-summary-actions">
+        <div class="storage-summary-actions" id="storage-summary-actions" {% if not usage.count %}hidden{% endif %}>
           <a href="/storage/export" download class="btn-quiet">Export all</a>
           <button type="button" id="clear-storage" class="btn-danger">Clear all</button>
         </div>
-        {% endif %}
       </div>
 
-      {% if usage.count %}
-      <ul id="storage-list" class="storage-list">
+      <ul id="storage-list" class="storage-list" {% if not usage.count %}hidden{% endif %}>
         {% for item in usage.items %}
         <li data-content-id="{{ item.id }}">
           <div class="storage-item-info">
@@ -424,9 +419,7 @@
         </li>
         {% endfor %}
       </ul>
-      {% else %}
-      <p class="muted">Nothing downloaded yet. Anything you play gets cached here.</p>
-      {% endif %}
+      <p class="muted" id="storage-empty" {% if usage.count %}hidden{% endif %}>Nothing downloaded yet. Anything you play gets cached here.</p>
     </div>
   </div>
 

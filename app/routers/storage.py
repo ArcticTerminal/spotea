@@ -7,11 +7,36 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.deps import get_current_profile, get_db, require_login
-from app.formatting import safe_filename
+from app.formatting import format_size, safe_filename
 from app.models import Content, User
-from app.storage import clear_all
+from app.schemas import StorageItemOut, StorageUsageOut
+from app.storage import clear_all, collect_usage
 
 router = APIRouter(prefix="/storage", tags=["storage"], dependencies=[Depends(require_login)])
+
+
+@router.get("", response_model=StorageUsageOut)
+def get_usage(
+    profile: User = Depends(get_current_profile), db: Session = Depends(get_db)
+) -> StorageUsageOut:
+    """Same data pages.py's settings route renders server-side — used to
+    live-patch the Settings/Downloads storage summary after a track finishes
+    downloading mid-session, instead of leaving it stale until reload (see
+    app.js's refreshStorageUsage)."""
+    usage = collect_usage(db, profile.id)
+    return StorageUsageOut(
+        total_formatted=format_size(usage.total_bytes),
+        count=usage.count,
+        items=[
+            StorageItemOut(
+                id=item.id,
+                title=item.title,
+                channel_title=item.channel_title,
+                size_formatted=format_size(item.size_bytes),
+            )
+            for item in usage.items
+        ],
+    )
 
 
 @router.delete("")

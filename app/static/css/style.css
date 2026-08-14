@@ -884,6 +884,10 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   gap: 0.25rem;
 }
 
+.storage-summary-actions[hidden] {
+  display: none;
+}
+
 .storage-total {
   font-size: 1.15rem;
   font-weight: 700;
@@ -904,6 +908,10 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
      would otherwise stop it from ever scrolling inside modal-downloads'
      capped height. */
   min-height: 0;
+}
+
+.storage-list[hidden] {
+  display: none;
 }
 
 .storage-list li {

@@ -3,6 +3,7 @@ uvicorn[standard]
 sqlalchemy
 feedparser
 yt-dlp
+bgutil-ytdlp-pot-provider
 jinja2
 python-multipart
 itsdangerous

@@ -370,7 +370,12 @@ async function prepareAudio(audio, onStart) {
         startPlayback();
       } else if (data.status === "error") {
         stopPolling();
-        fail(data.error_message ? "Download failed" : "Download failed");
+        // 403s here are usually YouTube rate-limiting this server rather than
+        // anything wrong with the video — downloader.py already retries a
+        // few times with backoff before giving up, so if it's still failing
+        // after that, waiting longer and trying again is the honest advice.
+        const isRateLimited = data.error_message && /\b403\b|Forbidden/i.test(data.error_message);
+        fail(isRateLimited ? "YouTube is rate-limiting downloads right now — try again in a bit" : "Download failed");
       } else if (data.phase === "converting") {
         prepareText.textContent = "Converting…";
       } else if (data.progress_percent != null) {
@@ -417,6 +422,16 @@ function setupFavorite() {
       btn.classList.toggle("is-on", data.is_favorite);
       btn.setAttribute("aria-pressed", String(data.is_favorite));
       btn.querySelector("svg").setAttribute("fill", data.is_favorite ? "currentColor" : "none");
+
+      document.querySelectorAll(`.card[data-content-id="${btn.dataset.contentId}"]`).forEach((card) => {
+        card.dataset.favorite = String(data.is_favorite);
+      });
+      // Only defined on index.html (Home's Favorites shelf/Library's count)
+      // — the standalone player page has neither to patch.
+      if (typeof syncFavoritesShelf === "function") syncFavoritesShelf(btn.dataset.contentId, data.is_favorite);
+      if (typeof bumpLibraryCount === "function") {
+        bumpLibraryCount("library-count-favorites", data.is_favorite ? 1 : -1);
+      }
     } catch (err) {
       showToast("Could not update favorite");
     } finally {

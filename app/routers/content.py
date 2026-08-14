@@ -86,6 +86,7 @@ def list_content(
                 added_at=c.added_at,
                 is_favorite=c.is_favorite,
                 is_saved=c.is_saved,
+                is_played=c.last_played_at is not None,
             )
             for c in items
         ],
@@ -124,6 +125,7 @@ def get_content(
         added_at=content.added_at,
         is_favorite=content.is_favorite,
         is_saved=content.is_saved,
+        is_played=content.last_played_at is not None,
     )
 
 

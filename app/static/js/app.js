@@ -4,6 +4,19 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
+// Library tab's summary tiles (Favorites/Saved for later/Recently Played)
+// show a count that's only computed at page render, same underlying problem
+// as the Home shelves below — a toggle/first-play during this session left
+// them stale until the next full reload. New Uploads' tile is deliberately
+// left out: unlike these three, its count isn't a simple ±1 per user action
+// (see refreshFeeds's comment on why it can only be trusted after a reload).
+function bumpLibraryCount(id, delta) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const next = Math.max(0, (parseInt(el.textContent, 10) || 0) + delta);
+  el.textContent = `${next} video${next === 1 ? "" : "s"}`;
+}
+
 // Home's "Saved for later" shelf is only populated at page render, so a
 // save/un-save needs to patch it in live or it wouldn't show up until the
 // next full reload. The whole shelf (title included) stays hidden while empty.
@@ -22,6 +35,31 @@ function syncSavedShelf(contentId, isSaved) {
       row.prepend(clone);
     }
   } else if (!isSaved && existing) {
+    existing.remove();
+  }
+
+  shelf.hidden = row.children.length === 0;
+}
+
+// Same problem as syncSavedShelf above, for the Favorites shelf — favoriting
+// only ever happens from the player's heart button (there's no per-card
+// equivalent of .btn-save), which previously just updated its own button
+// and left this shelf untouched until the next full reload.
+function syncFavoritesShelf(contentId, isFavorite) {
+  const shelf = document.getElementById("home-shelf-favorites");
+  const row = document.getElementById("home-favorites-row");
+  if (!shelf || !row) return;
+
+  const existing = row.querySelector(`.card[data-content-id="${contentId}"]`);
+
+  if (isFavorite && !existing) {
+    const source = document.querySelector(`.card[data-content-id="${contentId}"]`);
+    if (source) {
+      const clone = source.cloneNode(true);
+      clone.hidden = false; // the source may be paginated out of view in Library
+      row.prepend(clone);
+    }
+  } else if (!isFavorite && existing) {
     existing.remove();
   }
 
@@ -86,6 +124,60 @@ function markContentDownloaded(contentId) {
       );
     }
   });
+}
+
+// Same problem as markContentDownloaded above, for the storage-used figures
+// in Settings and the Downloads modal — {{ usage }} (pages.py) is only
+// computed at render time, so a fresh download leaves both stuck at their
+// pre-download numbers until reload. Refetches and re-renders from scratch
+// (GET /storage, same data collect_usage feeds the server-rendered version)
+// rather than trying to patch byte counts in place — the list is short and
+// this stays correct even if items were added/removed some other way (e.g.
+// another tab) since this page loaded.
+async function refreshStorageUsage() {
+  let data;
+  try {
+    const res = await fetch("/storage");
+    if (!res.ok) return;
+    data = await res.json();
+  } catch (err) {
+    return;
+  }
+
+  const desc = document.getElementById("settings-storage-desc");
+  if (desc) desc.textContent = `${data.total_formatted} across ${data.count} item${data.count === 1 ? "" : "s"}`;
+
+  const total = document.getElementById("storage-total");
+  if (total) total.textContent = data.total_formatted;
+  const count = document.getElementById("storage-count");
+  if (count) count.textContent = `across ${data.count} item${data.count === 1 ? "" : "s"}`;
+
+  const actions = document.getElementById("storage-summary-actions");
+  if (actions) actions.hidden = data.count === 0;
+
+  const list = document.getElementById("storage-list");
+  const empty = document.getElementById("storage-empty");
+  if (list) {
+    list.hidden = data.count === 0;
+    list.innerHTML = data.items
+      .map(
+        (item) => `
+      <li data-content-id="${item.id}">
+        <div class="storage-item-info">
+          <span class="storage-item-title">${escapeHtml(item.title)}</span>
+          <span class="storage-item-meta">${escapeHtml(item.channel_title || "")} · ${item.size_formatted}</span>
+        </div>
+        <a class="storage-export" href="/content/${item.id}/stream?download=1" download aria-label="Export">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+        </a>
+        <button type="button" class="storage-remove" data-content-id="${item.id}" aria-label="Remove download">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></svg>
+        </button>
+      </li>`
+      )
+      .join("");
+  }
+  if (empty) empty.hidden = data.count !== 0;
 }
 
 function setupHomeChannels() {
@@ -641,6 +733,20 @@ async function openPlayer(contentId, { expanded = true } = {}) {
   prepareAudio(audio, () => {
     syncRecentlyPlayedShelf(contentId);
     markContentDownloaded(contentId);
+    // data.is_played reflects state as of the GET above, i.e. before *this*
+    // play — the server only marks last_played_at once /stream actually
+    // starts. Replays of already-played content don't grow the list
+    // server-side (see content_query.py's recently_played_count), so the
+    // Library tile must only bump on a genuine first play too.
+    if (!data.is_played && typeof bumpLibraryCount === "function") {
+      bumpLibraryCount("library-count-recently-played", 1);
+    }
+    // Same "before this play" signal as above, reused: data.status is
+    // whatever the GET returned before /download ran, so "ready" here means
+    // this track was already downloaded and prepareAudio's callback just
+    // fired from a plain replay — nothing was added to disk, so storage
+    // usage hasn't changed and there's nothing to refetch.
+    if (data.status !== "ready") refreshStorageUsage();
   });
 }
 

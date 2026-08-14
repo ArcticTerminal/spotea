@@ -47,7 +47,10 @@ def login_submit(
     # first profile on the first profile-scoped request, same as it always did.
     if account.last_active_profile_id is not None:
         request.session[PROFILE_SESSION_KEY] = account.last_active_profile_id
-    return RedirectResponse(url="/", status_code=303)
+    # #home overrides whatever tab localStorage remembers from a previous
+    # session (see index.html's inline head script) — a fresh login should
+    # always land on Home, not wherever this browser last happened to be.
+    return RedirectResponse(url="/#home", status_code=303)
 
 
 @router.get("/register", response_class=HTMLResponse)
@@ -104,7 +107,7 @@ def register_submit(
 
     request.session[ACCOUNT_SESSION_KEY] = account.id
     request.session[PROFILE_SESSION_KEY] = profile.id
-    return RedirectResponse(url="/", status_code=303)
+    return RedirectResponse(url="/#home", status_code=303)
 
 
 @router.post("/logout")

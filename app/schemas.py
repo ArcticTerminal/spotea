@@ -32,6 +32,7 @@ class ContentOut(BaseModel):
     added_at: datetime
     is_favorite: bool
     is_saved: bool
+    is_played: bool
 
 
 class ContentPageOut(BaseModel):
@@ -56,6 +57,19 @@ class FavoriteOut(BaseModel):
 class SavedOut(BaseModel):
     id: int
     is_saved: bool
+
+
+class StorageItemOut(BaseModel):
+    id: int
+    title: str
+    channel_title: str | None
+    size_formatted: str
+
+
+class StorageUsageOut(BaseModel):
+    total_formatted: str
+    count: int
+    items: list[StorageItemOut]
 
 
 class ChannelSearchResultOut(BaseModel):

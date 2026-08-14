@@ -8,3 +8,15 @@ services:
     env_file:
       - .env
     restart: unless-stopped
+    depends_on:
+      - pot-provider
+
+  # Generates YouTube PO (Proof-of-Origin) tokens for yt-dlp — see
+  # app/downloader.py's ydl_opts. Without this, YouTube's SABR rollout
+  # increasingly 403s clients (including android_vr, previously token-free)
+  # unless a valid token is attached to the request. Internal-only, no host
+  # port published; app reaches it at http://pot-provider:4416 over the
+  # compose network.
+  pot-provider:
+    image: brainicism/bgutil-ytdlp-pot-provider
+    restart: unless-stopped

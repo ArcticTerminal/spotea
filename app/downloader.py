@@ -1,3 +1,4 @@
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -49,26 +50,81 @@ def download_audio(video_id: str, quality: str = "high", on_progress: ProgressCa
     codec = settings.audio_format
     postprocessor = {"key": "FFmpegExtractAudio", "preferredcodec": codec}
 
-    ydl_opts = {
-        "format": FORMAT_BY_QUALITY.get(quality, FORMAT_BY_QUALITY["high"]),
-        "outtmpl": out_template,
-        "noplaylist": True,
-        "quiet": True,
-        "no_warnings": True,
-        "postprocessors": [postprocessor],
-    }
+    def build_ydl_opts(include_mweb: bool) -> dict:
+        # android_vr alone covers the common case — every request this makes
+        # to YouTube is doubled (a full extra player-API round trip) the
+        # moment mweb joins the client list, and mweb's SABR formats also
+        # drag in the remote_components fetch below. Both stay off the fast
+        # path and only get pulled in from the second attempt onward, once
+        # android_vr alone has actually failed once — a real fallback, not
+        # something paid for on every single play.
+        player_clients = ["android_vr", "mweb"] if include_mweb else ["android_vr"]
+        opts = {
+            "format": FORMAT_BY_QUALITY.get(quality, FORMAT_BY_QUALITY["high"]),
+            "outtmpl": out_template,
+            "noplaylist": True,
+            "quiet": True,
+            "no_warnings": True,
+            "postprocessors": [postprocessor],
+            # A small per-request pause during extraction (yt-dlp's own
+            # --sleep-requests) — a handful of formats/player-API calls
+            # arriving back-to-back with zero delay reads as scripted in a
+            # way spacing them out by a beat doesn't.
+            "sleep_interval_requests": 1.5,
+            # YouTube increasingly requires a PO (Proof-of-Origin) token even
+            # for clients that never used to need one (android_vr's audio
+            # formats, notably) — pot-provider (see docker-compose.yml)
+            # generates these on request. Safe if pot-provider is unreachable
+            # (e.g. running outside compose) — yt-dlp just drops the formats
+            # that needed a token it couldn't get, rather than failing
+            # outright.
+            "extractor_args": {
+                "youtube": {"player_client": player_clients},
+                "youtubepot-bgutilhttp": {"base_url": ["http://pot-provider:4416"]},
+            },
+        }
+        if include_mweb:
+            # mweb's formats are SABR-gated and need this JS challenge solver
+            # to descramble — downloads yt-dlp's solver script from GitHub on
+            # first use and caches it (see Dockerfile's XDG_CACHE_HOME).
+            opts["remote_components"] = ["ejs:github"]
+        return opts
 
     if on_progress is not None:
-        ydl_opts["progress_hooks"] = [lambda event: _progress_hook(on_progress, event)]
-        ydl_opts["postprocessor_hooks"] = [lambda event: _postprocessor_hook(on_progress, event)]
+        progress_hooks = [lambda event: _progress_hook(on_progress, event)]
+        postprocessor_hooks = [lambda event: _postprocessor_hook(on_progress, event)]
+    else:
+        progress_hooks = postprocessor_hooks = None
 
     url = YOUTUBE_WATCH_URL.format(video_id=video_id)
 
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
-    except yt_dlp.utils.DownloadError as exc:
-        raise DownloadError(str(exc)) from exc
+    # Retry with growing backoff: the googlevideo playback URL yt-dlp resolves
+    # can 403 (observed even without any code/version change between
+    # attempts, both intermittently and — during a stretch of heavy same-IP
+    # traffic — consistently for several attempts in a row). That pattern
+    # points at short-lived, IP-level rate-limiting on YouTube's end as much
+    # as anything client-side, so a single immediate retry often just re-hits
+    # the same throttling window; these delays are long enough to plausibly
+    # clear it.
+    RETRY_DELAYS_SECONDS = [5, 15, 30]
+    last_exc: yt_dlp.utils.DownloadError | None = None
+    for attempt in range(len(RETRY_DELAYS_SECONDS) + 1):
+        if attempt:
+            time.sleep(RETRY_DELAYS_SECONDS[attempt - 1])
+        ydl_opts = build_ydl_opts(include_mweb=attempt > 0)
+        if progress_hooks is not None:
+            ydl_opts["progress_hooks"] = progress_hooks
+            ydl_opts["postprocessor_hooks"] = postprocessor_hooks
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([url])
+            last_exc = None
+            break
+        except yt_dlp.utils.DownloadError as exc:
+            last_exc = exc
+
+    if last_exc is not None:
+        raise DownloadError(str(last_exc)) from last_exc
 
     final_path = settings.storage_dir / f"{video_id}.{codec}"
     if not final_path.exists():

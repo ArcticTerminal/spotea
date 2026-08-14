@@ -180,9 +180,10 @@ async function toggleSaved(contentId, button) {
       if (saveBtn) applySavedState(saveBtn, data.is_saved);
     });
 
-    // Only defined on index.html (Home's "Saved for later" shelf) — the
-    // channel page has no such shelf to patch.
+    // Only defined on index.html (Home's "Saved for later" shelf/Library's
+    // count) — the channel page has neither to patch.
     if (typeof syncSavedShelf === "function") syncSavedShelf(contentId, data.is_saved);
+    if (typeof bumpLibraryCount === "function") bumpLibraryCount("library-count-saved", data.is_saved ? 1 : -1);
   } catch (err) {
     showToast("Could not update saved items");
   }
