@@ -1,36 +1,24 @@
-<!doctype html>
-<html lang="en" style="background: #121212">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-  <meta name="theme-color" content="#121212" />
-  <title>{{ title }} — Spotea</title>
-  <link rel="icon" href="/static/img/favicon.ico" />
-  <link rel="manifest" href="/static/manifest.json" />
-  <link rel="apple-touch-icon" href="/static/img/apple-touch-icon.png" />
-  <meta name="mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="apple-mobile-web-app-title" content="Spotea" />
-  <link rel="stylesheet" href="/static/css/style.css" />
-</head>
-<body>
+{% extends "_base.html" %}
+
+{% block title %}{{ title }} — Spotea{% endblock %}
+
+{% block body %}
   <main class="layout">
     <a class="back-link" href="/#library">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5"></path><path d="M12 19l-7-7 7-7"></path></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-arrow-left" /></svg>
       Library
     </a>
 
     <div class="channel-hero">
       <span class="channel-hero-avatar channel-card-icon is-{{ kind }}">
         {% if kind == "favorites" %}
-        <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-7.5-4.7-9.4-9A5.3 5.3 0 0 1 12 6.6 5.3 5.3 0 0 1 21.4 12c-1.9 4.3-9.4 9-9.4 9z"></path></svg>
+        <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-heart" /></svg>
         {% elif kind == "saved" %}
-        <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg>
+        <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-bookmark" /></svg>
         {% elif kind == "new-uploads" %}
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-upload" /></svg>
         {% else %}
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-clock" /></svg>
         {% endif %}
       </span>
       <div class="channel-hero-info">
@@ -54,7 +42,8 @@
     <p class="muted">{{ empty_message }}</p>
     {% endif %}
   </main>
+{% endblock %}
 
+{% block scripts %}
   <script src="/static/js/ui.js"></script>
-</body>
-</html>
+{% endblock %}

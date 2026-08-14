@@ -1,0 +1,44 @@
+{# Shared page shell. Every full page extends this; the partials
+   (_content_card, _content_row, _pagination, _player_controls,
+   _player_overlay) are included into these and don't.
+
+   The head below was copy-pasted identically into all six page templates
+   before this existed, which meant a PWA/meta change (viewport, theme
+   colour, apple-touch-icon, a new stylesheet) had to be made six times and
+   silently half-applied if one was missed.
+
+   Children customise via:
+     {% set body_class = "..." %}  — omitted entirely when unset, so pages
+                                     that had a bare <body> keep one
+     {% block title %}            — defaults to the bare app name
+     {% block head_extra %}       — anything that must run/load before paint
+     {% block body %}             — the page itself
+     {% block scripts %}          — deliberately empty by default: login and
+                                    register load no JS at all, and a page
+                                    silently inheriting ui.js (service worker
+                                    registration, the bfcache reload) is a
+                                    worse default than one that has to ask.
+#}
+<!doctype html>
+<html lang="en" style="background: #121212">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#121212" />
+  <title>{% block title %}Spotea{% endblock %}</title>
+  <link rel="icon" href="/static/img/favicon.ico" />
+  <link rel="manifest" href="/static/manifest.json" />
+  <link rel="apple-touch-icon" href="/static/img/apple-touch-icon.png" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Spotea" />
+  <link rel="stylesheet" href="/static/css/style.css" />
+{%- block head_extra %}{% endblock %}
+</head>
+<body{% if body_class %} class="{{ body_class }}"{% endif %}>
+{%- include "_icons.html" %}
+{%- block body %}{% endblock %}
+{%- block scripts %}{% endblock %}
+</body>
+</html>

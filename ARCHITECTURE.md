@@ -85,6 +85,13 @@ spotea/
                                               # new-uploads/recently-played,
                                               # channel, and player page rendering
     templates/
+      _base.html                                   # page shell every full page
+                                                     # extends (head/PWA meta,
+                                                     # body class, script slot)
+      _icons.html                                  # inline <symbol> sprite —
+                                                     # every icon's geometry,
+                                                     # defined once, referenced
+                                                     # by <use href="#i-...">
       login.html
       register.html
       index.html                                   # Home/Library/Explore/Settings
@@ -92,6 +99,10 @@ spotea/
       _player_overlay.html                          # Home/Library/Explore's
                                                      # persistent in-page player
                                                      # + mini-player bar
+      _player_controls.html                         # the transport/seek/volume/
+                                                     # favorite half of the
+                                                     # player, shared verbatim by
+                                                     # player.html and the overlay
       _content_card.html                           # grid card partial (Home
                                                      # shelves, Library's pinned
                                                      # virtual-playlist tiles)

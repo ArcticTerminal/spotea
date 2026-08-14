@@ -2,33 +2,33 @@
 <div class="pagination">
   {% if page > 1 %}
   <a class="pagination-btn" href="{{ base_url }}?page=1" aria-label="First page">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="18 17 13 12 18 7"></polyline><polyline points="11 17 6 12 11 7"></polyline></svg>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-chevrons-left" /></svg>
   </a>
   <a class="pagination-btn" href="{{ base_url }}?page={{ page - 1 }}" aria-label="Previous page">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"></polyline></svg>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-chevron-left" /></svg>
   </a>
   {% else %}
   <span class="pagination-btn is-disabled" aria-hidden="true">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="18 17 13 12 18 7"></polyline><polyline points="11 17 6 12 11 7"></polyline></svg>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-chevrons-left" /></svg>
   </span>
   <span class="pagination-btn is-disabled" aria-hidden="true">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"></polyline></svg>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-chevron-left" /></svg>
   </span>
   {% endif %}
   <span class="pagination-indicator">Page {{ page }} of {{ total_pages }}</span>
   {% if page < total_pages %}
   <a class="pagination-btn" href="{{ base_url }}?page={{ page + 1 }}" aria-label="Next page">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"></polyline></svg>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-chevron-right" /></svg>
   </a>
   <a class="pagination-btn" href="{{ base_url }}?page={{ total_pages }}" aria-label="Last page">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 17 11 12 6 7"></polyline><polyline points="13 17 18 12 13 7"></polyline></svg>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-chevrons-right" /></svg>
   </a>
   {% else %}
   <span class="pagination-btn is-disabled" aria-hidden="true">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"></polyline></svg>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-chevron-right" /></svg>
   </span>
   <span class="pagination-btn is-disabled" aria-hidden="true">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 17 11 12 6 7"></polyline><polyline points="13 17 18 12 13 7"></polyline></svg>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-chevrons-right" /></svg>
   </span>
   {% endif %}
 </div>

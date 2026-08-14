@@ -1,20 +1,9 @@
-<!doctype html>
-<html lang="en" style="background: #121212">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-  <meta name="theme-color" content="#121212" />
-  <title>{{ content.title }} — Spotea</title>
-  <link rel="icon" href="/static/img/favicon.ico" />
-  <link rel="manifest" href="/static/manifest.json" />
-  <link rel="apple-touch-icon" href="/static/img/apple-touch-icon.png" />
-  <meta name="mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="apple-mobile-web-app-title" content="Spotea" />
-  <link rel="stylesheet" href="/static/css/style.css" />
-</head>
-<body class="player-body">
+{% extends "_base.html" %}
+{% set body_class = "player-body" %}
+
+{% block title %}{{ content.title }} — Spotea{% endblock %}
+
+{% block body %}
   <main
     class="player-card"
     id="player-root"
@@ -23,7 +12,7 @@
     data-stream="/content/{{ content.id }}/stream"
   >
     <a class="back-link" id="player-back-link" href="/">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5"></path><path d="M12 19l-7-7 7-7"></path></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-arrow-left" /></svg>
       Back
     </a>
 
@@ -37,63 +26,15 @@
       <h1 class="player-title">{{ content.title }}</h1>
       <p class="player-channel">{{ content.feed.channel_title }}</p>
     </div>
-
-    <audio id="audio" preload="metadata"></audio>
-
-    <div id="prepare-state" class="prepare-state" hidden>
-      <span class="spinner" role="status"></span>
-      <span id="prepare-text">Preparing audio…</span>
-    </div>
-
-    <div class="progress-block">
-      <input type="range" id="seek-bar" class="range" min="0" max="100" step="0.1" value="0" aria-label="Seek" />
-      <div class="progress-times">
-        <span id="current-time">0:00</span>
-        <span id="duration-time">{{ content.duration_seconds | duration if content.duration_seconds else '0:00' }}</span>
-      </div>
-    </div>
-
-    <div class="transport">
-      <button type="button" id="back15" class="btn-transport" aria-label="Back 15 seconds">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 4a8 8 0 1 1-7.5 5.2"></path><path d="M3 3v5h5"></path></svg>
-        <span class="transport-num">15</span>
-      </button>
-
-      <button type="button" id="play-pause" class="btn-play-main" aria-label="Play">
-        <svg id="icon-play" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"></path></svg>
-        <svg id="icon-pause" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" hidden><path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z"></path></svg>
-      </button>
-
-      <button type="button" id="fwd15" class="btn-transport" aria-label="Forward 15 seconds">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 4a8 8 0 1 0 7.5 5.2"></path><path d="M21 3v5h-5"></path></svg>
-        <span class="transport-num">15</span>
-      </button>
-    </div>
-
-    <div class="player-footer">
-      <div class="volume-group">
-        <button type="button" id="mute-btn" class="btn-quiet-icon" aria-label="Mute">
-          <svg id="icon-volume" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5L6 9H3v6h3l5 4V5z" fill="currentColor" stroke="none"></path><path d="M15.5 8.5a5 5 0 0 1 0 7"></path><path d="M18.5 6a9 9 0 0 1 0 12"></path></svg>
-          <svg id="icon-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden><path d="M11 5L6 9H3v6h3l5 4V5z" fill="currentColor" stroke="none"></path><path d="M16 9.5l5 5"></path><path d="M21 9.5l-5 5"></path></svg>
-        </button>
-        <input type="range" id="volume-bar" class="range range-volume" min="0" max="100" value="100" aria-label="Volume" />
-      </div>
-
-      <button
-        type="button"
-        id="favorite-btn"
-        class="btn-fav{{ ' is-on' if content.is_favorite else '' }}"
-        data-content-id="{{ content.id }}"
-        data-favorite="{{ 'true' if content.is_favorite else 'false' }}"
-        aria-pressed="{{ 'true' if content.is_favorite else 'false' }}"
-        aria-label="Favorite"
-      >
-        <svg viewBox="0 0 24 24" fill="{{ 'currentColor' if content.is_favorite else 'none' }}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-7.5-4.7-9.4-9A5.3 5.3 0 0 1 12 6.6 5.3 5.3 0 0 1 21.4 12c-1.9 4.3-9.4 9-9.4 9z"></path></svg>
-      </button>
-    </div>
+{% with duration_label = (content.duration_seconds | duration if content.duration_seconds else '0:00'),
+        favorite_content_id = content.id,
+        favorite_is_on = content.is_favorite %}
+{% include "_player_controls.html" %}
+{% endwith %}
   </main>
+{% endblock %}
 
+{% block scripts %}
   <script src="/static/js/ui.js"></script>
   <script src="/static/js/player.js"></script>
-</body>
-</html>
+{% endblock %}

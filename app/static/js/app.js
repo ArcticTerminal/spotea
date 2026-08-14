@@ -109,7 +109,7 @@ function markContentDownloaded(contentId) {
     if (thumb && !thumb.querySelector(".downloaded-badge")) {
       thumb.insertAdjacentHTML(
         "beforeend",
-        '<span class="downloaded-badge" title="Downloaded — plays instantly"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg></span>'
+        '<span class="downloaded-badge" title="Downloaded — plays instantly"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-check" /></svg></span>'
       );
     }
   });
@@ -120,7 +120,7 @@ function markContentDownloaded(contentId) {
     if (durationEl && !durationEl.querySelector(".track-downloaded")) {
       durationEl.insertAdjacentHTML(
         "afterbegin",
-        '<svg class="track-downloaded" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" title="Downloaded — plays instantly"><polyline points="20 6 9 17 4 12"></polyline></svg>'
+        '<svg class="track-downloaded" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" title="Downloaded — plays instantly"><use href="#i-check" /></svg>'
       );
     }
   });
@@ -168,10 +168,10 @@ async function refreshStorageUsage() {
           <span class="storage-item-meta">${escapeHtml(item.channel_title || "")} · ${item.size_formatted}</span>
         </div>
         <a class="storage-export" href="/content/${item.id}/stream?download=1" download aria-label="Export">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-download" /></svg>
         </a>
         <button type="button" class="storage-remove" data-content-id="${item.id}" aria-label="Remove download">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></svg>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-trash" /></svg>
         </button>
       </li>`
       )
@@ -567,7 +567,7 @@ function renderVideoSearchResults(results) {
             <span class="search-result-subs">${meta}</span>
           </div>
           <button type="button" class="btn-icon video-search-play" aria-label="Play">
-            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"></path></svg>
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><use href="#i-play" /></svg>
           </button>
         </li>
       `;

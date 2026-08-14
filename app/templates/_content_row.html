@@ -23,7 +23,7 @@
   </a>
   <span class="track-duration">
     {% if item.status == "ready" %}
-    <svg class="track-downloaded" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" title="Downloaded — plays instantly"><polyline points="20 6 9 17 4 12"></polyline></svg>
+    <svg class="track-downloaded" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" title="Downloaded — plays instantly"><use href="#i-check" /></svg>
     {% endif %}
     {{ item.duration_seconds | duration if item.duration_seconds else '' }}
   </span>
@@ -35,6 +35,6 @@
     title="{{ 'Saved for later' if item.is_saved else 'Save for later' }}"
     aria-label="Save for later"
   >
-    <svg viewBox="0 0 24 24" fill="{{ 'currentColor' if item.is_saved else 'none' }}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg>
+    <svg viewBox="0 0 24 24" fill="{{ 'currentColor' if item.is_saved else 'none' }}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-bookmark" /></svg>
   </button>
 </div>
