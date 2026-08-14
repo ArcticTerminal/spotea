@@ -10,5 +10,7 @@ data/storage/*
 !data/storage/.gitkeep
 data/avatars/*
 !data/avatars/.gitkeep
+data/thumbnails/*
+!data/thumbnails/.gitkeep
 data/.cache/
 .claude/

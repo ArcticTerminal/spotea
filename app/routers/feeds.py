@@ -40,7 +40,7 @@ from app.schemas import (
     VideoAddResult,
     VideoSearchResultOut,
 )
-from app.storage import unlink_if_unshared
+from app.storage import unlink_if_unshared, unlink_thumbnail_if_unshared
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +120,13 @@ def _run_backfill(feed_id: int, channel_id: str, db: Session) -> None:
         total = len(new_entries)
         _backfill_progress[feed_id] = ("saving", 0, total)
         for i, entry in enumerate(new_entries, start=1):
+            # Stored as-is (still a remote ytimg.com URL) — no need to fetch
+            # it here. Whichever page first renders this row (channel page,
+            # Library, ...) queues the same caching pages.py already does for
+            # every other render (see _queue_thumbnail_caching), so eagerly
+            # downloading during a full-history backfill would just be
+            # blocking hundreds of inserts on network round trips nobody's
+            # waiting on yet.
             db.add(
                 Content(
                     feed_id=feed.id,
@@ -402,6 +409,10 @@ def add_single_video(
         user_id=profile.id,
         video_id=payload.video_id,
         title=payload.title,
+        # Stored as-is — see _run_backfill's comment above; the player page
+        # (or wherever this ends up rendered first) queues the same lazy
+        # caching, and this is a synchronous request handler so downloading
+        # here would delay the "listen" click's own response for no benefit.
         thumbnail_url=payload.thumbnail_url,
         duration_seconds=payload.duration_seconds,
         # Flat search results don't reliably expose a real upload date, and
@@ -438,6 +449,7 @@ def remove_single_video(
     feed_id = content.feed_id
     if content.file_path:
         unlink_if_unshared(db, content.file_path, content.id)
+    unlink_thumbnail_if_unshared(db, content.video_id, content.id)
     db.delete(content)
     db.commit()
 
@@ -500,6 +512,7 @@ def delete_feed(
         if not keep:
             if content.file_path:
                 unlink_if_unshared(db, content.file_path, content.id)
+            unlink_thumbnail_if_unshared(db, content.video_id, content.id)
             db.delete(content)
 
     db.commit()

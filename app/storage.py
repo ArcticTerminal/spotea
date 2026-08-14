@@ -58,6 +58,25 @@ def collect_usage(db: Session, user_id: int) -> StorageUsage:
     return StorageUsage(items=items, total_bytes=sum(item.size_bytes for item in items))
 
 
+def unlink_thumbnail_if_unshared(db: Session, video_id: str, exclude_content_id: int) -> None:
+    """Same sharing check as unlink_if_unshared, for a cached thumbnail
+    instead of a downloaded audio file — a thumbnail is keyed by video_id
+    alone (see downloader.download_thumbnail), so it can legitimately be
+    shared by more than one profile's Content row for the same video (e.g.
+    two profiles both followed an overlapping channel, or one followed it
+    after the other already had it as an Explore preview). Only ever called
+    where a Content row is actually being deleted (unfollow purge, Explore
+    removal) — content.py's delete_content resets a row's download status in
+    place without deleting it, so it never needs this."""
+    still_referenced = (
+        db.query(Content.id)
+        .filter(Content.video_id == video_id, Content.id != exclude_content_id)
+        .first()
+    )
+    if still_referenced is None:
+        (settings.thumbnails_dir / f"{video_id}.jpg").unlink(missing_ok=True)
+
+
 def unlink_if_unshared(db: Session, file_path: str, exclude_content_id: int) -> None:
     """Only remove the file if no other ready Content row (any profile) still
     points at it. Storage is keyed by video_id alone, so the same physical

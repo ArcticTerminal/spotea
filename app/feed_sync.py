@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
-from app.downloader import download_avatar
+from app.downloader import download_avatar, download_thumbnail
 from app.models import Content, Feed
 from app.rss import (
     SHORT_MAX_DURATION_SECONDS,
@@ -186,3 +186,20 @@ def refresh_feeds(db: Session, feeds: list[Feed]) -> int:
             db.rollback()
             logger.exception("Failed to apply feed data for feed %s (%s)", feed.id, feed.channel_title)
     return new_count
+
+
+def cache_thumbnail(video_id: str, thumbnail_url: str) -> None:
+    """The actual work behind pages.py's queue_thumbnail_caching — fetches
+    once and rewrites every Content row sharing this video_id (there can be
+    more than one: the same video followed/played/favorited under more than
+    one profile). Meant to run as a FastAPI BackgroundTask, after the
+    response that triggered it has already gone out with the original
+    (still remote) URL — this call only ever affects the *next* render of
+    this content, never the one that queued it."""
+    local_url = download_thumbnail(video_id, thumbnail_url)
+    if local_url and local_url != thumbnail_url:
+        with SessionLocal() as db:
+            db.query(Content).filter(
+                Content.video_id == video_id, Content.thumbnail_url.like("%ytimg.com%")
+            ).update({"thumbnail_url": local_url}, synchronize_session=False)
+            db.commit()

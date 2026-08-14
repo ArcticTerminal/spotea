@@ -109,6 +109,14 @@ def service_worker() -> FileResponse:
     )
 
 
+# Both avatars and thumbnails are content-addressed (filename is the
+# channel/video id, and download_avatar/download_thumbnail never overwrite
+# an existing file — see their on-disk check) — so unlike RevalidatingStaticFiles'
+# app code, a cached copy is never stale and can be trusted indefinitely
+# without a revalidation round trip.
+_IMAGE_CACHE_HEADERS = {"Cache-Control": "public, max-age=31536000, immutable"}
+
+
 @app.get("/avatars/{filename}", dependencies=[Depends(require_login)])
 def get_avatar(filename: str) -> FileResponse:
     # Downloaded and re-served from our own origin rather than hotlinked
@@ -122,4 +130,20 @@ def get_avatar(filename: str) -> FileResponse:
     if not path.is_file():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
 
-    return FileResponse(path, media_type="image/jpeg")
+    return FileResponse(path, media_type="image/jpeg", headers=_IMAGE_CACHE_HEADERS)
+
+
+@app.get("/thumbnails/{filename}", dependencies=[Depends(require_login)])
+def get_thumbnail(filename: str) -> FileResponse:
+    # Same deal as get_avatar above — see downloader.download_thumbnail.
+    # filename is always "{video_id}.jpg" from that function, but guard
+    # against path traversal since it still arrives as attacker-controlled
+    # input.
+    if "/" in filename or "\\" in filename or filename.startswith("."):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+
+    path = settings.thumbnails_dir / filename
+    if not path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+
+    return FileResponse(path, media_type="image/jpeg", headers=_IMAGE_CACHE_HEADERS)

@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from typing import Iterable
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func
@@ -7,6 +9,7 @@ from sqlalchemy.sql.elements import ColumnElement
 
 from app.content_query import DEFAULT_PAGE_SIZE, new_upload_cutoff, query_content_page
 from app.deps import get_current_profile, get_db, require_login
+from app.feed_sync import cache_thumbnail
 from app.formatting import format_duration, format_size
 from app.models import AppSettings, Content, Feed, User
 from app.storage import collect_usage
@@ -18,6 +21,27 @@ templates.env.filters["filesize"] = format_size
 
 HOME_SHELF_LIMIT = 12
 HOME_CHANNEL_LIMIT = 8
+
+
+def _queue_thumbnail_caching(background_tasks: BackgroundTasks, items: Iterable[Content]) -> None:
+    """Caches thumbnails for whatever's actually being rendered in this
+    response — a Home shelf, a Library list's current page, a channel page's
+    current page — rather than eagerly sweeping ahead of actual browsing (a
+    prior version of this did that at startup; on a large library it meant
+    downloading and storing thumbnails for things nobody was looking at yet).
+    This render still goes out with the original YouTube URL for anything
+    not yet cached — the queued task (see feed_sync.cache_thumbnail) only
+    ever benefits the *next* time this same content is rendered, anywhere.
+    Deduped per call so a video appearing in more than one shelf here isn't
+    queued twice."""
+    seen: set[str] = set()
+    for item in items:
+        if not item.thumbnail_url or "ytimg.com" not in item.thumbnail_url:
+            continue
+        if item.video_id in seen:
+            continue
+        seen.add(item.video_id)
+        background_tasks.add_task(cache_thumbnail, item.video_id, item.thumbnail_url)
 
 
 def _home_shelf_query(db: Session, user_id: int):
@@ -34,7 +58,10 @@ def _home_shelf_query(db: Session, user_id: int):
 
 @router.get("/", response_class=HTMLResponse)
 def home(
-    request: Request, profile: User = Depends(get_current_profile), db: Session = Depends(get_db)
+    request: Request,
+    background_tasks: BackgroundTasks,
+    profile: User = Depends(get_current_profile),
+    db: Session = Depends(get_db),
 ) -> HTMLResponse:
     # Fixed id — see app.models.AppSettings and main._ensure_app_settings,
     # which guarantees this row exists before any request can reach here.
@@ -112,6 +139,10 @@ def home(
         .all()
     )
 
+    _queue_thumbnail_caching(
+        background_tasks, home_new_uploads + home_recently_played + home_favorites + home_saved
+    )
+
     # Library is a grid of channels, not videos — one cheap grouped count
     # query covers every channel's card instead of a per-feed query each.
     channel_video_counts = dict(
@@ -175,6 +206,7 @@ def home(
 def _content_list_page(
     request: Request,
     db: Session,
+    background_tasks: BackgroundTasks,
     *,
     user_id: int,
     kind: str,
@@ -190,6 +222,9 @@ def _content_list_page(
     single-channel avatar hero)."""
     video_count = db.query(func.count(Content.id)).filter(Content.user_id == user_id, is_match).scalar()
     items, page, total_pages = query_content_page(db, user_id, page=page, filter=filter_value)
+    # Only ever this page's items — paginating to page 2 queues page 2's
+    # thumbnails, not the whole list, matching how a user actually browses.
+    _queue_thumbnail_caching(background_tasks, items)
 
     return templates.TemplateResponse(
         request,
@@ -211,6 +246,7 @@ def _content_list_page(
 @router.get("/favorites", response_class=HTMLResponse)
 def favorites_page(
     request: Request,
+    background_tasks: BackgroundTasks,
     page: int = 1,
     profile: User = Depends(get_current_profile),
     db: Session = Depends(get_db),
@@ -218,6 +254,7 @@ def favorites_page(
     return _content_list_page(
         request,
         db,
+        background_tasks,
         user_id=profile.id,
         kind="favorites",
         is_match=Content.is_favorite.is_(True),
@@ -231,6 +268,7 @@ def favorites_page(
 @router.get("/saved", response_class=HTMLResponse)
 def saved_page(
     request: Request,
+    background_tasks: BackgroundTasks,
     page: int = 1,
     profile: User = Depends(get_current_profile),
     db: Session = Depends(get_db),
@@ -238,6 +276,7 @@ def saved_page(
     return _content_list_page(
         request,
         db,
+        background_tasks,
         user_id=profile.id,
         kind="saved",
         is_match=Content.is_saved.is_(True),
@@ -251,6 +290,7 @@ def saved_page(
 @router.get("/new-uploads", response_class=HTMLResponse)
 def new_uploads_page(
     request: Request,
+    background_tasks: BackgroundTasks,
     page: int = 1,
     profile: User = Depends(get_current_profile),
     db: Session = Depends(get_db),
@@ -258,6 +298,7 @@ def new_uploads_page(
     return _content_list_page(
         request,
         db,
+        background_tasks,
         user_id=profile.id,
         kind="new-uploads",
         is_match=(Content.is_new_upload.is_(True))
@@ -273,6 +314,7 @@ def new_uploads_page(
 @router.get("/recently-played", response_class=HTMLResponse)
 def recently_played_page(
     request: Request,
+    background_tasks: BackgroundTasks,
     page: int = 1,
     profile: User = Depends(get_current_profile),
     db: Session = Depends(get_db),
@@ -280,6 +322,7 @@ def recently_played_page(
     return _content_list_page(
         request,
         db,
+        background_tasks,
         user_id=profile.id,
         kind="recently-played",
         is_match=Content.last_played_at.isnot(None),
@@ -294,6 +337,7 @@ def recently_played_page(
 def channel_page(
     feed_id: int,
     request: Request,
+    background_tasks: BackgroundTasks,
     page: int = 1,
     profile: User = Depends(get_current_profile),
     db: Session = Depends(get_db),
@@ -306,6 +350,7 @@ def channel_page(
         Content.feed_id == feed_id, Content.user_id == profile.id
     ).scalar()
     items, page, total_pages = query_content_page(db, profile.id, page=page, feed_id=feed_id)
+    _queue_thumbnail_caching(background_tasks, items)
 
     return templates.TemplateResponse(
         request,
@@ -325,6 +370,7 @@ def channel_page(
 def player_page(
     content_id: int,
     request: Request,
+    background_tasks: BackgroundTasks,
     profile: User = Depends(get_current_profile),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
@@ -336,6 +382,8 @@ def player_page(
     )
     if content is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Content not found")
+
+    _queue_thumbnail_caching(background_tasks, [content])
 
     # No redirect for not-yet-downloaded content: the player itself kicks off the
     # download and shows a preparing state until the audio is ready.

@@ -176,7 +176,11 @@ def test_filter_new_uploads(db_session):
     db_session.commit()
     db_session.refresh(feed)
 
-    now = datetime(2026, 1, 1)
+    # Relative to "now" rather than a fixed literal — new_upload_cutoff()
+    # (content_query.py) is a rolling window off the real current time, so a
+    # hardcoded past date eventually ages out of it and starts failing on its
+    # own regardless of anything this test is actually checking.
+    now = datetime.utcnow()
     db_session.add_all(
         [
             Content(

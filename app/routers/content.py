@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.content_query import query_content_page
 from app.deps import get_current_profile, get_db, require_login
 from app.downloader import DownloadError, download_audio
+from app.feed_sync import cache_thumbnail
 from app.formatting import safe_filename
 from app.models import Content, User
 from app.rss import VIDEO_ID_RE
@@ -97,7 +98,10 @@ def list_content(
 
 @router.get("/{content_id}", response_model=ContentOut)
 def get_content(
-    content_id: int, profile: User = Depends(get_current_profile), db: Session = Depends(get_db)
+    content_id: int,
+    background_tasks: BackgroundTasks,
+    profile: User = Depends(get_current_profile),
+    db: Session = Depends(get_db),
 ) -> ContentOut:
     """Single-item fetch — used by the Home player overlay (see app.js's
     openPlayer) to populate itself for a track without a full page
@@ -111,6 +115,11 @@ def get_content(
     )
     if content is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Content not found")
+
+    # Caches for next time only, same as pages.py's _queue_thumbnail_caching
+    # — this response still carries whatever thumbnail_url is on file now.
+    if content.thumbnail_url and "ytimg.com" in content.thumbnail_url:
+        background_tasks.add_task(cache_thumbnail, content.video_id, content.thumbnail_url)
 
     return ContentOut(
         id=content.id,

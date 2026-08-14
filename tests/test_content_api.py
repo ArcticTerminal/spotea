@@ -59,6 +59,7 @@ def test_get_content_default_page_shape(client, db_session):
         "added_at",
         "is_favorite",
         "is_saved",
+        "is_played",
     }
     assert first["channel_title"] == "Test Channel"
     assert first["title"] == "Title 025"
@@ -119,6 +120,7 @@ def test_get_single_content_returns_full_shape(client, db_session):
         "added_at",
         "is_favorite",
         "is_saved",
+        "is_played",
     }
     assert body["id"] == items[0].id
     assert body["channel_title"] == "Test Channel"
