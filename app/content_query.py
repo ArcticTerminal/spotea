@@ -1,7 +1,17 @@
+"""Shared query building blocks.
+
+Anything a query means in more than one place belongs here rather than
+being spelled out again at each call site — the Home shelf, the Library
+tile's count and the full list page all have to agree on what "a new
+upload" is, and they used to say so in four separate expressions that
+could drift apart independently.
+"""
+
 from datetime import datetime, timedelta
 
-from sqlalchemy import or_
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import and_, or_
+from sqlalchemy.orm import Query, Session, joinedload
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.models import Content, Feed
 from app.timeutil import utcnow
@@ -11,18 +21,61 @@ DEFAULT_PAGE_SIZE = 20
 # How far back "New Uploads" reaches — is_new_upload alone (see models.py's
 # Content.is_new_upload) only means "RSS-sourced, not backfilled," which
 # without this stays true forever, so a channel's uploads from months ago
-# never age out of the shelf/list. Shared by every place that means "New
-# Uploads" (this file, routers/pages.py's home shelf, count, and video_count)
-# so they can't drift apart and disagree on what counts as new.
+# never age out of the shelf/list.
 NEW_UPLOAD_MAX_AGE = timedelta(days=14)
 
 
 def new_upload_cutoff() -> datetime:
     # Naive UTC, matching Content.published_at's own convention (see e.g.
-    # routers/feeds.py's add_single_video) — SQLite has no timezone type, and
+    # routers/explore.py's add_single_video) — SQLite has no timezone type, and
     # mixing naive/aware datetimes in the same column makes string comparison
     # unreliable.
     return utcnow() - NEW_UPLOAD_MAX_AGE
+
+
+def new_upload_filter() -> ColumnElement[bool]:
+    """What "New Uploads" means, in one place: RSS-sourced, recent, and from
+    a channel still followed.
+
+    All three conditions are load-bearing and none is implied by the others.
+    is_new_upload alone never expires (see NEW_UPLOAD_MAX_AGE). The
+    Feed.followed check covers two separate cases: Explore-added content
+    keeps a live feed_id even after being favorited/saved, but that feed is
+    only a placeholder (see routers/explore.py's _get_or_create_placeholder_feed);
+    and a channel that was unfollowed while some of its content was kept
+    (see routers/feeds.py's delete_feed) leaves is_new_upload=True rows
+    behind that shouldn't keep surfacing as if still followed.
+
+    Expressed as `Content.feed.has(...)` rather than a join so it composes
+    into any query over Content without the caller having to arrange for
+    Feed to be joined first.
+    """
+    return and_(
+        Content.is_new_upload.is_(True),
+        Content.published_at >= new_upload_cutoff(),
+        Content.feed.has(Feed.followed.is_(True)),
+    )
+
+
+def followed_feeds(db: Session, user_id: int | None = None) -> Query[Feed]:
+    """Feeds the user actually follows, newest first.
+
+    followed=False rows are Explore placeholders auto-created to hold a
+    single video (see routers/explore.py's _get_or_create_placeholder_feed)
+    or channels unfollowed while keeping some content (see delete_feed).
+    Either way they're invisible in Library and skipped by the background
+    refresh, so every "the user's channels" query has to exclude them —
+    omitting the filter is what would silently turn "I grabbed one song"
+    into "I follow this channel now".
+
+    user_id is optional because the background scheduler refreshes every
+    profile's feeds at once, not one profile's.
+    """
+    query = db.query(Feed).filter(Feed.followed.is_(True))
+    if user_id is not None:
+        query = query.filter(Feed.user_id == user_id)
+    return query.order_by(Feed.added_at.desc())
+
 
 # Distinct from a plain free-text filter: this is an *exact* channel match
 # (picked from a suggestion, e.g. clicking a Home channel chip), so a video
@@ -52,7 +105,7 @@ def query_content_page(
     Returns (items, clamped page, total_pages).
     """
     # is_preview excludes Explore videos not yet favorited/saved — see
-    # routers/feeds.py's add_single_video and routers/content.py's
+    # routers/explore.py's add_single_video and routers/content.py's
     # add_favorite/add_saved. Favorites/Saved never actually hit this in
     # practice (favoriting/saving already clears is_preview as a side
     # effect), but the channel-detail page (feed_id) could otherwise be
@@ -67,7 +120,11 @@ def query_content_page(
     if feed_id is not None:
         query = query.filter(Content.feed_id == feed_id)
 
-    needs_feed_join = filter not in ("", "__favorites__", "__saved__", "__played__")
+    # Only the filters that actually match on a Feed column need the join.
+    # __new_uploads__ used to be in here too, back when it spelled its
+    # follow check out as `Feed.followed.is_(True)`; new_upload_filter()
+    # carries its own EXISTS instead, so it composes without one.
+    needs_feed_join = filter not in ("", "__favorites__", "__saved__", "__played__", "__new_uploads__")
     if needs_feed_join:
         query = query.join(Feed)
 
@@ -78,17 +135,7 @@ def query_content_page(
     elif filter == "__played__":
         query = query.filter(Content.last_played_at.isnot(None))
     elif filter == "__new_uploads__":
-        # Unfollowing a channel keeps content that was played/favorited/
-        # saved/downloaded (see routers/feeds.py's delete_feed) but is
-        # explicitly meant to drop it out of New Uploads — Feed.followed
-        # (not just is_new_upload) has to hold for this filter, matching the
-        # Home shelf's own Content.feed.has(Feed.followed.is_(True)) check
-        # (routers/pages.py's home_new_uploads).
-        query = query.filter(
-            Content.is_new_upload.is_(True),
-            Content.published_at >= new_upload_cutoff(),
-            Feed.followed.is_(True),
-        )
+        query = query.filter(new_upload_filter())
     elif filter.startswith(CHANNEL_FILTER_PREFIX):
         channel_title = filter[len(CHANNEL_FILTER_PREFIX) :]
         query = query.filter(Feed.channel_title == channel_title)

@@ -576,7 +576,7 @@ function renderVideoSearchResults(results) {
 }
 
 // Explore's "listen" action: adds the video (always as an unkept preview —
-// see routers/feeds.py's add_single_video) and jumps straight to its player,
+// see routers/explore.py's add_single_video) and jumps straight to its player,
 // same as tapping any other card. If this video already has a Content row
 // (an earlier Explore preview, or an upload from a followed channel),
 // add_single_video hands back that row's id instead of erroring, so this
@@ -1169,7 +1169,7 @@ function setupBulkImport() {
     progressText.textContent = `Resolving channels… 0/${total}`;
 
     // Large channels' backfills run inline, one at a time, inside the same
-    // job (see _run_bulk_import) — the counter can sit still for a while on
+    // job (see services/bulk_import.py) — the counter can sit still for a while on
     // a channel with a long upload history. Polling just keeps asking, same
     // as waitForBackfillThenReload does for a single add.
     while (true) {
@@ -1194,7 +1194,7 @@ function setupBulkImport() {
         break;
       }
 
-      // Channels resolve in parallel first (see _run_bulk_import), then get
+      // Channels resolve in parallel first (see services/bulk_import.py), then get
       // created one at a time — two distinct stages, so the counter doesn't
       // sit at 0 for however long that whole parallel batch takes.
       progressText.textContent =

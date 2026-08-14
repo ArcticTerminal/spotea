@@ -52,7 +52,7 @@ class User(Base):
 
 
 class AppSettings(Base):
-    """Singleton row (fixed id=1, see main._ensure_app_settings) holding
+    """Singleton row (fixed id, see app_settings.APP_SETTINGS_ID) holding
     settings that apply to the whole app rather than one profile — this is a
     single-deployment household app, so there's one background refresh loop
     shared by every profile's feeds, not one per profile."""
@@ -74,7 +74,7 @@ class Feed(Base):
     avatar_url: Mapped[str | None] = mapped_column(String(500), default=None)
     added_at: Mapped[datetime] = mapped_column(default=utcnow)
     # False only for placeholder feeds auto-created to hold a single video
-    # added via Explore (see routers/feeds.py's _get_or_create_placeholder_feed)
+    # added via Explore (see routers/explore.py's _get_or_create_placeholder_feed)
     # — invisible in Library, skipped by the background refresh scheduler,
     # until the user actually follows the channel for real.
     followed: Mapped[bool] = mapped_column(default=True)
@@ -128,7 +128,7 @@ class Content(Base):
     is_preview: Mapped[bool] = mapped_column(default=False)
     # True for a row inserted by an RSS parse (a channel's initial fetch when
     # followed, or any later routine refresh — see feed_sync.apply_feed_data,
-    # the only place this is set) — False for _run_backfill's direct inserts
+    # the only place this is set) — False for services/backfill.py's direct inserts
     # (the full-history scan) and Explore's add_single_video. This is what
     # "New Uploads" (Home shelf and Library's full playlist) actually means:
     # RSS-sourced content, not a channel's backfilled-in history.

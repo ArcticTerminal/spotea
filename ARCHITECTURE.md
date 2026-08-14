@@ -42,40 +42,57 @@ spotea/
     database.py             # SQLAlchemy engine/session
     migrations.py            # lightweight "add column if missing" patcher +
                               # legacy-account backfill for pre-account installs
-    content_query.py           # shared filter/paginate query (newest-first),
-                                # backs every per-channel/virtual-playlist page
-    feed_sync.py                # network+DB feed refresh, shared by the
-                                 # on-demand /feeds/refresh route and the
-                                 # background scheduler
-    scheduler.py                 # background feed-refresh loop, on
-                                  # AppSettings.feed_refresh_interval_minutes
-    formatting.py                 # Jinja filters (duration, file size),
-                                   # filesystem-safe filenames
-    timeutil.py                    # utcnow() — the single naive-UTC source
-                                    # every datetime column agrees on
-    progress.py                     # ProgressRegistry: expiring in-memory
-                                     # progress for downloads, backfills and
-                                      # bulk imports (single-process only)
-    storage.py                     # disk usage, cache clearing, orphan
-                                    # sweep, zip export
-    models.py                       # Account, User, AppSettings, Feed, Content
-    schemas.py                       # Pydantic request/response models
-    auth.py                           # password hashing (bcrypt), session-key
-                                      # constants
-    deps.py                            # get_db, require_login,
-                                        # get_current_account, get_current_profile
-    rss.py                               # feedparser + yt-dlp metadata helpers,
-                                          # channel/video search, avatar/duration
-                                          # lookups, full-history backfill scan
-    downloader.py                          # yt-dlp wrapper + background download +
-                                            # channel avatar fetch
+    content_query.py           # shared query building blocks: pagination,
+                                # new_upload_filter(), followed_feeds()
+    app_settings.py             # the singleton AppSettings row, created on
+                                 # first access
+    templating.py                # the one Jinja environment (filters included)
+    feed_sync.py                  # network+DB feed refresh, shared by the
+                                   # on-demand /feeds/refresh route and the
+                                   # background scheduler
+    scheduler.py                   # background feed-refresh loop, on
+                                    # AppSettings.feed_refresh_interval_minutes
+    formatting.py                   # Jinja filters (duration, file size),
+                                     # filesystem-safe filenames
+    timeutil.py                      # utcnow() — the single naive-UTC source
+                                      # every datetime column agrees on
+    progress.py                       # ProgressRegistry: expiring in-memory
+                                       # progress for downloads, backfills and
+                                        # bulk imports (single-process only)
+    storage.py                       # disk usage, cache clearing, orphan
+                                      # sweep, zip export, content purge
+    models.py                         # Account, User, AppSettings, Feed, Content
+    schemas.py                         # Pydantic request/response models
+    auth.py                             # password hashing (bcrypt), session-key
+                                        # constants
+    deps.py                              # get_db, require_login,
+                                          # get_current_account, get_current_profile
+    images.py                             # avatar/thumbnail fetch + on-disk cache
+    downloader.py                          # yt-dlp audio extraction (audio only)
+    youtube/
+      urls.py                                # URL shapes, id conventions, regexes
+                                              # (no network)
+      rss.py                                 # feedparser: a channel's RSS feed —
+                                              # the cheap path routine refreshes use
+      extract.py                             # yt-dlp: channel resolution,
+                                              # durations, avatars, full-history scan
+      search.py                              # yt-dlp: Explore's channel/video search
+    services/
+      feed_add.py                            # create (or re-follow) a Feed from a
+                                              # channel URL — shared by the single
+                                              # add route and bulk import
+      backfill.py                            # one-time full-history scan + its
+                                              # progress registry
+      bulk_import.py                         # parallel resolve, then sequential
+                                              # create, for a pasted channel list
     routers/
       auth.py                                # login/register/logout
       profiles.py                            # profile CRUD + switch,
                                               # account-scoped
-      feeds.py                               # feeds, channel/video search,
-                                              # refresh, backfill status, bulk
-                                              # import, single-video add
+      feeds.py                               # follow/unfollow/refresh, backfill
+                                              # status, bulk import endpoints
+      explore.py                             # channel/video search + single-video
+                                              # add/remove (still under /feeds)
       content.py                             # list/get/download/status/stream/
                                               # favorite/save/delete
       storage.py                             # clear-all + zip export endpoints

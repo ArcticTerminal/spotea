@@ -32,7 +32,7 @@ class ProgressRegistry[K, V]:
 
     Note that expiry tracks `set()` calls, not reads and not in-place
     mutation of a stored mutable value — a task that keeps a long job alive
-    has to keep calling `set()` (see routers/feeds.py's _run_bulk_import,
+    has to keep calling `set()` (see services/bulk_import.py's run_bulk_import,
     which re-sets after each line it finishes) rather than only mutating the
     dict it stored once at the start.
     """

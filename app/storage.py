@@ -116,6 +116,25 @@ def unlink_if_unshared(db: Session, file_path: str, exclude_content_id: int) -> 
         Path(file_path).unlink(missing_ok=True)
 
 
+def purge_content(db: Session, content: Content) -> None:
+    """Delete a Content row and any files only it was keeping alive.
+
+    Both unlink helpers above are sharing-aware, so this is safe even when
+    another profile has its own row for the same video. Deliberately does
+    not commit: the unfollow path (routers/feeds.py's delete_feed) purges
+    many rows and commits once, and doing it per row would leave a
+    half-purged feed behind if one of them failed.
+
+    Note this is for rows that are genuinely going away — content.py's
+    delete_content resets a row's download state in place and keeps the row,
+    so it only unlinks the audio file.
+    """
+    if content.file_path:
+        unlink_if_unshared(db, content.file_path, content.id)
+    unlink_thumbnail_if_unshared(db, content.video_id, content.id)
+    db.delete(content)
+
+
 def clear_all(db: Session, user_id: int) -> int:
     """Delete every downloaded file and reset its row. Returns rows cleared.
 

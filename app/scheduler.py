@@ -1,9 +1,10 @@
 import asyncio
 import logging
 
+from app.app_settings import get_app_settings
+from app.content_query import followed_feeds
 from app.database import SessionLocal
 from app.feed_sync import refresh_feeds
-from app.models import AppSettings, Feed
 
 logger = logging.getLogger(__name__)
 
@@ -28,17 +29,14 @@ def request_reschedule() -> None:
 
 def _read_interval_minutes() -> int:
     with SessionLocal() as db:
-        app_settings = db.get(AppSettings, 1)
-        return app_settings.feed_refresh_interval_minutes if app_settings else 30
+        return get_app_settings(db).feed_refresh_interval_minutes
 
 
 def _refresh_all_feeds() -> None:
     with SessionLocal() as db:
-        # followed=False feeds are Explore placeholders (see
-        # routers/feeds.py's _get_or_create_placeholder_feed) — polling them
-        # would silently turn "I grabbed one song" into "I'm now following
-        # this channel's every future upload", which nobody asked for.
-        feeds = db.query(Feed).filter(Feed.followed.is_(True)).all()
+        # No user_id: this is the one refresh loop for the whole deployment,
+        # covering every profile's feeds (see AppSettings' docstring).
+        feeds = followed_feeds(db).all()
         new_count = refresh_feeds(db, feeds)
         if new_count:
             logger.info("Background refresh added %d new item(s) across %d feed(s)", new_count, len(feeds))

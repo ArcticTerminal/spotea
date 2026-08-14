@@ -1,10 +1,13 @@
 from datetime import datetime
 
 import app.feed_sync as feed_sync_module
-import app.routers.feeds as feeds_module
+import app.services.backfill as backfill_module
+import app.services.feed_add as feed_add_module
 from app.feed_sync import FeedFetchResult, apply_feed_data
 from app.models import Content, Feed
-from app.rss import BackfillEntry, ParsedEntry, ParsedFeed, channel_feed_url
+from app.youtube.extract import BackfillEntry
+from app.youtube.rss import ParsedEntry, ParsedFeed
+from app.youtube.urls import channel_feed_url
 
 USER_ID = 1
 
@@ -57,16 +60,16 @@ def test_following_a_previously_previewed_channel_upgrades_the_placeholder(db_se
     db_session.commit()
 
     parsed = ParsedFeed(channel_title="Ezhel", entries=[])
-    monkeypatch.setattr(feeds_module, "fetch_feed", lambda url: parsed)
+    monkeypatch.setattr(feed_add_module, "fetch_feed", lambda url: parsed)
     monkeypatch.setattr(
-        feeds_module,
+        feed_add_module,
         "fetch_feed_data",
         lambda feed_id, rss_url, avatar_url: FeedFetchResult(
             parsed=parsed, durations={}, channel_id=channel_id, avatar_url=None
         ),
     )
 
-    feed, _new_count, resolved_channel_id = feeds_module._create_feed_from_rss_url(
+    feed, _new_count, resolved_channel_id = feed_add_module.create_feed_from_rss_url(
         db_session, rss_url, USER_ID
     )
 
@@ -222,7 +225,7 @@ def test_run_backfill_marks_done_on_unexpected_failure(db_session, monkeypatch):
     db_session.refresh(feed)
 
     monkeypatch.setattr(
-        feeds_module,
+        backfill_module,
         "fetch_channel_all_videos",
         lambda channel_id, on_progress=None: [
             BackfillEntry(video_id="backfill01", title="T", thumbnail_url=None, duration_seconds=None)
@@ -234,9 +237,9 @@ def test_run_backfill_marks_done_on_unexpected_failure(db_session, monkeypatch):
 
     monkeypatch.setattr(db_session, "commit", raise_on_commit)
 
-    feeds_module._run_backfill(feed.id, channel_id, db_session)
+    backfill_module.run_backfill(feed.id, channel_id, db_session)
 
-    assert feeds_module._backfill_progress.get(feed.id)[0] == "done"
+    assert backfill_module.backfill_progress.get(feed.id)[0] == "done"
 
 
 def test_run_backfill_does_not_mark_entries_as_new_upload(db_session, monkeypatch):
@@ -247,14 +250,14 @@ def test_run_backfill_does_not_mark_entries_as_new_upload(db_session, monkeypatc
     db_session.refresh(feed)
 
     monkeypatch.setattr(
-        feeds_module,
+        backfill_module,
         "fetch_channel_all_videos",
         lambda channel_id, on_progress=None: [
             BackfillEntry(video_id="oldvid0001", title="Old video", thumbnail_url=None, duration_seconds=None)
         ],
     )
 
-    feeds_module._run_backfill(feed.id, channel_id, db_session)
+    backfill_module.run_backfill(feed.id, channel_id, db_session)
 
     row = db_session.query(Content).filter(Content.video_id == "oldvid0001").first()
     assert row is not None
@@ -269,7 +272,7 @@ def test_run_backfill_skips_likely_shorts(db_session, monkeypatch):
     db_session.refresh(feed)
 
     monkeypatch.setattr(
-        feeds_module,
+        backfill_module,
         "fetch_channel_all_videos",
         lambda channel_id, on_progress=None: [
             BackfillEntry(video_id="shortvid02", title="A Short", thumbnail_url=None, duration_seconds=30),
@@ -277,7 +280,7 @@ def test_run_backfill_skips_likely_shorts(db_session, monkeypatch):
         ],
     )
 
-    feeds_module._run_backfill(feed.id, channel_id, db_session)
+    backfill_module.run_backfill(feed.id, channel_id, db_session)
 
     remaining = {row.video_id for row in db_session.query(Content).filter(Content.feed_id == feed.id)}
     assert remaining == {"longvid002"}

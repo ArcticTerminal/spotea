@@ -7,13 +7,14 @@ from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
+from app.app_settings import get_app_settings
 from app.config import settings
 from app.database import Base, SessionLocal, engine
 from app.deps import NotAuthenticated, require_login
 from app.migrations import run_migrations
-from app.models import AppSettings
 from app.routers import auth as auth_router
 from app.routers import content as content_router
+from app.routers import explore as explore_router
 from app.routers import feeds as feeds_router
 from app.routers import pages as pages_router
 from app.routers import profiles as profiles_router
@@ -21,15 +22,13 @@ from app.routers import settings as settings_router
 from app.routers import storage as storage_router
 from app.scheduler import run_scheduler
 
-# Fixed id for the single AppSettings row — see app.models.AppSettings.
-APP_SETTINGS_ID = 1
-
 
 def _ensure_app_settings() -> None:
+    # get_app_settings creates the row if it's missing, so this is just
+    # "do that once at startup" rather than leaving the first request to
+    # pay for it.
     with SessionLocal() as db:
-        if db.get(AppSettings, APP_SETTINGS_ID) is None:
-            db.add(AppSettings(id=APP_SETTINGS_ID))
-            db.commit()
+        get_app_settings(db)
 
 
 @asynccontextmanager
@@ -78,6 +77,7 @@ app.mount("/static", RevalidatingStaticFiles(directory="app/static"), name="stat
 
 app.include_router(auth_router.router)
 app.include_router(feeds_router.router)
+app.include_router(explore_router.router)
 app.include_router(content_router.router)
 app.include_router(storage_router.router)
 app.include_router(settings_router.router)

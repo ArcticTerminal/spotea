@@ -1,11 +1,11 @@
 import pytest
 
-from app.rss import (
-    _absolute_thumbnail_url,
+from app.youtube.extract import resolve_feed_url
+from app.youtube.urls import (
     _playlist_id,
+    absolute_thumbnail_url,
     channel_feed_url,
     extract_channel_id,
-    resolve_feed_url,
 )
 
 
@@ -35,9 +35,9 @@ def test_channel_feed_url_builds_channel_id_shaped_url():
 
 
 def test_resolve_feed_url_direct_channel_url_matches_channel_feed_url():
-    # Placeholder feeds (routers/feeds.py's _get_or_create_placeholder_feed)
+    # Placeholder feeds (routers/explore.py's _get_or_create_placeholder_feed)
     # must build their rss_url identically to a real follow's, or the
-    # upgrade-in-place dedup lookup in _create_feed_from_rss_url silently
+    # upgrade-in-place dedup lookup in create_feed_from_rss_url silently
     # misses — this pins resolve_feed_url's direct-match branch to the same
     # helper channel_feed_url exposes.
     channel_id = "UCX6OQ3DkcsbYNE6H8uQQuVA"
@@ -57,19 +57,19 @@ def test_playlist_id_passes_through_non_uc_ids():
 
 
 def test_absolute_thumbnail_url_none_passthrough():
-    assert _absolute_thumbnail_url(None) is None
-    assert _absolute_thumbnail_url("") is None
+    assert absolute_thumbnail_url(None) is None
+    assert absolute_thumbnail_url("") is None
 
 
 def test_absolute_thumbnail_url_adds_scheme_to_protocol_relative_urls():
-    assert _absolute_thumbnail_url("//i.ytimg.com/vi/abc/hqdefault.jpg") == (
+    assert absolute_thumbnail_url("//i.ytimg.com/vi/abc/hqdefault.jpg") == (
         "https://i.ytimg.com/vi/abc/hqdefault.jpg"
     )
 
 
 def test_absolute_thumbnail_url_leaves_already_absolute_urls_alone():
     url = "https://i.ytimg.com/vi/abc/hqdefault.jpg"
-    assert _absolute_thumbnail_url(url) == url
+    assert absolute_thumbnail_url(url) == url
 
 
 def test_absolute_thumbnail_url_rewrites_googleusercontent_to_ggpht():
@@ -77,11 +77,11 @@ def test_absolute_thumbnail_url_rewrites_googleusercontent_to_ggpht():
     # intermittently blocked by Chrome's Opaque Response Blocking when
     # hotlinked; yt3.ggpht.com serves the same image and doesn't.
     raw = "https://yt3.googleusercontent.com/abc123=s900-c-k-c0x00ffffff-no-rj"
-    assert _absolute_thumbnail_url(raw) == "https://yt3.ggpht.com/abc123=s900-c-k-c0x00ffffff-no-rj"
+    assert absolute_thumbnail_url(raw) == "https://yt3.ggpht.com/abc123=s900-c-k-c0x00ffffff-no-rj"
 
 
 def test_absolute_thumbnail_url_only_rewrites_the_expected_host():
     # Some other googleusercontent-hosted asset (not the yt3 avatar CDN)
     # should pass through untouched.
     raw = "https://lh3.googleusercontent.com/abc123"
-    assert _absolute_thumbnail_url(raw) == raw
+    assert absolute_thumbnail_url(raw) == raw

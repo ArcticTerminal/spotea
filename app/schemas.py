@@ -1,6 +1,10 @@
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict
+
+if TYPE_CHECKING:  # import cycle otherwise — models has no reason to know about schemas
+    from app.models import Content
 
 
 class FeedCreate(BaseModel):
@@ -33,6 +37,34 @@ class ContentOut(BaseModel):
     is_favorite: bool
     is_saved: bool
     is_played: bool
+
+    @classmethod
+    def from_content(cls, content: "Content") -> "ContentOut":
+        """Build from a Content row. Requires `content.feed` to be loaded —
+        every caller uses joinedload(Content.feed) for exactly this reason.
+
+        Not `model_validate`: two of the fields aren't columns. channel_title
+        comes from the related Feed, and is_played is a derived boolean rather
+        than the raw last_played_at timestamp (the client only ever needs
+        "has this been played", and the timestamp isn't the client's business).
+        This was written out field-by-field at both call sites, which is a
+        long list of trivially-forgettable lines to keep in sync.
+        """
+        return cls(
+            id=content.id,
+            feed_id=content.feed_id,
+            channel_title=content.feed.channel_title,
+            video_id=content.video_id,
+            title=content.title,
+            thumbnail_url=content.thumbnail_url,
+            duration_seconds=content.duration_seconds,
+            published_at=content.published_at,
+            status=content.status,
+            added_at=content.added_at,
+            is_favorite=content.is_favorite,
+            is_saved=content.is_saved,
+            is_played=content.last_played_at is not None,
+        )
 
 
 class ContentPageOut(BaseModel):

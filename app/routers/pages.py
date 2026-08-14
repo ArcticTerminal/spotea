@@ -2,22 +2,24 @@ from collections.abc import Iterable
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.sql.elements import ColumnElement
 
-from app.content_query import DEFAULT_PAGE_SIZE, new_upload_cutoff, query_content_page
+from app.app_settings import get_app_settings
+from app.content_query import (
+    DEFAULT_PAGE_SIZE,
+    followed_feeds,
+    new_upload_filter,
+    query_content_page,
+)
 from app.deps import get_current_profile, get_db, require_login
 from app.feed_sync import cache_thumbnail
-from app.formatting import format_duration, format_size
-from app.models import AppSettings, Content, Feed, User
+from app.models import Content, Feed, User
 from app.storage import collect_usage
+from app.templating import templates
 
 router = APIRouter(dependencies=[Depends(require_login)])
-templates = Jinja2Templates(directory="app/templates")
-templates.env.filters["duration"] = format_duration
-templates.env.filters["filesize"] = format_size
 
 HOME_SHELF_LIMIT = 12
 HOME_CHANNEL_LIMIT = 8
@@ -46,7 +48,7 @@ def _queue_thumbnail_caching(background_tasks: BackgroundTasks, items: Iterable[
 
 def _home_shelf_query(db: Session, user_id: int):
     # is_preview excludes Explore videos not yet favorited/saved — see
-    # routers/feeds.py's add_single_video and routers/content.py's
+    # routers/explore.py's add_single_video and routers/content.py's
     # add_favorite/add_saved. Listening to one shouldn't look like it's
     # already saved.
     return (
@@ -56,6 +58,93 @@ def _home_shelf_query(db: Session, user_id: int):
     )
 
 
+def _home_shelves(db: Session, user_id: int) -> dict[str, list[Content]]:
+    """The four horizontal rows on the Home tab.
+
+    Each is its own bounded query. This used to be one `.all()` over every
+    content row the user had ever had, sliced per shelf in Python, which got
+    very slow once backfilling full channel histories pushed that past a few
+    thousand rows.
+    """
+    return {
+        "home_new_uploads": (
+            _home_shelf_query(db, user_id)
+            .filter(new_upload_filter())
+            .order_by(Content.published_at.desc())
+            .limit(HOME_SHELF_LIMIT)
+            .all()
+        ),
+        # Not built on _home_shelf_query: an Explore preview that's actually
+        # been played earns a spot here even though it's still is_preview
+        # (never favorited/saved) — otherwise playing something from Explore
+        # and coming back to Home would make it look like nothing happened.
+        # New uploads/Favorites/Saved have no such case, since none of those
+        # imply the user ever listened.
+        "home_recently_played": (
+            db.query(Content)
+            .options(joinedload(Content.feed))
+            .filter(Content.user_id == user_id, Content.last_played_at.isnot(None))
+            .order_by(Content.last_played_at.desc())
+            .limit(HOME_SHELF_LIMIT)
+            .all()
+        ),
+        "home_favorites": (
+            _home_shelf_query(db, user_id)
+            .filter(Content.is_favorite.is_(True))
+            .order_by(Content.published_at.desc())
+            .limit(HOME_SHELF_LIMIT)
+            .all()
+        ),
+        "home_saved": (
+            _home_shelf_query(db, user_id)
+            .filter(Content.is_saved.is_(True))
+            .order_by(Content.published_at.desc())
+            .limit(HOME_SHELF_LIMIT)
+            .all()
+        ),
+    }
+
+
+def _library_counts(db: Session, user_id: int) -> dict:
+    """Per-channel video counts for Library's grid, plus the four pinned
+    virtual-playlist tiles' counts.
+
+    Each count matches its page's own filter exactly (see content_query.py's
+    query_content_page) — a tile saying "12 videos" that opens onto a list
+    of 9 is worse than no count at all.
+    """
+    return {
+        # One grouped count covers every channel's card, rather than a
+        # per-feed query each.
+        "channel_video_counts": dict(
+            db.query(Content.feed_id, func.count(Content.id))
+            .filter(Content.user_id == user_id)
+            .group_by(Content.feed_id)
+            .all()
+        ),
+        "favorites_count": (
+            db.query(func.count(Content.id))
+            .filter(Content.user_id == user_id, Content.is_favorite.is_(True))
+            .scalar()
+        ),
+        "saved_count": (
+            db.query(func.count(Content.id))
+            .filter(Content.user_id == user_id, Content.is_saved.is_(True))
+            .scalar()
+        ),
+        "new_uploads_count": (
+            db.query(func.count(Content.id))
+            .filter(Content.user_id == user_id, Content.is_preview.is_(False), new_upload_filter())
+            .scalar()
+        ),
+        "recently_played_count": (
+            db.query(func.count(Content.id))
+            .filter(Content.user_id == user_id, Content.last_played_at.isnot(None))
+            .scalar()
+        ),
+    }
+
+
 @router.get("/", response_class=HTMLResponse)
 def home(
     request: Request,
@@ -63,142 +152,29 @@ def home(
     profile: User = Depends(get_current_profile),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
-    # Fixed id — see app.models.AppSettings and main._ensure_app_settings,
-    # which guarantees this row exists before any request can reach here.
-    app_settings = db.get(AppSettings, 1)
+    """index.html is the whole app — Home, Library, Explore and Settings are
+    tab panels in one document (see its inline head script), so this single
+    route builds the context for all of them at once."""
+    feeds = followed_feeds(db, profile.id).all()
+    shelves = _home_shelves(db, profile.id)
 
-    # followed=False excludes Explore's placeholder feeds (see
-    # routers/feeds.py's _get_or_create_placeholder_feed) — never a real
-    # follow, so it shouldn't show up as one in Library or here.
-    feeds = (
-        db.query(Feed)
-        .filter(Feed.user_id == profile.id, Feed.followed.is_(True))
-        .order_by(Feed.added_at.desc())
-        .all()
-    )
-    # feeds is already newest-first — Home's chip row is just the most
-    # recently followed few (with 100+ channels followed, the full list made
-    # that row an endless horizontal scroll); Library's grid below still
-    # gets every channel via `feeds` itself.
-    home_recent_channels = feeds[:HOME_CHANNEL_LIMIT]
-    usage = collect_usage(db, profile.id)
-
-    # Each shelf (and the Library grid below) is its own bounded query now —
-    # this used to be one `.all()` over every content row the user has ever
-    # had (sliced in Python per shelf), which got very slow once backfilling
-    # full channel histories pushed that past a few thousand rows.
-    # is_new_upload (set in feed_sync.apply_feed_data) is what actually
-    # means "new upload" here — an RSS-sourced row, as opposed to one from
-    # _run_backfill's full-history scan or an Explore preview. The
-    # feed.followed check on top of it is still needed as a safety net: it's
-    # the same reasoning content_query.py's is_preview carve-out documents —
-    # Explore-added content keeps a live feed_id even after being
-    # favorited/saved, but that feed is only a placeholder (followed=False)
-    # unless the user actually follows the channel (see
-    # routers/feeds.py's _get_or_create_placeholder_feed) — and it also
-    # covers a channel that was later unfollowed but had some content kept
-    # (see routers/feeds.py's delete_feed), whose is_new_upload=True rows
-    # shouldn't keep showing here as if still followed.
-    home_new_uploads = (
-        _home_shelf_query(db, profile.id)
-        .filter(
-            Content.is_new_upload.is_(True),
-            Content.published_at >= new_upload_cutoff(),
-            Content.feed.has(Feed.followed.is_(True)),
-        )
-        .order_by(Content.published_at.desc())
-        .limit(HOME_SHELF_LIMIT)
-        .all()
-    )
-    # Not built on _home_shelf_query: an Explore preview that's actually been
-    # played earns a spot here even though it's still is_preview (never
-    # favorited/saved) — otherwise playing something from Explore and coming
-    # back to Home would make it look like nothing happened. New
-    # uploads/Favorites/Saved have no such case, since none of those imply
-    # the user ever listened.
-    home_recently_played = (
-        db.query(Content)
-        .options(joinedload(Content.feed))
-        .filter(Content.user_id == profile.id, Content.last_played_at.isnot(None))
-        .order_by(Content.last_played_at.desc())
-        .limit(HOME_SHELF_LIMIT)
-        .all()
-    )
-    home_favorites = (
-        _home_shelf_query(db, profile.id)
-        .filter(Content.is_favorite.is_(True))
-        .order_by(Content.published_at.desc())
-        .limit(HOME_SHELF_LIMIT)
-        .all()
-    )
-    home_saved = (
-        _home_shelf_query(db, profile.id)
-        .filter(Content.is_saved.is_(True))
-        .order_by(Content.published_at.desc())
-        .limit(HOME_SHELF_LIMIT)
-        .all()
-    )
-
-    _queue_thumbnail_caching(
-        background_tasks, home_new_uploads + home_recently_played + home_favorites + home_saved
-    )
-
-    # Library is a grid of channels, not videos — one cheap grouped count
-    # query covers every channel's card instead of a per-feed query each.
-    channel_video_counts = dict(
-        db.query(Content.feed_id, func.count(Content.id))
-        .filter(Content.user_id == profile.id)
-        .group_by(Content.feed_id)
-        .all()
-    )
-    favorites_count = (
-        db.query(func.count(Content.id))
-        .filter(Content.user_id == profile.id, Content.is_favorite.is_(True))
-        .scalar()
-    )
-    saved_count = (
-        db.query(func.count(Content.id))
-        .filter(Content.user_id == profile.id, Content.is_saved.is_(True))
-        .scalar()
-    )
-    # Matches query_content_page's __new_uploads__/__played__ filters exactly
-    # (see content_query.py) so these Library-card counts never disagree
-    # with what the page they link to actually lists.
-    new_uploads_count = (
-        db.query(func.count(Content.id))
-        .filter(
-            Content.user_id == profile.id,
-            Content.is_new_upload.is_(True),
-            Content.is_preview.is_(False),
-            Content.published_at >= new_upload_cutoff(),
-            Content.feed.has(Feed.followed.is_(True)),
-        )
-        .scalar()
-    )
-    recently_played_count = (
-        db.query(func.count(Content.id))
-        .filter(Content.user_id == profile.id, Content.last_played_at.isnot(None))
-        .scalar()
-    )
+    _queue_thumbnail_caching(background_tasks, [item for shelf in shelves.values() for item in shelf])
 
     return templates.TemplateResponse(
         request,
         "index.html",
         {
             "feeds": feeds,
-            "home_recent_channels": home_recent_channels,
-            "channel_video_counts": channel_video_counts,
-            "favorites_count": favorites_count,
-            "saved_count": saved_count,
-            "new_uploads_count": new_uploads_count,
-            "recently_played_count": recently_played_count,
-            "usage": usage,
+            # feeds is already newest-first — Home's chip row is just the
+            # most recently followed few (with 100+ channels followed, the
+            # full list made that row an endless horizontal scroll);
+            # Library's grid below still gets every channel via `feeds`.
+            "home_recent_channels": feeds[:HOME_CHANNEL_LIMIT],
+            "usage": collect_usage(db, profile.id),
             "audio_quality": profile.audio_quality,
-            "feed_refresh_interval_minutes": app_settings.feed_refresh_interval_minutes,
-            "home_recently_played": home_recently_played,
-            "home_new_uploads": home_new_uploads,
-            "home_favorites": home_favorites,
-            "home_saved": home_saved,
+            "feed_refresh_interval_minutes": get_app_settings(db).feed_refresh_interval_minutes,
+            **shelves,
+            **_library_counts(db, profile.id),
         },
     )
 
@@ -216,8 +192,9 @@ def _content_list_page(
     empty_message: str,
     page: int,
 ) -> HTMLResponse:
-    """Shared by /favorites and /saved — both are just query_content_page
-    with a fixed filter, rendered through content_list.html (the same
+    """Shared by /favorites, /saved, /new-uploads and /recently-played —
+    each is just query_content_page with a fixed filter, rendered through
+    content_list.html (the same
     track-list/pagination partials channel.html uses, minus its
     single-channel avatar hero)."""
     video_count = db.query(func.count(Content.id)).filter(Content.user_id == user_id, is_match).scalar()
@@ -301,9 +278,7 @@ def new_uploads_page(
         background_tasks,
         user_id=profile.id,
         kind="new-uploads",
-        is_match=(Content.is_new_upload.is_(True))
-        & (Content.published_at >= new_upload_cutoff())
-        & (Content.feed.has(Feed.followed.is_(True))),
+        is_match=new_upload_filter(),
         filter_value="__new_uploads__",
         title="New Uploads",
         empty_message="No new uploads yet.",

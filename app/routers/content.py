@@ -12,10 +12,10 @@ from app.feed_sync import cache_thumbnail
 from app.formatting import safe_filename
 from app.models import Content, User
 from app.progress import ProgressRegistry
-from app.rss import VIDEO_ID_RE
 from app.schemas import ContentOut, ContentPageOut, FavoriteOut, SavedOut, StatusOut
 from app.storage import unlink_if_unshared
 from app.timeutil import utcnow
+from app.youtube.urls import VIDEO_ID_RE
 
 router = APIRouter(prefix="/content", tags=["content"], dependencies=[Depends(require_login)])
 
@@ -107,24 +107,7 @@ def list_content(
 ) -> ContentPageOut:
     items, page, total_pages = query_content_page(db, profile.id, page, filter)
     return ContentPageOut(
-        items=[
-            ContentOut(
-                id=c.id,
-                feed_id=c.feed_id,
-                channel_title=c.feed.channel_title,
-                video_id=c.video_id,
-                title=c.title,
-                thumbnail_url=c.thumbnail_url,
-                duration_seconds=c.duration_seconds,
-                published_at=c.published_at,
-                status=c.status,
-                added_at=c.added_at,
-                is_favorite=c.is_favorite,
-                is_saved=c.is_saved,
-                is_played=c.last_played_at is not None,
-            )
-            for c in items
-        ],
+        items=[ContentOut.from_content(c) for c in items],
         page=page,
         total_pages=total_pages,
     )
@@ -155,21 +138,7 @@ def get_content(
     if content.thumbnail_url and "ytimg.com" in content.thumbnail_url:
         background_tasks.add_task(cache_thumbnail, content.video_id, content.thumbnail_url)
 
-    return ContentOut(
-        id=content.id,
-        feed_id=content.feed_id,
-        channel_title=content.feed.channel_title,
-        video_id=content.video_id,
-        title=content.title,
-        thumbnail_url=content.thumbnail_url,
-        duration_seconds=content.duration_seconds,
-        published_at=content.published_at,
-        status=content.status,
-        added_at=content.added_at,
-        is_favorite=content.is_favorite,
-        is_saved=content.is_saved,
-        is_played=content.last_played_at is not None,
-    )
+    return ContentOut.from_content(content)
 
 
 # Registered ahead of the /{content_id}/... routes below — a literal segment

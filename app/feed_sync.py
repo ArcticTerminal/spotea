@@ -5,18 +5,11 @@ from dataclasses import dataclass
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
-from app.downloader import download_avatar, download_thumbnail
+from app.images import download_avatar, download_thumbnail
 from app.models import Content, Feed
-from app.rss import (
-    SHORT_MAX_DURATION_SECONDS,
-    InvalidFeedError,
-    ParsedFeed,
-    extract_channel_id,
-    fetch_channel_avatar_url,
-    fetch_channel_video_durations,
-    fetch_feed,
-    longform_feed_url,
-)
+from app.youtube.extract import fetch_channel_avatar_url, fetch_channel_video_durations
+from app.youtube.rss import InvalidFeedError, ParsedFeed, fetch_feed
+from app.youtube.urls import SHORT_MAX_DURATION_SECONDS, extract_channel_id, longform_feed_url
 
 logger = logging.getLogger(__name__)
 

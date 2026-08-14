@@ -43,7 +43,7 @@ def test_entries_expire_once_their_ttl_passes():
 def test_setting_again_extends_a_long_running_job():
     """A bulk import re-sets after every line precisely so a job that runs
     longer than the TTL isn't evicted while still working (see
-    routers/feeds.py's _run_bulk_import)."""
+    services/bulk_import.py's run_bulk_import)."""
     registry: ProgressRegistry[str, dict] = ProgressRegistry(ttl_seconds=0.05)
     progress = {"done": 0}
     registry.set("job", progress)
