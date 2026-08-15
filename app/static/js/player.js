@@ -1,7 +1,5 @@
-// The audio player itself. Drives both the standalone /player/{id} page and
-// Home/Library/Explore's in-page overlay — both render _player_controls.html,
-// so the same element ids are present either way and nothing here needs to
-// know which one it's running in.
+// The audio player itself. Drives the in-page overlay (_player_overlay.html,
+// which renders _player_controls.html) — its only caller.
 
 import { api, formatDuration, showToast } from "./core.js";
 import { refreshFragments } from "./fragments.js";
@@ -17,12 +15,24 @@ const SKIP_SECONDS = 15;
 const POLL_SCHEDULE_MS = [250, 250, 400, 400, 700, 1000, 1500];
 const POLL_STEADY_MS = 2500;
 
-// prepareAudio() used to only ever run once per page load (player.html
-// renders exactly one track). It now also drives the overlay, which can call
-// it repeatedly for different tracks in the same page — this tracks the
-// in-flight download-status poll across those calls so a later call can
-// cancel a still-running earlier one instead of leaving it to eventually
-// hijack playback once its download finishes.
+// If a download shows literally no sign of life — no byte progress, no
+// "converting" phase — within this long, it's worth abandoning and asking
+// the server to start a fresh attempt (POST .../download/restart) rather
+// than waiting out whatever the stuck attempt is doing: YouTube not
+// answering at all is exactly what a stalled attempt looks like from here.
+// Capped at MAX_STALL_ATTEMPTS total rounds (the original attempt plus
+// restarts) rather than forever — a video that's going to stall on every
+// attempt (geo-blocked, taken down) needs to actually fail eventually
+// instead of restarting every few seconds indefinitely.
+const STALL_TIMEOUT_MS = 3000;
+const MAX_STALL_ATTEMPTS = 3;
+let stallTimer = null;
+
+// prepareAudio() can be called repeatedly for different tracks in the same
+// page load (switching tracks in the overlay) — this tracks the in-flight
+// download-status poll across those calls so a later call can cancel a
+// still-running earlier one instead of leaving it to eventually hijack
+// playback once its download finishes.
 let activePollTimer = null;
 
 // Identifies the prepareAudio call that owns the current poll chain. The
@@ -158,20 +168,6 @@ export function setupPlayer() {
   paintRange(seek);
   paintRange(volume);
   setupMediaSession(audio);
-
-  // Browsers speculatively load links (prerender runs the page's JS), so a card
-  // link can open this page without the user ever clicking it. Since opening
-  // the player is what triggers a download, kicking one off on plain page load
-  // would let mere prefetching fill the user's disk. Wait until the page is
-  // genuinely being viewed.
-  //
-  // Guarded on a real content id being present: true on player.html (Jinja
-  // fills #player-root's dataset server-side), false on index.html's overlay
-  // until a track is actually opened (see home/overlay.js's openPlayer, which
-  // sets the dataset itself and calls prepareAudio directly once it does).
-  if (document.getElementById("player-root").dataset.contentId) {
-    whenVisible(() => prepareAudio(audio));
-  }
 }
 
 // Lock-screen/notification-shade transport controls and Bluetooth/headset
@@ -221,7 +217,17 @@ function setupMediaSession(audio) {
   audio.addEventListener("timeupdate", syncPositionState);
 }
 
-function whenVisible(run) {
+// Browsers speculatively load links (prerender runs the page's JS) and a
+// ctrl/cmd-clicked track can open a genuinely backgrounded new tab — either
+// way, the page's JS runs before the user has actually looked at it. Since
+// opening a track is what triggers a download, calling prepareAudio()
+// without this guard would let mere prefetching or an unfocused background
+// tab fill the user's disk. home/overlay.js's openPlayer() is the only
+// caller now that player.html (which had its own page-load call to guard)
+// is gone — wrapping there covers a real click just as harmlessly (the page
+// is already visible by then, so this resolves immediately) as it covers
+// the boot-time resume/deep-link paths that don't involve a click at all.
+export function whenVisible(run) {
   if (document.prerendering) {
     document.addEventListener("prerenderingchange", () => whenVisible(run), { once: true });
     return;
@@ -247,9 +253,8 @@ function whenVisible(run) {
  * onStart (optional) fires exactly once, right as audio.src is actually
  * assigned — the moment the server records this as a play (see
  * routers/content.py's stream_content, which sets last_played_at on that
- * same request). player.html has nothing to do with this; it's how the
- * overlay knows to live-patch the Recently Played shelf instead of leaving
- * it stuck at whatever it was at page load.
+ * same request). It's how the overlay knows to live-patch the Recently
+ * Played shelf instead of leaving it stuck at whatever it was at page load.
  */
 export async function prepareAudio(audio, onStart) {
   const root = document.getElementById("player-root");
@@ -259,8 +264,8 @@ export async function prepareAudio(audio, onStart) {
   const streamUrl = root.dataset.stream;
   const contentId = root.dataset.contentId;
 
-  // Both only matter once this can run more than once per page (player.html
-  // never does; the overlay does, switching tracks). Without clearing the
+  // Both only matter because this can run more than once per page load — the
+  // overlay calls it again for each new track. Without clearing the
   // previous call's poll, a still-downloading earlier track can finish later
   // and hijack playback out from under whatever's loaded now. Without
   // resetting the error styling, a track opened after an earlier one failed
@@ -299,10 +304,15 @@ export async function prepareAudio(audio, onStart) {
     return;
   }
 
+  // Surfaced in the "Downloading audio…"/"Converting…" text throughout, so
+  // a restart is never invisible — see the stall watchdog below.
+  let attemptNumber = 1;
+  const attemptSuffix = () => ` (attempt ${attemptNumber} of ${MAX_STALL_ATTEMPTS})`;
+
   prepare.hidden = false;
   transport.classList.add("is-disabled");
   prepareText.textContent =
-    root.dataset.status === "downloading" ? "Downloading audio…" : "Preparing audio…";
+    root.dataset.status === "downloading" ? "Downloading audio…" + attemptSuffix() : "Preparing audio…";
 
   if (root.dataset.status !== "downloading") {
     // 409 just means another tab already started it; keep polling either way.
@@ -311,7 +321,7 @@ export async function prepareAudio(audio, onStart) {
       fail("Could not start the download");
       return;
     }
-    prepareText.textContent = "Downloading audio…";
+    prepareText.textContent = "Downloading audio…" + attemptSuffix();
   }
 
   // The download itself is a server-side background task, independent of
@@ -322,6 +332,11 @@ export async function prepareAudio(audio, onStart) {
   // misses; a lone one is silently retried on the next tick.
   const MAX_CONSECUTIVE_POLL_FAILURES = 4;
   let consecutiveFailures = 0;
+
+  // Set the moment checkStatus sees any real sign of life, so the stall
+  // watchdog below knows the attempt it's watching has actually gotten
+  // going and stops trying to restart it.
+  let sawProgress = false;
 
   const checkStatus = async () => {
     // This track may no longer be the one loaded (a later openPlayer() call
@@ -356,9 +371,11 @@ export async function prepareAudio(audio, onStart) {
       const refused = data.error_message && /\b403\b|Forbidden/i.test(data.error_message);
       fail(refused ? "YouTube wouldn't serve this track — try again" : "Download failed");
     } else if (data.phase === "converting") {
-      prepareText.textContent = "Converting…";
+      sawProgress = true;
+      prepareText.textContent = "Converting…" + attemptSuffix();
     } else if (data.progress_percent != null) {
-      prepareText.textContent = `Downloading audio… ${data.progress_percent}%`;
+      sawProgress = true;
+      prepareText.textContent = `Downloading audio… ${data.progress_percent}%` + attemptSuffix();
     }
   };
 
@@ -374,6 +391,30 @@ export async function prepareAudio(audio, onStart) {
   };
   activePollTimer = setTimeout(poll, POLL_SCHEDULE_MS[pollStep++]);
 
+  // Re-arms itself after each restart, so a track that stalls again on the
+  // next attempt gets restarted again too — up to MAX_STALL_ATTEMPTS total
+  // rounds, at which point it's treated as a real failure (see fail() below)
+  // instead of retrying forever.
+  const armStallTimer = () => {
+    stallTimer = setTimeout(async () => {
+      if (activePollToken !== pollToken || sawProgress) return;
+      if (attemptNumber >= MAX_STALL_ATTEMPTS) {
+        stopPolling();
+        fail("YouTube isn't responding — try again");
+        return;
+      }
+      attemptNumber += 1;
+      const { ok } = await api(`/content/${contentId}/download/restart`, { method: "POST" });
+      // Whether or not this actually landed, keep going — the poll loop
+      // above keeps running either way and will pick up whatever the server
+      // ends up doing, and the next stall window still needs to be watched.
+      if (activePollToken !== pollToken) return;
+      if (ok) prepareText.textContent = "Downloading audio…" + attemptSuffix();
+      armStallTimer();
+    }, STALL_TIMEOUT_MS);
+  };
+  armStallTimer();
+
   // Mobile browsers throttle/suspend timers for a backgrounded tab, so the
   // interval above may not have ticked in a while by the time the user
   // switches back — check in immediately instead of waiting for the next
@@ -384,17 +425,22 @@ export async function prepareAudio(audio, onStart) {
   document.addEventListener("visibilitychange", activeVisibilityHandler);
 }
 
-// Stops both the poll and the visibilitychange check-in — anything that ends
-// a track's polling (ready, error, giving up, or a new track superseding it)
-// needs both gone. Leaving the visibilitychange listener behind after the
-// interval is cleared turns it into a zombie: the next foreground/background
-// cycle would still fire it, see "ready" again, and call startPlayback() a
-// second time — restarting a track that was already playing fine from 0:00.
+// Stops the poll, the stall watchdog, and the visibilitychange check-in —
+// anything that ends a track's polling (ready, error, giving up, or a new
+// track superseding it) needs all three gone. Leaving the visibilitychange
+// listener behind after the interval is cleared turns it into a zombie: the
+// next foreground/background cycle would still fire it, see "ready" again,
+// and call startPlayback() a second time — restarting a track that was
+// already playing fine from 0:00.
 function stopPolling() {
   activePollToken = null;
   if (activePollTimer) {
     clearTimeout(activePollTimer);
     activePollTimer = null;
+  }
+  if (stallTimer) {
+    clearTimeout(stallTimer);
+    stallTimer = null;
   }
   if (activeVisibilityHandler) {
     document.removeEventListener("visibilitychange", activeVisibilityHandler);
@@ -424,24 +470,6 @@ export function setupFavorite() {
       refreshFragments();
     } finally {
       btn.disabled = false;
-    }
-  });
-}
-
-// The player is reachable from many different pages (a channel, Favorites,
-// Saved, a Home shelf) — unlike channel.html/content_list.html's back-link,
-// which always means "back to Library", there's no single right fallback
-// destination here. Real browser history is, so prefer it whenever there's a
-// same-origin previous page to return to; the plain href="/" stays as the
-// no-JS/no-referrer fallback (e.g. the player opened directly, a fresh tab).
-export function setupBackLink() {
-  const link = document.getElementById("player-back-link");
-  if (!link) return;
-
-  link.addEventListener("click", (event) => {
-    if (document.referrer && new URL(document.referrer).origin === window.location.origin) {
-      event.preventDefault();
-      history.back();
     }
   });
 }

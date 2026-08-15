@@ -12,7 +12,7 @@
 
 import { api, formatDuration, showToast } from "../core.js";
 import { refreshFragments } from "../fragments.js";
-import { paintRange, prepareAudio } from "../player.js";
+import { paintRange, prepareAudio, whenVisible } from "../player.js";
 import { clearResumeState, readResumeState } from "../resume.js";
 
 function expandPlayer() {
@@ -115,13 +115,18 @@ export async function openPlayer(contentId, { expanded = true } = {}) {
   document.getElementById("mini-player").hidden = false;
   document.body.classList.add("has-mini-player");
 
-  prepareAudio(audio, () => {
-    // The server records the play when /stream is requested, which only
-    // happens after audio.src is assigned — refreshing right here would race
-    // it and re-render shelves that don't know about this play yet.
-    // loadedmetadata fires once the first bytes are back, by which point the
-    // server has already written last_played_at.
-    audio.addEventListener("loadedmetadata", refreshFragments, { once: true });
+  // Waits out a prerender or a ctrl/cmd-clicked background tab (see
+  // player.js's whenVisible) — resolves immediately for a real click, since
+  // the page is already visible by then.
+  whenVisible(() => {
+    prepareAudio(audio, () => {
+      // The server records the play when /stream is requested, which only
+      // happens after audio.src is assigned — refreshing right here would race
+      // it and re-render shelves that don't know about this play yet.
+      // loadedmetadata fires once the first bytes are back, by which point the
+      // server has already written last_played_at.
+      audio.addEventListener("loadedmetadata", refreshFragments, { once: true });
+    });
   });
 }
 

@@ -1,3 +1,4 @@
+import threading
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
@@ -26,6 +27,26 @@ router = APIRouter(prefix="/content", tags=["content"], dependencies=[Depends(re
 # type the backfill/import trackers use (see app/progress.py) rather than a
 # fourth hand-rolled dict.
 _download_progress: ProgressRegistry[int, tuple[str, int | None]] = ProgressRegistry()
+
+# Bumped on every dispatch (a normal start or a restart — see
+# restart_download). _run_download checks its own generation against the
+# current one before writing anything, so a superseded attempt's eventual
+# result — success, failure, or never finishing at all — can't clobber a
+# newer attempt's. A plain dict rather than ProgressRegistry: a generation is
+# meant to keep counting for the life of the row, not expire and reset.
+_download_generation: dict[int, int] = {}
+_download_generation_lock = threading.Lock()
+
+
+def _next_generation(content_id: int) -> int:
+    with _download_generation_lock:
+        generation = _download_generation.get(content_id, 0) + 1
+        _download_generation[content_id] = generation
+        return generation
+
+
+def _is_current_generation(content_id: int, generation: int) -> bool:
+    return _download_generation.get(content_id) == generation
 
 # Keyed by extension rather than the configured AUDIO_FORMAT so files
 # downloaded under a previous format setting still get a correct Content-Type.
@@ -67,17 +88,33 @@ def _set_download_outcome(content_id: int, **fields) -> None:
         db.commit()
 
 
-def _run_download(content_id: int, video_id: str, quality: str) -> None:
+def _run_download(content_id: int, video_id: str, quality: str, generation: int) -> None:
+    def is_current() -> bool:
+        return _is_current_generation(content_id, generation)
+
     def on_progress(phase: str, percent: int | None) -> None:
-        _download_progress.set(content_id, (phase, percent))
+        # A restart bumps the generation and discards this entry — if a
+        # superseded attempt's hook still fires after that, letting it write
+        # here would stomp the new attempt's own progress with stale numbers.
+        if is_current():
+            _download_progress.set(content_id, (phase, percent))
 
     try:
         file_path = download_audio(video_id, quality=quality, on_progress=on_progress)
     except DownloadError as exc:
-        _set_download_outcome(content_id, status="error", error_message=str(exc)[:1000])
+        if is_current():
+            _set_download_outcome(content_id, status="error", error_message=str(exc)[:1000])
         return
     finally:
-        _download_progress.discard(content_id)
+        if is_current():
+            _download_progress.discard(content_id)
+
+    if not is_current():
+        # Superseded by a restart while this attempt was still running.
+        # Whatever it just produced — even a real, valid file — isn't what
+        # the client asked to wait for anymore; the generation that's
+        # actually current owns the DB row now, not this one.
+        return
 
     # Measured here, once, rather than on every render that wants a storage
     # total — see Content.file_size_bytes. The file is guaranteed to exist
@@ -178,7 +215,51 @@ def start_download(
     content.error_message = None
     db.commit()
 
-    background_tasks.add_task(_run_download, content.id, content.video_id, profile.audio_quality)
+    generation = _next_generation(content.id)
+    background_tasks.add_task(_run_download, content.id, content.video_id, profile.audio_quality, generation)
+
+    return StatusOut(id=content.id, status=content.status, error_message=content.error_message)
+
+
+@router.post("/{content_id}/download/restart", response_model=StatusOut)
+def restart_download(
+    content_id: int,
+    background_tasks: BackgroundTasks,
+    profile: User = Depends(get_current_profile),
+    db: Session = Depends(get_db),
+) -> StatusOut:
+    """Abandons whatever download attempt is currently running for this
+    content (if any) and dispatches a fresh one — the client's fallback for
+    a download that's shown no progress at all for a couple of seconds (see
+    player.js). Unlike POST /download, this never 409s on "already
+    downloading" — that's the whole point.
+
+    The old attempt isn't killed; yt-dlp can't be cleanly interrupted from
+    here. It's voided instead: _run_download compares its own generation
+    against the current one before writing anything, so whatever the old
+    attempt eventually does — succeed, fail, or hang forever — never reaches
+    the DB or the progress the client is polling. There's a small residual
+    window where the old and new attempt could both be writing the same
+    output file at once; accepted as unlikely enough in practice not to be
+    worth the bigger per-attempt-temp-path change that would rule it out.
+    """
+    content = _get_content_or_404(db, content_id, profile.id)
+
+    if content.status == "ready":
+        # Already finished (a race between this firing and the original
+        # attempt actually succeeding) — nothing to restart.
+        return StatusOut(id=content.id, status=content.status, error_message=content.error_message)
+
+    if not VIDEO_ID_RE.match(content.video_id):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid video id")
+
+    content.status = "downloading"
+    content.error_message = None
+    db.commit()
+
+    generation = _next_generation(content.id)
+    _download_progress.discard(content.id)
+    background_tasks.add_task(_run_download, content.id, content.video_id, profile.audio_quality, generation)
 
     return StatusOut(id=content.id, status=content.status, error_message=content.error_message)
 
