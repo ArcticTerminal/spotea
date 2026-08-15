@@ -919,6 +919,35 @@ the repo, not installed as a package.
 | Duplicate download request | 409 |
 | Stream request while not `ready` | 409 |
 
+### YouTube refusing a download (HTTP 403)
+
+The common failure isn't extraction — it's YouTube resolving a media URL and
+then refusing to serve it (`unable to download video data: HTTP Error 403`).
+Measured against the live instance rather than assumed (see the comment on
+`_ATTEMPTS` in `app/downloader.py`):
+
+- The refusals are **per-request**, not per-IP and not per-video. In one
+  minute, one video downloaded end to end in 2.2s while another 403'd four
+  times in a row across four different client and network configurations.
+  A video that succeeded first time needed a retry half an hour later.
+- **Retrying works, and works immediately** — a second attempt 2 seconds
+  later succeeded. Longer waits bought nothing measurable, so the ladder is
+  0s / 2s / 5s across three attempts (~20s worst case) rather than the
+  5s/15s/30s it used to be (~70s, nearly all sleeping).
+- The transfer is never the bottleneck: 5.4MB arrived in under a second.
+  Typical audio here averages ~44kbps, so an hour of content is ~19MB.
+- Things that did **not** help, tested and rejected: forcing IPv4, and
+  Chrome TLS impersonation via `curl_cffi` (so it isn't a dependency). The
+  `tv` client is not usable unauthenticated — it reports every format as DRM
+  protected without cookies.
+- `sleep_interval_requests` was removed. It spaced out yt-dlp's own internal
+  requests, costing ~1.5s on every play including the successful ones, with
+  no measured effect on how often YouTube refused.
+
+Cookies would unlock more (`tv` formats, age-restricted content) but carry a
+real risk of the Google account being restricted, so the app stays
+unauthenticated by default.
+
 ## 9. Deployment (Docker)
 
 - `Dockerfile`: `python:3.12-slim` base, installs a static `ffmpeg` binary

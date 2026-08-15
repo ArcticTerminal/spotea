@@ -8,7 +8,14 @@ import { refreshFragments } from "./fragments.js";
 import { consumeResumeState } from "./resume.js";
 
 const SKIP_SECONDS = 15;
-const STATUS_POLL_MS = 1500;
+
+// A download that works settles in roughly two seconds end to end, so a flat
+// 1500ms poll — which is what this used to be — spent most of a second of
+// dead air after the file was already on disk. Start tight and back off, so
+// the common case feels immediate without a genuinely slow download turning
+// into a request every 300ms for minutes on end.
+const POLL_SCHEDULE_MS = [250, 250, 400, 400, 700, 1000, 1500];
+const POLL_STEADY_MS = 2500;
 
 // prepareAudio() used to only ever run once per page load (player.html
 // renders exactly one track). It now also drives the overlay, which can call
@@ -17,6 +24,13 @@ const STATUS_POLL_MS = 1500;
 // cancel a still-running earlier one instead of leaving it to eventually
 // hijack playback once its download finishes.
 let activePollTimer = null;
+
+// Identifies the prepareAudio call that owns the current poll chain. The
+// chain re-arms itself with setTimeout rather than running on a fixed
+// setInterval, so "is this still the live track?" has to be checked between
+// ticks — a stale chain that kept going would eventually see its own old
+// track go ready and hijack playback.
+let activePollToken = null;
 
 // Same problem, for the visibilitychange listener prepareAudio registers:
 // without tracking and removing the previous call's listener, every track
@@ -332,12 +346,15 @@ export async function prepareAudio(audio, onStart) {
       startPlayback();
     } else if (data.status === "error") {
       stopPolling();
-      // 403s here are usually YouTube rate-limiting this server rather than
-      // anything wrong with the video — downloader.py already retries a few
-      // times with backoff before giving up, so if it's still failing after
-      // that, waiting longer and trying again is the honest advice.
-      const isRateLimited = data.error_message && /\b403\b|Forbidden/i.test(data.error_message);
-      fail(isRateLimited ? "YouTube is rate-limiting downloads right now — try again in a bit" : "Download failed");
+      // A 403 here means YouTube resolved a media URL and then refused it.
+      // This used to be reported as rate-limiting the whole server, which
+      // measurement didn't support (see downloader.py's _ATTEMPTS — the
+      // refusals are per-request, and other tracks download fine in the same
+      // minute). By the time this shows, downloader.py has already retried
+      // with two different client families, so trying again right now is
+      // worth a shot but not something to promise.
+      const refused = data.error_message && /\b403\b|Forbidden/i.test(data.error_message);
+      fail(refused ? "YouTube wouldn't serve this track — try again" : "Download failed");
     } else if (data.phase === "converting") {
       prepareText.textContent = "Converting…";
     } else if (data.progress_percent != null) {
@@ -345,7 +362,17 @@ export async function prepareAudio(audio, onStart) {
     }
   };
 
-  activePollTimer = setInterval(checkStatus, STATUS_POLL_MS);
+  const pollToken = {};
+  activePollToken = pollToken;
+  let pollStep = 0;
+
+  const poll = async () => {
+    if (activePollToken !== pollToken) return;
+    await checkStatus();
+    if (activePollToken !== pollToken) return; // checkStatus stopped us, or a newer track took over
+    activePollTimer = setTimeout(poll, POLL_SCHEDULE_MS[pollStep++] ?? POLL_STEADY_MS);
+  };
+  activePollTimer = setTimeout(poll, POLL_SCHEDULE_MS[pollStep++]);
 
   // Mobile browsers throttle/suspend timers for a backgrounded tab, so the
   // interval above may not have ticked in a while by the time the user
@@ -364,8 +391,9 @@ export async function prepareAudio(audio, onStart) {
 // cycle would still fire it, see "ready" again, and call startPlayback() a
 // second time — restarting a track that was already playing fine from 0:00.
 function stopPolling() {
+  activePollToken = null;
   if (activePollTimer) {
-    clearInterval(activePollTimer);
+    clearTimeout(activePollTimer);
     activePollTimer = null;
   }
   if (activeVisibilityHandler) {

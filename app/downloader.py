@@ -1,13 +1,17 @@
 """yt-dlp audio extraction. Image caching lives in app/images.py."""
 
+import logging
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 import yt_dlp
 
 from app.config import settings
 from app.youtube.urls import YOUTUBE_WATCH_URL
+
+logger = logging.getLogger(__name__)
 
 ProgressCallback = Callable[[str, int | None], None]
 
@@ -24,6 +28,56 @@ FORMAT_BY_QUALITY = {
 
 class DownloadError(Exception):
     pass
+
+
+@dataclass(frozen=True)
+class Attempt:
+    """One shot at fetching a video, and how long to wait before taking it."""
+
+    player_clients: tuple[str, ...]
+    delay_seconds: float
+    needs_js_challenge_solver: bool = False
+
+
+# A failed play costs the user the whole ladder, so it is deliberately
+# short. It used to be four attempts with 5s/15s/30s between them — around
+# 70 seconds, nearly all of it sleeping — on the theory that these 403s are
+# IP-level rate-limiting that only time clears.
+#
+# Measured against the live instance, the waiting was doing almost none of
+# the work:
+#   - The refusals are per-request, not per-IP and not per-video. In one
+#     minute, one video downloaded end to end in 2.2s while another 403'd on
+#     four consecutive attempts across four different client and network
+#     configurations (android_vr alone, yt-dlp's default pair, forced IPv4,
+#     Chrome TLS impersonation). Half an hour later the video that had
+#     worked first time needed a second attempt itself.
+#   - When a retry does help, it helps immediately: that second attempt
+#     succeeded after a 2s wait, for 5.9s in total. Nothing observed
+#     suggested 15s or 30s buys anything a couple of seconds doesn't.
+#   - The transfer itself is never the problem — 5.4MB arrived in under a
+#     second at 11MB/s. The cost is entirely in resolving a URL YouTube is
+#     willing to honour.
+#
+# So: still three attempts, because retrying genuinely works, but the whole
+# ladder now gives up in well under twenty seconds instead of seventy.
+#
+# The client lists matter more than the waiting:
+#   - android_vr + web_safari is yt-dlp's own default pairing for this
+#     version (_DEFAULT_CLIENTS). web_safari costs no extra round trip —
+#     it's also yt-dlp's webpage client (_DEFAULT_WEBPAGE_CLIENT), so its
+#     player response comes from the watch page that was fetched anyway.
+#     Pinning android_vr alone, as this used to, threw that fallback away
+#     for nothing — and android_vr on its own has been erratic since March
+#     2026 (yt-dlp#16150), sometimes returning only format 18.
+#   - mweb is a genuinely different client family, worth one last try. It
+#     needs a GVS PO token and the JS challenge solver, which is why it
+#     isn't on the fast path.
+_ATTEMPTS = (
+    Attempt(player_clients=("android_vr", "web_safari"), delay_seconds=0),
+    Attempt(player_clients=("android_vr", "web_safari"), delay_seconds=2),
+    Attempt(player_clients=("mweb",), delay_seconds=5, needs_js_challenge_solver=True),
+)
 
 
 def _progress_hook(on_progress: ProgressCallback, event: dict) -> None:
@@ -49,15 +103,7 @@ def download_audio(video_id: str, quality: str = "high", on_progress: ProgressCa
     codec = settings.audio_format
     postprocessor = {"key": "FFmpegExtractAudio", "preferredcodec": codec}
 
-    def build_ydl_opts(include_mweb: bool) -> dict:
-        # android_vr alone covers the common case — every request this makes
-        # to YouTube is doubled (a full extra player-API round trip) the
-        # moment mweb joins the client list, and mweb's SABR formats also
-        # drag in the remote_components fetch below. Both stay off the fast
-        # path and only get pulled in from the second attempt onward, once
-        # android_vr alone has actually failed once — a real fallback, not
-        # something paid for on every single play.
-        player_clients = ["android_vr", "mweb"] if include_mweb else ["android_vr"]
+    def build_ydl_opts(attempt: "Attempt") -> dict:
         opts = {
             "format": FORMAT_BY_QUALITY.get(quality, FORMAT_BY_QUALITY["high"]),
             "outtmpl": out_template,
@@ -65,24 +111,17 @@ def download_audio(video_id: str, quality: str = "high", on_progress: ProgressCa
             "quiet": True,
             "no_warnings": True,
             "postprocessors": [postprocessor],
-            # A small per-request pause during extraction (yt-dlp's own
-            # --sleep-requests) — a handful of formats/player-API calls
-            # arriving back-to-back with zero delay reads as scripted in a
-            # way spacing them out by a beat doesn't.
-            "sleep_interval_requests": 1.5,
-            # YouTube increasingly requires a PO (Proof-of-Origin) token even
-            # for clients that never used to need one (android_vr's audio
-            # formats, notably) — pot-provider (see docker-compose.yml)
+            # YouTube requires a PO (Proof-of-Origin) token for several
+            # clients' formats — pot-provider (see docker-compose.yml)
             # generates these on request. Safe if pot-provider is unreachable
-            # (e.g. running outside compose) — yt-dlp just drops the formats
-            # that needed a token it couldn't get, rather than failing
-            # outright.
+            # (e.g. running outside compose): yt-dlp drops the formats that
+            # needed a token it couldn't get rather than failing outright.
             "extractor_args": {
-                "youtube": {"player_client": player_clients},
+                "youtube": {"player_client": list(attempt.player_clients)},
                 "youtubepot-bgutilhttp": {"base_url": ["http://pot-provider:4416"]},
             },
         }
-        if include_mweb:
+        if attempt.needs_js_challenge_solver:
             # mweb's formats are SABR-gated and need this JS challenge solver
             # to descramble — downloads yt-dlp's solver script from GitHub on
             # first use and caches it (see Dockerfile's XDG_CACHE_HOME).
@@ -97,20 +136,11 @@ def download_audio(video_id: str, quality: str = "high", on_progress: ProgressCa
 
     url = YOUTUBE_WATCH_URL.format(video_id=video_id)
 
-    # Retry with growing backoff: the googlevideo playback URL yt-dlp resolves
-    # can 403 (observed even without any code/version change between
-    # attempts, both intermittently and — during a stretch of heavy same-IP
-    # traffic — consistently for several attempts in a row). That pattern
-    # points at short-lived, IP-level rate-limiting on YouTube's end as much
-    # as anything client-side, so a single immediate retry often just re-hits
-    # the same throttling window; these delays are long enough to plausibly
-    # clear it.
-    RETRY_DELAYS_SECONDS = [5, 15, 30]
     last_exc: yt_dlp.utils.DownloadError | None = None
-    for attempt in range(len(RETRY_DELAYS_SECONDS) + 1):
-        if attempt:
-            time.sleep(RETRY_DELAYS_SECONDS[attempt - 1])
-        ydl_opts = build_ydl_opts(include_mweb=attempt > 0)
+    for attempt in _ATTEMPTS:
+        if attempt.delay_seconds:
+            time.sleep(attempt.delay_seconds)
+        ydl_opts = build_ydl_opts(attempt)
         if progress_hooks is not None:
             ydl_opts["progress_hooks"] = progress_hooks
             ydl_opts["postprocessor_hooks"] = postprocessor_hooks
@@ -121,6 +151,10 @@ def download_audio(video_id: str, quality: str = "high", on_progress: ProgressCa
             break
         except yt_dlp.utils.DownloadError as exc:
             last_exc = exc
+            logger.info(
+                "Download attempt failed for %s (clients=%s): %s",
+                video_id, ",".join(attempt.player_clients), str(exc)[:200],
+            )
 
     if last_exc is not None:
         raise DownloadError(str(last_exc)) from last_exc
