@@ -4,7 +4,7 @@
   data-status="{{ item.status }}"
   data-saved="{{ 'true' if item.is_saved else 'false' }}"
 >
-  <a class="track-link" href="/player/{{ item.id }}" aria-label="Play {{ item.title }}">
+  <a class="track-link" href="/#player/{{ item.id }}" aria-label="Play {{ item.title }}">
     <span class="track-index">{{ index }}</span>
     <span class="track-thumb">
       {% if item.thumbnail_url %}

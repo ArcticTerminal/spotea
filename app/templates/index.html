@@ -9,13 +9,24 @@
     // without this, the server always renders Library first and JS only
     // corrects it after DOMContentLoaded, which flashes stale content for a
     // frame on every reload.
+    //
+    // A channel/playlist hash resolves to the "detail" panel instead — kept
+    // out of VALID_TABS itself so those routes can't get treated as a
+    // remembered tab. home/detail.js re-parses the hash after module load to
+    // actually fetch and fill the panel; this only has to get first paint
+    // right. A player/<id> hash is deliberately not handled here at all — it
+    // opens the overlay on top of whatever tab/detail this same logic
+    // resolves to, not a tab switch of its own.
     (function () {
       var VALID_TABS = ["home", "library", "explore", "settings"];
-      var fromHash = location.hash.slice(1);
+      var PLAYLIST_KINDS = ["favorites", "saved", "new-uploads", "recently-played"];
+      var hash = location.hash.slice(1).split("?")[0];
+      var isDetail = hash.indexOf("channel/") === 0 || PLAYLIST_KINDS.indexOf(hash) !== -1;
       var fromStorage = localStorage.getItem("spotea-active-tab");
-      var tab =
-        VALID_TABS.indexOf(fromHash) !== -1
-          ? fromHash
+      var tab = isDetail
+        ? "detail"
+        : VALID_TABS.indexOf(hash) !== -1
+          ? hash
           : VALID_TABS.indexOf(fromStorage) !== -1
             ? fromStorage
             : "home";
@@ -198,6 +209,10 @@
           </select>
         </div>
       </div>
+    </section>
+
+    <section id="tab-detail" class="tab-panel" data-tab-panel="detail" hidden>
+      <div id="detail-panel"></div>
     </section>
   </main>
 

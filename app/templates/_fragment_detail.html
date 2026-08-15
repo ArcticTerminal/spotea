@@ -1,0 +1,9 @@
+{# Wrapper that GET /partials/detail/channel/{id} and
+   /partials/detail/playlist/{kind} return. Unlike home/library/downloads,
+   this doesn't also back a full-page SSR render — the detail panel is
+   client-fetched only (see home/detail.js) — but it keeps the same
+   <template data-target="…"> convention so the swap code in fragments.js
+   didn't need a special case. #}
+<template data-target="detail-panel">
+{% include "_detail_panel.html" %}
+</template>

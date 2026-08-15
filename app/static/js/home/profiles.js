@@ -1,10 +1,10 @@
 import { api, confirmDialog, escapeHtml, setupOverlay } from "../core.js";
 import { closePlayer } from "./overlay.js";
 
-// Profile management. Only wired up on index.html — the drill-down pages
-// (channel/player/content list) have no topbar and switching/managing
-// profiles mid-drill-down would just orphan the page underneath, so they
-// don't need this at all.
+// Profile management. Wired up once on index.html — the channel/playlist
+// detail panel and the player overlay share its topbar (they're all one
+// document now), so switching/managing profiles works from inside either the
+// same way it does from Home/Library/Explore/Settings.
 //
 // Two separate overlays, deliberately not merged and not overlapping in
 // what they do: #profiles-overlay ("Switch profile", from the topbar/mobile

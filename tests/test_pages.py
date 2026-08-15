@@ -101,123 +101,35 @@ def test_home_applies_the_duration_and_filesize_template_filters(client, db_sess
     assert "MB" in body  # filesize filter, from the storage summary
 
 
-def test_favorites_page(client, db_session):
-    _seed(db_session)
-
-    res = client.get("/favorites")
-
-    assert res.status_code == 200
-    assert "A Favorite" in res.text
-    assert "Fresh Upload" not in res.text
-
-
-def test_saved_page(client, db_session):
-    _seed(db_session)
-
-    res = client.get("/saved")
-
-    assert res.status_code == 200
-    assert "Saved And Played" in res.text
-    assert "A Favorite" not in res.text
-
-
-def test_new_uploads_page(client, db_session):
-    _seed(db_session)
-
-    res = client.get("/new-uploads")
-
-    assert res.status_code == 200
-    assert "Fresh Upload" in res.text
-    assert "A Favorite" not in res.text
-
-
-def test_recently_played_page(client, db_session):
-    _seed(db_session)
-
-    res = client.get("/recently-played")
-
-    assert res.status_code == 200
-    assert "Saved And Played" in res.text
-    assert "Fresh Upload" not in res.text
-
-
-def test_empty_list_pages_render_their_empty_message(client):
-    for path, message in [
-        ("/favorites", "No favorites yet."),
-        ("/saved", "Nothing saved yet."),
-        ("/new-uploads", "No new uploads yet."),
-        ("/recently-played", "Nothing played yet."),
+def test_channel_and_playlist_pages_redirect_to_their_hash_route(client):
+    """Favorites/Saved/New Uploads/Recently Played/a channel/a track all moved
+    in-page (see app/static/js/home/detail.js, home/overlay.js) — these
+    routes exist only so an old link or bookmark still lands somewhere real.
+    The actual rendering is now GET /partials/detail/... — see
+    test_partials.py."""
+    for path, expected_hash in [
+        ("/favorites", "/#favorites"),
+        ("/saved", "/#saved"),
+        ("/new-uploads", "/#new-uploads"),
+        ("/recently-played", "/#recently-played"),
+        ("/channel/1", "/#channel/1"),
+        ("/player/1", "/#player/1"),
     ]:
-        res = client.get(path)
-        assert res.status_code == 200, path
-        assert message in res.text, path
-
-
-def test_channel_page(client, db_session):
-    feed, _items = _seed(db_session)
-
-    res = client.get(f"/channel/{feed.id}")
-
-    assert res.status_code == 200
-    assert "Page Test Channel" in res.text
-    assert "Fresh Upload" in res.text
-    assert "3 videos" in res.text
-
-
-def test_channel_page_404s_for_an_unknown_feed(client):
-    assert client.get("/channel/9999").status_code == 404
-
-
-def test_player_page(client, db_session):
-    _feed, items = _seed(db_session)
-
-    res = client.get(f"/player/{items[0].id}")
-
-    assert res.status_code == 200
-    assert "Fresh Upload" in res.text
-    assert f'data-stream="/content/{items[0].id}/stream"' in res.text
-
-
-def test_player_page_404s_for_an_unknown_content_id(client):
-    assert client.get("/player/9999").status_code == 404
-
-
-def test_pagination_appears_only_once_there_is_a_second_page(client, db_session):
-    """query_content_page's DEFAULT_PAGE_SIZE is 20, so 25 items is two
-    pages — and _pagination.html renders nothing at all below that."""
-    feed, _items = _seed(db_session)
-    db_session.add_all(
-        [
-            Content(
-                feed_id=feed.id,
-                user_id=USER_ID,
-                video_id=f"bulkvid{i:04d}"[:11],
-                title=f"Bulk {i}",
-                published_at=datetime(2025, 6, 1) - timedelta(days=i),
-                is_favorite=True,
-            )
-            for i in range(25)
-        ]
-    )
-    db_session.commit()
-
-    first_page = client.get("/favorites")
-    assert "Page 1 of 2" in first_page.text
-
-    second_page = client.get("/favorites?page=2")
-    assert second_page.status_code == 200
-    assert "Page 2 of 2" in second_page.text
+        res = client.get(path, follow_redirects=False)
+        assert res.status_code == 307, path
+        assert res.headers["location"] == expected_hash, path
 
 
 def test_page_routes_require_login():
     """Every route in pages.py sits behind require_login — an unauthenticated
-    request has to land on /login, not render someone's library."""
+    request has to land on /login, not render someone's library or redirect
+    into the app."""
     from fastapi.testclient import TestClient
 
     from app.main import app
 
     with TestClient(app) as anonymous:
-        for path in ["/", "/favorites", "/saved", "/new-uploads", "/recently-played", "/channel/1"]:
+        for path in ["/", "/favorites", "/saved", "/new-uploads", "/recently-played", "/channel/1", "/player/1"]:
             res = anonymous.get(path, follow_redirects=False)
             assert res.status_code == 303, path
             assert res.headers["location"] == "/login", path

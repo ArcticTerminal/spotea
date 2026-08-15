@@ -4,15 +4,39 @@
 
 import { api, showToast } from "../core.js";
 import { onFragmentsSwapped, refreshFragments } from "../fragments.js";
+import { openDetail } from "./detail.js";
 
-// Delegated from the panel rather than the chip row: the row lives inside
-// the Home fragment and is replaced wholesale on every refresh, which would
-// take a listener bound to it along.
+// Delegated from the panel rather than the chip row/see-more links
+// themselves: both live inside the Home fragment and are replaced wholesale
+// on every refresh, which would take a directly-bound listener with them.
 export function setupHomeChannels() {
   document.getElementById("tab-home")?.addEventListener("click", (event) => {
+    if (event.ctrlKey || event.metaKey || event.shiftKey || event.button !== 0) return;
+
     const chip = event.target.closest(".channel-chip");
-    if (!chip) return;
-    window.location.href = `/channel/${chip.dataset.feedId}`;
+    if (chip) {
+      openDetail("channel", chip.dataset.feedId);
+      return;
+    }
+
+    const seeMore = event.target.closest(".shelf-see-more[data-detail-kind]");
+    if (seeMore) {
+      event.preventDefault();
+      openDetail(seeMore.dataset.detailKind, null);
+    }
+  });
+}
+
+// Same idea for the Library grid's pinned playlist tiles and per-channel
+// cards — delegated from the panel (rather than bound per-card) because
+// #library-grid's contents are replaced wholesale on every fragment refresh.
+export function setupLibraryChannelGrid() {
+  document.getElementById("tab-library")?.addEventListener("click", (event) => {
+    if (event.ctrlKey || event.metaKey || event.shiftKey || event.button !== 0) return;
+    const card = event.target.closest(".channel-card");
+    if (!card) return;
+    event.preventDefault();
+    openDetail(card.dataset.detailKind, card.dataset.detailId || null);
   });
 }
 

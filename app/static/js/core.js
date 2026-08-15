@@ -3,6 +3,36 @@
 // used from at least two other modules — anything used from only one belongs
 // in that one.
 
+// What a URL hash means: one of the four tab panels, a channel/playlist
+// detail view, a player overlay request, or nothing recognized. Shared by
+// home/tabs.js (plain tab switches and its popstate handler) and
+// home/detail.js (detail/player routes and its own popstate handler) so the
+// two agree on where the line between them is. index.html's inline
+// pre-paint script runs before any module loads and can't import this, so it
+// necessarily duplicates the same prefix rules in plain JS — this is the one
+// place everything after that first paint agrees with it.
+const VALID_TABS = ["home", "library", "explore", "settings"];
+const PLAYLIST_KINDS = ["favorites", "saved", "new-uploads", "recently-played"];
+
+export function classifyHash(hash) {
+  const [path, query] = hash.split("?");
+  const page = query ? Number(query.replace("page=", "")) || 1 : 1;
+
+  if (path.startsWith("channel/")) {
+    return { type: "detail", kind: "channel", id: path.slice("channel/".length), page };
+  }
+  if (PLAYLIST_KINDS.includes(path)) {
+    return { type: "detail", kind: path, id: null, page };
+  }
+  if (path.startsWith("player/")) {
+    return { type: "player", id: path.slice("player/".length) };
+  }
+  if (VALID_TABS.includes(path)) {
+    return { type: "tab", tab: path };
+  }
+  return { type: "unknown" };
+}
+
 export function escapeHtml(str) {
   const div = document.createElement("div");
   div.textContent = str ?? "";

@@ -519,6 +519,14 @@ html[data-active-tab="settings"] .tab-btn[data-tab="settings"] {
   border-bottom-color: var(--accent);
 }
 
+/* data-active-tab="detail" (a channel or pinned playlist) has no .tab-btn of
+   its own — Library stays visually selected underneath it, since that's
+   where "Back" returns to. */
+html[data-active-tab="detail"] .tab-btn[data-tab="library"] {
+  color: var(--white);
+  border-bottom-color: var(--accent);
+}
+
 .layout {
   padding: 1rem;
   max-width: 1100px;
@@ -566,7 +574,8 @@ html[data-active-tab] .tab-panel {
 html[data-active-tab="home"] .tab-panel[data-tab-panel="home"],
 html[data-active-tab="library"] .tab-panel[data-tab-panel="library"],
 html[data-active-tab="explore"] .tab-panel[data-tab-panel="explore"],
-html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
+html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"],
+html[data-active-tab="detail"] .tab-panel[data-tab-panel="detail"] {
   display: block;
 }
 
@@ -1743,6 +1752,15 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   border-width: 4px;
 }
 
+/* Shown in #detail-panel while home/detail.js's fetch is in flight — unlike
+   .overlay, not fixed/full-screen: the topbar and tabs stay visible and
+   usable while a channel/playlist loads in. */
+.detail-loading {
+  display: flex;
+  justify-content: center;
+  padding: 4rem 0;
+}
+
 .backfill-overlay-content {
   display: flex;
   flex-direction: column;
@@ -2040,16 +2058,6 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   transform: translateY(0);
 }
 
-/* Standalone /player/{id} page */
-.player-body {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 100vh;
-  padding: 1.5rem;
-  background: radial-gradient(circle at 50% 0%, var(--bg-page-glow) 0%, var(--bg-page) 60%);
-}
-
 .player-card {
   width: 100%;
   max-width: 380px;
@@ -2068,11 +2076,6 @@ html[data-active-tab="settings"] .tab-panel[data-tab-panel="settings"] {
   font-weight: 600;
   margin-bottom: 1.5rem;
   cursor: pointer;
-  /* This is the first element on channel.html/content_list.html/player.html
-     — standalone pages with no .topbar above them to already clear a notch
-     or Dynamic Island (see .topbar-inner above). Adds on top of .layout's/
-     .player-card's own base padding rather than replacing it. */
-  margin-top: env(safe-area-inset-top, 0px);
 }
 
 .back-link svg {
@@ -2383,6 +2386,14 @@ audio {
 
 .player-overlay[hidden] {
   display: none;
+}
+
+/* Unlike .back-link elsewhere (the detail panel, sitting under the sticky
+   topbar, which already clears the notch/Dynamic Island itself), this one is
+   the first element in a position: fixed; inset: 0 overlay with nothing
+   above it — it has to clear that safe area on its own. */
+.player-overlay .back-link {
+  margin-top: env(safe-area-inset-top, 0px);
 }
 
 /* Modeled on YouTube Music/Apple Music's mobile mini-player: a flush bar

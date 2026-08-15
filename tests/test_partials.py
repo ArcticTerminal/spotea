@@ -160,6 +160,109 @@ def test_fragments_require_login():
             assert res.headers["location"] == "/login", url
 
 
+def test_channel_detail_fragment(client, db_session):
+    """The channel/playlist detail panel (home/detail.js) isn't SSR'd inside
+    index.html at all — unlike FRAGMENTS above, there's no full-page render
+    to compare it against, so this asserts content directly, the same way
+    the old standalone channel.html page's test did before it moved here."""
+    feed = _seed(db_session)
+
+    res = client.get(f"/partials/detail/channel/{feed.id}")
+
+    assert res.status_code == 200
+    body = _fragment_body(res.text, "detail-panel")
+    assert "Partial Channel" in body
+    assert "Fresh Upload" in body
+    assert "3 videos" in body
+
+
+def test_channel_detail_fragment_404s_for_an_unknown_feed(client):
+    assert client.get("/partials/detail/channel/9999").status_code == 404
+
+
+def test_playlist_detail_fragments(client, db_session):
+    _seed(db_session)
+
+    for kind, expected, unexpected in [
+        ("favorites", "A Favorite", "Fresh Upload"),
+        ("saved", "Saved And Played", "A Favorite"),
+        ("new-uploads", "Fresh Upload", "A Favorite"),
+        ("recently-played", "Saved And Played", "Fresh Upload"),
+    ]:
+        res = client.get(f"/partials/detail/playlist/{kind}")
+        assert res.status_code == 200, kind
+        body = _fragment_body(res.text, "detail-panel")
+        assert expected in body, kind
+        assert unexpected not in body, kind
+
+
+def test_empty_playlist_detail_fragments_render_their_empty_message(client):
+    for kind, message in [
+        ("favorites", "No favorites yet."),
+        ("saved", "Nothing saved yet."),
+        ("new-uploads", "No new uploads yet."),
+        ("recently-played", "Nothing played yet."),
+    ]:
+        res = client.get(f"/partials/detail/playlist/{kind}")
+        assert res.status_code == 200, kind
+        assert message in res.text, kind
+
+
+def test_playlist_detail_fragment_404s_for_an_unknown_kind(client):
+    assert client.get("/partials/detail/playlist/bogus").status_code == 404
+
+
+def test_detail_pagination(client, db_session):
+    """Same DEFAULT_PAGE_SIZE=20 threshold as the fragment/page tests above."""
+    feed = _seed(db_session)
+    db_session.add_all(
+        [
+            Content(
+                feed_id=feed.id, user_id=USER_ID, video_id=f"bulkvid{i:04d}"[:11], title=f"Bulk {i}",
+                published_at=datetime(2025, 6, 1) - timedelta(days=i), is_favorite=True,
+            )
+            for i in range(25)
+        ]
+    )
+    db_session.commit()
+
+    first_page = client.get("/partials/detail/playlist/favorites")
+    assert "Page 1 of 2" in first_page.text
+
+    second_page = client.get("/partials/detail/playlist/favorites?page=2")
+    assert second_page.status_code == 200
+    assert "Page 2 of 2" in second_page.text
+
+
+def test_detail_fragments_require_login():
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    with TestClient(app) as anonymous:
+        for url in ["/partials/detail/channel/1", "/partials/detail/playlist/favorites"]:
+            res = anonymous.get(url, follow_redirects=False)
+            assert res.status_code == 303, url
+            assert res.headers["location"] == "/login", url
+
+
+def test_detail_fragments_are_scoped_to_the_current_profile(client, db_session):
+    _seed(db_session)
+    other = Feed(user_id=999, rss_url="https://example.com/other", channel_title="Someone Else")
+    db_session.add(other)
+    db_session.commit()
+    db_session.refresh(other)
+    db_session.add(
+        Content(feed_id=other.id, user_id=999, video_id="otherprof02", title="Not Yours", is_favorite=True)
+    )
+    db_session.commit()
+
+    # Another profile's channel isn't just filtered out of the response —
+    # it's a 404, same as any other feed_id that isn't this user's.
+    assert client.get(f"/partials/detail/channel/{other.id}").status_code == 404
+    assert "Not Yours" not in client.get("/partials/detail/playlist/favorites").text
+
+
 def test_fragments_are_scoped_to_the_current_profile(client, db_session):
     """Another profile's content must never leak into a fragment — the
     fragment endpoints resolve the profile the same way the page does."""

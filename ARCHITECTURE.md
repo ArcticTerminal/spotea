@@ -101,11 +101,12 @@ spotea/
       storage.py                             # clear-all + zip export endpoints
       settings.py                            # per-profile audio quality +
                                               # deployment-wide refresh interval
-      pages.py                               # home (shelves), favorites/saved/
-                                              # new-uploads/recently-played,
-                                              # channel, and player page rendering
+      pages.py                               # home (shelves) rendering; the
+                                              # rest are one-line redirects to
+                                              # their hash route (see §5)
       partials.py                            # re-render one region of index.html
-                                              # on demand (see §4's Partials)
+                                              # on demand, including the channel/
+                                              # playlist detail panel (see §4)
     templates/
       _base.html                                   # page shell every full page
                                                      # extends (head/PWA meta,
@@ -116,37 +117,34 @@ spotea/
                                                      # by <use href="#i-...">
       login.html
       register.html
-      index.html                                   # Home/Library/Explore/Settings
-                                                     # tabs (a single-page app)
-      _player_overlay.html                          # Home/Library/Explore's
-                                                     # persistent in-page player
-                                                     # + mini-player bar
+      index.html                                   # Home/Library/Explore/Settings/
+                                                     # detail — the whole app, one
+                                                     # document (a single-page app)
+      _player_overlay.html                          # persistent in-page player
+                                                     # + mini-player bar, usable
+                                                     # from anywhere in the app
       _player_controls.html                         # the transport/seek/volume/
                                                      # favorite half of the
                                                      # player, shared verbatim by
-                                                     # player.html and the overlay
+                                                     # the overlay (its only caller)
       _home_shelves.html                           # Home's chips + four shelves
                                                      # (also GET /partials/home)
       _library_grid.html                           # Library's channel grid
                                                      # (also GET /partials/library)
       _downloads.html                              # Downloads modal body
                                                      # (also GET /partials/downloads)
-      _fragment_{home,library,downloads}.html      # the <template data-target>
+      _detail_panel.html                           # one channel or pinned
+                                                     # playlist's track list —
+                                                     # index.html's 5th panel,
+                                                     # client-fetched (see §5)
+      _fragment_{home,library,downloads,detail}.html  # the <template data-target>
                                                      # wrappers those endpoints return
       _content_card.html                           # grid card partial (Home
                                                      # shelves, Library's pinned
                                                      # virtual-playlist tiles)
-      _content_row.html                             # list-row partial (channel
-                                                     # page, virtual-playlist pages)
+      _content_row.html                             # list-row partial (the
+                                                     # detail panel's track list)
       _pagination.html
-      channel.html                                 # one channel's track list
-                                                     # (real navigation, not the
-                                                     # overlay — see §5)
-      content_list.html                            # Favorites/Saved/New
-                                                     # Uploads/Recently Played
-                                                     # (same partials as channel.html)
-      player.html                                  # standalone full-page player
-                                                     # (real navigation)
     static/
       js/                                    # ES modules; each page loads one
                                               # entry point via <script type="module">
@@ -156,14 +154,18 @@ spotea/
         resume.js                            # playback resume across loads,
                                               # the bfcache reload rule, service
                                               # worker registration
-        player.js                            # the audio player, shared by
-                                              # player.html and the overlay
+        player.js                            # the audio player, driving the
+                                              # overlay's markup (its only caller)
         fragments.js                         # re-render page regions from the
                                               # server after an action, instead
                                               # of patching the DOM by hand
         content-actions.js                   # save toggle + unfollow, on every
                                               # page that shows content
-        home/tabs.js                         # Home/Library/Explore/Settings panels
+        home/tabs.js                         # Home/Library/Explore/Settings/
+                                              # detail panel switching
+        home/detail.js                       # the channel/playlist detail panel:
+                                              # opening it, its pagination, hash
+                                              # routing (see §5)
         home/library.js                      # channel chips, library search,
                                               # drag-scroll rows, mobile menu,
                                               # manual refresh
@@ -173,7 +175,7 @@ spotea/
         home/settings.js                     # settings controls + downloads modal
         home/bulk-import.js                  # paste-a-list import modal
         home/profiles.js                     # profile switcher + manage UI
-        pages/{index,player,channel,list}.js # per-page entry points
+        pages/index.js                       # index.html's one entry point
         sw.js                                # PWA service worker (installability
                                               # only, not offline-first; a classic
                                               # script, not a module)
@@ -337,13 +339,18 @@ Every one of these returns the same markup the full page renders for that
 region, from the same context functions (`app/page_context.py`). The client
 swaps them in after an action instead of hand-patching the DOM; see
 `routers/partials.py` for why. Each response is one or more
-`<template data-target="…">` blocks.
+`<template data-target="…">` blocks. The two detail endpoints are the
+exception to "same as the full page renders" — the detail panel isn't SSR'd
+anywhere, so they're the *only* render of that markup, not a refresh of one
+(see §5's Library section).
 
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/partials/home` | Home's channel chips and its four shelves |
 | GET | `/partials/library` | Library's channel grid and virtual-playlist counts |
 | GET | `/partials/downloads` | Downloads modal body + the Settings storage line |
+| GET | `/partials/detail/channel/{feed_id}` | One channel's track list (paginated) |
+| GET | `/partials/detail/playlist/{kind}` | One pinned playlist's track list (paginated); `kind` is `favorites`/`saved`/`new-uploads`/`recently-played` |
 
 **Content**
 
@@ -375,10 +382,8 @@ swaps them in after an action instead of hand-patching the DOM; see
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/` | Home/Library/Explore/Settings SPA |
-| GET | `/favorites`, `/saved`, `/new-uploads`, `/recently-played` | Pinned virtual-playlist pages (paginated) |
-| GET | `/channel/{feed_id}` | One channel's track list (paginated) |
-| GET | `/player/{content_id}` | Standalone full-page player |
+| GET | `/` | Home/Library/Explore/Settings/detail SPA |
+| GET | `/favorites`, `/saved`, `/new-uploads`, `/recently-played`, `/channel/{feed_id}`, `/player/{content_id}` | Redirect to the equivalent hash route (`/#favorites`, `/#channel/{id}`, …) — kept only for old links/bookmarks; see §5 |
 
 All routes except `/login`, `/register`, `/health`, `/sw.js`, and static
 assets require an active session (enforced via `require_login` or, where the
@@ -436,11 +441,19 @@ and **Settings** — `<section>` panels toggled via the `hidden` attribute
 driven by `html[data-active-tab]` (see style.css), not separate routes. An
 inline `<head>` script resolves the active tab (URL hash, falling back to
 `localStorage`) and sets it on `<html>` *before first paint*, so a reload
-never flashes the wrong tab; `setupTabs()` (app.js) just syncs button/URL
-state to match afterward. Tab switches use `history.replaceState` (not
-`pushState`) so cycling tabs doesn't spam back-button history — except
-`setupHomeChannels()`'s channel-chip navigation, which does `pushState`
-once, so back correctly returns to the tab you were on.
+never flashes the wrong tab; `home/tabs.js`'s `setupTabs()` just syncs
+button/URL state to match afterward. Tab switches use `history.replaceState`
+(not `pushState`) so cycling tabs doesn't spam back-button history.
+
+A fifth panel, **detail** (`data-active-tab="detail"`, `home/detail.js`),
+holds one channel or pinned playlist's track list — reached from a Library
+card/tile, a Home channel chip, or a shelf's "See more". Unlike the four
+tabs, opening it *does* `pushState` (to `#channel/{id}` or `#favorites` etc.
+— see `core.js`'s `classifyHash`), so the browser back button returns to
+wherever you actually came from. It has no server-rendered content of its
+own on first paint (see the Library section below) and no `.tab-btn` of its
+own — the Library button stays visually selected while it's open, since
+that's conceptually where "Back" returns to.
 
 **Home page** — Assembled in `pages.py`'s `home()`, each shelf its own
 bounded query (`HOME_SHELF_LIMIT = 12`) rather than one big query sliced in
@@ -480,21 +493,30 @@ which is what keeps historical backfill out of "New Uploads" by design.
 **Library** — No longer a searchable/filterable video grid (see §11 — an
 earlier version worked that way). It's a grid of channel cards
 (`channel-grid`): four pinned tiles (Favorites, Saved for later, New
-Uploads, Recently Played, each linking to its own paginated page) followed
-by every followed channel, each linking to `/channel/{id}`. The only
-client-side filtering left here is `setupLibrarySearch()` matching channel
-*names* — no server round trip, since every card is already in the DOM.
-Per-video browsing (search substring against title-or-channel, an exact
-channel filter, pagination) all lives server-side now in
-`content_query.query_content_page()`, shared by `channel.html`'s
-`GET /channel/{id}` and the four virtual-playlist pages'
-`GET /favorites`/`/saved`/`/new-uploads`/`/recently-played` (all through
-`pages.py`'s `_content_list_page()` helper → `content_list.html`, the same
-track-list/pagination partials `channel.html` uses, minus its single-channel
-avatar hero). The JSON `GET /content?page=&filter=` endpoint that used to
-back an AJAX-swapped grid still exists and is exercised by the test suite,
-but nothing in the current UI calls it — every list is server-rendered per
-page now, not fetched and spliced into a shared grid.
+Uploads, Recently Played) followed by every followed channel. Clicking any
+of them — or a Home channel chip, or a shelf's "See more" — opens the
+**detail** panel in place (`home/detail.js`'s `openDetail()`; see the Tabs
+section above), not a navigation: it fetches
+`GET /partials/detail/channel/{id}` or `GET /partials/detail/playlist/{kind}`
+and swaps the response into `#detail-panel`. `ctrl`/`cmd`-click still opens
+in a new tab, since every card's `href` is a real, navigable hash URL
+(`/#channel/{id}`, `/#favorites`, …) — a cold load at one of those resolves
+the same way (see `handleInitialRoute()`), just with a brief loading spinner
+since, unlike Home/Library, the detail panel isn't server-rendered inline on
+first paint. The only client-side filtering left here is
+`setupLibrarySearch()` matching channel *names* — no server round trip,
+since every card is already in the DOM. Per-video browsing (search substring
+against title-or-channel, an exact channel filter, pagination) all lives
+server-side in `content_query.query_content_page()`, shared by
+`page_context.channel_detail_context()`/`playlist_detail_context()` behind
+those same two `/partials/detail/...` endpoints. The old real pages this
+replaced (`/channel/{id}`, `/favorites`, `/saved`, `/new-uploads`,
+`/recently-played`) are now one-line redirects to their hash equivalent, kept
+only so an old link or bookmark still lands somewhere real. The JSON
+`GET /content?page=&filter=` endpoint that used to back an AJAX-swapped grid
+still exists and is exercised by the test suite, but nothing in the current
+UI calls it — the detail panel's list is server-rendered HTML per page, not
+fetched-as-JSON and spliced into a shared grid.
 
 **Search & add a channel** — Explore's one search box (debounced ~400ms)
 fires both `GET /feeds/search-videos?q=` and `GET /feeds/search?q=` in
@@ -645,35 +667,38 @@ and Escape both cancel, focus lands on the *safe* button) and
 `showToast(message)` (bottom-centre, auto-dismissing). Both lazily create
 their own DOM.
 
-**In-page player overlay & playback-state persistence across navigation** —
-Home/Library/Explore play through a persistent overlay + mini-player bar
-(`_player_overlay.html`, `GET /content/{id}` JSON, `app.js`'s `openPlayer()`)
-instead of navigating to `/player/{id}` — reuses `player.html`'s exact
-markup/element ids, so `player.js`'s `setupPlayer`/`prepareAudio`/
-`setupMediaSession`/`setupFavorite` work against it unmodified.
-`channel.html`, `content_list.html`, and the standalone `player.html` are
-**deliberately still real navigations**, not wired into the overlay — those
-are comparatively infrequent, "landing page"-style visits (following a link
-into a specific channel or track list), not worth the added complexity of
-making every page in the app aware of a shared, cross-page player state.
+**In-page player overlay** — Every surface plays through one persistent
+overlay + mini-player bar (`_player_overlay.html`, `GET /content/{id}` JSON,
+`home/overlay.js`'s `openPlayer()`): Home's shelves, Explore's results, and
+the channel/playlist detail panel (`home/detail.js`) all call it, and there
+is no separate standalone player page anymore — a track link's `href` is a
+real `/#player/{id}` URL for ctrl-click/bookmark purposes, but a plain click
+is always intercepted and opens the overlay instead. The overlay reuses
+`_player_controls.html` (its only caller now), so `player.js`'s
+`setupPlayer`/`prepareAudio`/`setupMediaSession`/`setupFavorite` work against
+it unmodified. Since the whole app — Home/Library/Explore/Settings and the
+detail panel — is one document, opening a channel or a track never tears
+down the `<audio>` element; that's what fixed the mini-player silently
+stopping whenever you left Home/Library/Explore before this (see the
+Library section above and §11).
 
-That split creates a real seam, though: something has to carry playback
-position (and whether the player was expanded or just the mini bar) across
-an actual page navigation, since the audio element itself doesn't survive
-one. `ui.js` listens for both:
-- `pageshow` with `event.persisted` — fires when a page is restored from the
-  browser's back/forward cache (bfcache) without a real server round trip,
-  which would otherwise silently show stale server-rendered data (Recently
-  Played, storage usage, a track list, …) with no signal anything's wrong.
-  The handler snapshots playback state, then forces one real
-  `window.location.reload()` — simpler and more robust than trying to track
-  every specific action that could have changed something while away.
-- `pagehide` — fires on *any* departure, bfcache-eligible or not (e.g.
-  tapping a channel page's "Library" back-link, a plain in-app navigation
-  that never restores via `pageshow` at all when you return). Without this,
-  landing back on a *fresh* load of `index.html` had nothing in
-  `sessionStorage` to resume, and the mini-player just silently didn't come
-  back.
+That leaves one real seam: the audio element still doesn't survive a genuine
+full document reload (an actual F5, reopening the tab, or landing via one of
+the `/channel/{id}`-style compatibility redirects), so something has to
+carry playback position — and whether the overlay was expanded or just the
+mini bar — across *that*. `resume.js` listens for both:
+- `pageshow` with `event.persisted` — fires when the page is restored from
+  the browser's back/forward cache (bfcache) without a real server round
+  trip, which would otherwise silently show stale server-rendered data
+  (Recently Played, storage usage, Library's grid, …) with no signal
+  anything's wrong. The handler snapshots playback state, then forces one
+  real `window.location.reload()` — simpler and more robust than trying to
+  track every specific action that could have changed something while away.
+- `pagehide` — fires on *any* departure, bfcache-eligible or not (closing
+  the tab, a hard refresh, following one of the compatibility redirects).
+  Without this, landing back on a *fresh* load of `index.html` had nothing
+  in `sessionStorage` to resume, and the mini-player just silently didn't
+  come back.
 
 Both call the same `saveResumeState()`, writing `{contentId, currentTime,
 wasPlaying, wasExpanded}` to `sessionStorage['spotea-resume']` — but only if
@@ -681,10 +706,7 @@ wasPlaying, wasExpanded}` to `sessionStorage['spotea-resume']` — but only if
 has `audio.paused === true` for a reason that has nothing to do with an
 intentional pause; saving that as `wasPlaying: false` would wrongly suppress
 autoplay once the download finishes). `wasExpanded` reflects whether
-`#player-overlay` was visible; on `player.html`, which has no such overlay,
-it defaults to **not** expanded — landing on the SPA with something already
-playing surfaces it as the mini bar, not a screen-hijacking full-screen
-takeover.
+`#player-overlay` was visible when the record was saved.
 
 Two different consumers read this record back, for two different reasons:
 - `player.js`'s `consumeResumeState(contentId)` — called once, deep inside
@@ -693,17 +715,19 @@ Two different consumers read this record back, for two different reasons:
   (from the `pageshow` case above) doesn't restart the track from 0:00.
   Removed from `sessionStorage` on read, so a stale record can never apply
   to some later, unrelated track load.
-- `app.js`'s `resumeOverlayIfNeeded()` (called on every `index.html`
-  `DOMContentLoaded`) — the overlay always starts closed/empty on a fresh
-  load, unlike `player.html`, which has its content id server-rendered.
-  Reads the same record (without consuming it itself) and calls
+- `home/overlay.js`'s `resumeOverlayIfNeeded()` (called once on boot,
+  `pages/index.js`) — the overlay always starts closed/empty on a fresh
+  load. Reads the same record (without consuming it itself) and calls
   `openPlayer(contentId, { expanded: wasExpanded !== false })` to reopen
-  whatever was playing, correctly collapsed or expanded. If that fetch
-  fails (e.g. the content id no longer resolves for the now-active profile
-  — see the profile-switch note below), the stale record is explicitly
-  cleared right there; otherwise a permanently-invalid record would
-  re-trigger the same "Could not load this track" failure on every
-  subsequent reload forever, since nothing else would ever consume it.
+  whatever was playing, correctly collapsed or expanded. Runs before
+  `handleInitialRoute()` (`home/detail.js`), which takes over from there if
+  the URL itself names a different track (`#player/{id}`) or a detail view —
+  an explicit URL wins over an implicit resume. If the resume fetch fails
+  (e.g. the content id no longer resolves for the now-active profile — see
+  the profile-switch note below), the stale record is explicitly cleared
+  right there; otherwise a permanently-invalid record would re-trigger the
+  same "Could not load this track" failure on every subsequent reload
+  forever, since nothing else would ever consume it.
 
 **Profile switch and this same mechanism** — `switchProfile()`
 (`profiles.js`) calls `closePlayer()` (clearing `#player-root`'s dataset and
@@ -729,7 +753,7 @@ background → response returns immediately. On completion: `status='ready'`
 
 > **Never start a download on plain page load.** Browsers speculatively load
 > links — a prerender executes the target page's JavaScript — so simply having
-> `<a href="/player/{id}">` on a card is enough for the browser to open the
+> `<a href="/#player/{id}">` on a card is enough for the browser to open the
 > player behind your back and, if the player downloads unconditionally, fill
 > the user's disk with things they never clicked. `player.js` therefore gates
 > `prepareAudio()` behind `whenVisible()`, which waits out
@@ -761,7 +785,7 @@ item export, and "Clear all"/"Export all". Two things to keep in mind:
   same physical file, so deleting one profile's copy only actually unlinks
   it from disk once no other `ready` row anywhere still references it.
 
-**Play** — Both `player.html` and the overlay render the same custom player
+**Play** — The overlay renders a custom player (`_player_controls.html`)
 (no native `<audio controls>`, which renders as a light pill clashing with
 the dark theme): large artwork, title/channel, a seek bar, ±15s skip
 buttons, a large round play/pause, volume, and the favorite toggle.
@@ -1119,6 +1143,15 @@ Post-MVP additions, same one-at-a-time/test-then-continue approach:
     latent cross-account data-isolation gaps fixed as part of this (see §6);
     `Account.last_active_profile_id` added so re-login returns to whichever
     profile was active before logout instead of always the first one
+40. `channel.html`/`content_list.html`/standalone `player.html` (kept as
+    real navigations by milestone 36, above) folded into `index.html` as a
+    fifth panel, "detail" (`home/detail.js`, `GET /partials/detail/channel/
+    {id}` and `/partials/detail/playlist/{kind}`), reversing that earlier
+    scope decision — see §5's Tabs/Library sections and "In-page player
+    overlay". Fixed the mini-player tearing down whenever leaving Home/
+    Library/Explore for a channel or pinned playlist, since there's no
+    longer a document boundary for it to fall off of; the old real routes
+    became one-line redirects to their hash equivalent
 
 ### Verifying UI work
 

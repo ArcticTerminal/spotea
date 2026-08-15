@@ -19,13 +19,20 @@ Each response is one or more <template data-target="…"> blocks, so a single
 render can update several places at once.
 """
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
 from app.deps import get_current_profile, get_db, require_login
 from app.models import User
-from app.page_context import downloads_context, home_context, library_context
+from app.page_context import (
+    channel_detail_context,
+    downloads_context,
+    home_context,
+    library_context,
+    playlist_detail_context,
+    queue_thumbnail_caching,
+)
 from app.templating import templates
 
 router = APIRouter(prefix="/partials", tags=["partials"], dependencies=[Depends(require_login)])
@@ -61,3 +68,35 @@ def downloads_fragment(
     return templates.TemplateResponse(
         request, "_fragment_downloads.html", downloads_context(db, profile.id)
     )
+
+
+@router.get("/detail/channel/{feed_id}", response_class=HTMLResponse)
+def channel_detail_fragment(
+    feed_id: int,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    page: int = 1,
+    profile: User = Depends(get_current_profile),
+    db: Session = Depends(get_db),
+) -> HTMLResponse:
+    context = channel_detail_context(db, profile.id, feed_id, page)
+    if context is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Channel not found")
+    queue_thumbnail_caching(background_tasks, context["content"])
+    return templates.TemplateResponse(request, "_fragment_detail.html", context)
+
+
+@router.get("/detail/playlist/{kind}", response_class=HTMLResponse)
+def playlist_detail_fragment(
+    kind: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    page: int = 1,
+    profile: User = Depends(get_current_profile),
+    db: Session = Depends(get_db),
+) -> HTMLResponse:
+    context = playlist_detail_context(db, profile.id, kind, page)
+    if context is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown playlist")
+    queue_thumbnail_caching(background_tasks, context["content"])
+    return templates.TemplateResponse(request, "_fragment_detail.html", context)

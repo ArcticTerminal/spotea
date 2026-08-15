@@ -7,15 +7,40 @@ that means one thing on first load and another on refresh is exactly the
 class of bug this replaced.
 """
 
+from collections.abc import Iterable
+
+from fastapi import BackgroundTasks
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
-from app.content_query import followed_feeds, new_upload_filter
-from app.models import Content
+from app.content_query import DEFAULT_PAGE_SIZE, followed_feeds, new_upload_filter, query_content_page
+from app.feed_sync import cache_thumbnail
+from app.models import Content, Feed
 from app.storage import collect_usage
 
 HOME_SHELF_LIMIT = 12
 HOME_CHANNEL_LIMIT = 8
+
+
+def queue_thumbnail_caching(background_tasks: BackgroundTasks, items: Iterable[Content]) -> None:
+    """Caches thumbnails for whatever's actually being rendered in this
+    response — a Home shelf, a Library list's current page, a channel page's
+    current page — rather than eagerly sweeping ahead of actual browsing (a
+    prior version of this did that at startup; on a large library it meant
+    downloading and storing thumbnails for things nobody was looking at yet).
+    This render still goes out with the original YouTube URL for anything
+    not yet cached — the queued task (see feed_sync.cache_thumbnail) only
+    ever benefits the *next* time this same content is rendered, anywhere.
+    Deduped per call so a video appearing in more than one shelf here isn't
+    queued twice."""
+    seen: set[str] = set()
+    for item in items:
+        if not item.thumbnail_url or "ytimg.com" not in item.thumbnail_url:
+            continue
+        if item.video_id in seen:
+            continue
+        seen.add(item.video_id)
+        background_tasks.add_task(cache_thumbnail, item.video_id, item.thumbnail_url)
 
 
 def _shelf_query(db: Session, user_id: int):
@@ -142,3 +167,77 @@ def downloads_context(db: Session, user_id: int) -> dict:
     """What's on disk — shown both in the Downloads modal and as a one-line
     summary in Settings."""
     return {"usage": collect_usage(db, user_id)}
+
+
+# kind -> (is_match, filter_value, title, empty_message) for the four pinned
+# virtual playlists. is_match is a zero-arg callable rather than a bare
+# expression because new_upload_filter() has to be evaluated fresh on every
+# call (it embeds "now").
+PLAYLIST_KINDS: dict[str, tuple] = {
+    "favorites": (lambda: Content.is_favorite.is_(True), "__favorites__", "Favorites", "No favorites yet."),
+    "saved": (lambda: Content.is_saved.is_(True), "__saved__", "Saved for later", "Nothing saved yet."),
+    "new-uploads": (new_upload_filter, "__new_uploads__", "New Uploads", "No new uploads yet."),
+    "recently-played": (
+        lambda: Content.last_played_at.isnot(None),
+        "__played__",
+        "Recently Played",
+        "Nothing played yet.",
+    ),
+}
+
+
+def playlist_detail_context(db: Session, user_id: int, kind: str, page: int) -> dict | None:
+    """One of the four pinned virtual playlists (Favorites/Saved/New
+    Uploads/Recently Played), rendered through the same track-list/
+    pagination markup a channel page uses. Returns None for an unknown kind
+    so the caller can 404."""
+    config = PLAYLIST_KINDS.get(kind)
+    if config is None:
+        return None
+    is_match, filter_value, title, empty_message = config
+
+    video_count = db.query(func.count(Content.id)).filter(Content.user_id == user_id, is_match()).scalar()
+    items, page, total_pages = query_content_page(db, user_id, page=page, filter=filter_value)
+
+    return {
+        "kind": kind,
+        "feed": None,
+        "title": title,
+        "empty_message": empty_message,
+        "video_count": video_count,
+        "content": items,
+        "page": page,
+        "total_pages": total_pages,
+        "start_index": (page - 1) * DEFAULT_PAGE_SIZE + 1,
+        # A hash route, not the /partials/... fetch URL itself: this is what
+        # _pagination.html's <a> actually points at, and home/detail.js's
+        # click interception aside, it has to be a real navigable URL on its
+        # own (ctrl-click, a JS-disabled fallback).
+        "base_url": f"/#{kind}",
+    }
+
+
+def channel_detail_context(db: Session, user_id: int, feed_id: int, page: int) -> dict | None:
+    """One followed channel's track list. Returns None if the feed doesn't
+    exist or isn't this user's, so the caller can 404."""
+    feed = db.query(Feed).filter(Feed.id == feed_id, Feed.user_id == user_id).first()
+    if feed is None:
+        return None
+
+    video_count = db.query(func.count(Content.id)).filter(
+        Content.feed_id == feed_id, Content.user_id == user_id
+    ).scalar()
+    items, page, total_pages = query_content_page(db, user_id, page=page, feed_id=feed_id)
+
+    return {
+        "kind": "channel",
+        "feed": feed,
+        "title": feed.channel_title or feed.rss_url,
+        "empty_message": "No videos from this channel yet.",
+        "video_count": video_count,
+        "content": items,
+        "page": page,
+        "total_pages": total_pages,
+        "start_index": (page - 1) * DEFAULT_PAGE_SIZE + 1,
+        "base_url": f"/#channel/{feed_id}",
+    }

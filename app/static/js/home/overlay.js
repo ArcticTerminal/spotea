@@ -1,7 +1,9 @@
 // The in-page player: a full "now playing" overlay plus a mini bar that stays
-// visible while it's collapsed. Only Home/Library/Explore have this — the
-// channel, favorites/saved and standalone player pages are real navigations
-// by design.
+// visible while it's collapsed. Every surface opens tracks through this —
+// Home's shelves here, the channel/playlist detail panel and Explore's
+// results from home/detail.js and home/explore.js respectively — since
+// there's no longer a separate standalone player page for any of them to
+// navigate to instead.
 //
 // player.js's setupPlayer/prepareAudio/setupMediaSession/setupFavorite run
 // against this markup unmodified (it renders the same _player_controls.html
@@ -185,9 +187,10 @@ export function setupPlayerOverlay() {
   });
   document.getElementById("mini-player-close").addEventListener("click", closePlayer);
 
-  // Home's shelves only — Library has no .card elements at all (it's a grid
-  // of channel tiles linking to /channel/{id}, a real page, out of scope),
-  // and Explore's results route through playSearchedVideo instead.
+  // Home's shelves only — Library's grid links to channels/playlists, not
+  // tracks (home/library.js handles those, via home/detail.js), and
+  // Explore's results and the detail panel's track rows route through
+  // playSearchedVideo and home/detail.js respectively instead.
   const homeTab = document.getElementById("tab-home");
   if (!homeTab) return;
 

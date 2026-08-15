@@ -1,0 +1,61 @@
+{# One channel or one pinned playlist's track list — swapped into index.html's
+   #detail-panel by home/detail.js (GET /partials/detail/channel/{id} or
+   /partials/detail/playlist/{kind}). Replaces the old standalone
+   channel.html/content_list.html pages; no <main class="layout"> wrapper
+   here since #tab-detail already sits inside index.html's one shared
+   <main class="layout">.
+
+   `feed` is set for a channel, None for a playlist — that's also what picks
+   the hero icon vs avatar and whether track rows repeat the channel name
+   (show_channel below).
+#}
+<button type="button" class="back-link" id="detail-back-btn">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-arrow-left" /></svg>
+  Library
+</button>
+
+<div class="channel-hero">
+  {% if feed %}
+  {% if feed.avatar_url %}
+  <img class="channel-hero-avatar" src="{{ feed.avatar_url }}" alt="" />
+  {% else %}
+  <span class="channel-hero-avatar"></span>
+  {% endif %}
+  {% else %}
+  <span class="channel-hero-avatar channel-card-icon is-{{ kind }}">
+    {% if kind == "favorites" %}
+    <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-heart" /></svg>
+    {% elif kind == "saved" %}
+    <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-bookmark" /></svg>
+    {% elif kind == "new-uploads" %}
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-upload" /></svg>
+    {% else %}
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-clock" /></svg>
+    {% endif %}
+  </span>
+  {% endif %}
+  <div class="channel-hero-info">
+    <h1 class="channel-hero-title">{{ title }}</h1>
+    <p class="muted">{{ video_count }} video{{ '' if video_count == 1 else 's' }}</p>
+  </div>
+  {% if feed %}
+  <button type="button" id="unfollow-channel-btn" class="btn-quiet channel-hero-unfollow" data-feed-id="{{ feed.id }}">
+    Unfollow
+  </button>
+  {% endif %}
+</div>
+
+{% if content %}
+{% set show_channel = (feed is none) %}
+<div class="track-list">
+  {% for item in content %}
+  {% set index = start_index + loop.index0 %}
+  {% include "_content_row.html" %}
+  {% endfor %}
+</div>
+
+{% include "_pagination.html" %}
+
+{% else %}
+<p class="muted">{{ empty_message }}</p>
+{% endif %}

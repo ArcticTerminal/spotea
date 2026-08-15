@@ -8,7 +8,7 @@
   data-favorite="{{ 'true' if item.is_favorite else 'false' }}"
   data-saved="{{ 'true' if item.is_saved else 'false' }}"
 >
-  <a class="thumb" href="/player/{{ item.id }}" aria-label="Play {{ item.title }}">
+  <a class="thumb" href="/#player/{{ item.id }}" aria-label="Play {{ item.title }}">
     {% if item.thumbnail_url %}
     <img src="{{ item.thumbnail_url }}" alt="" loading="lazy" />
     {% endif %}
@@ -23,12 +23,12 @@
   </a>
   <div class="card-body">
     <h3 class="card-title" title="{{ item.title }}">
-      <a class="card-link" href="/player/{{ item.id }}">{{ item.title }}</a>
+      <a class="card-link" href="/#player/{{ item.id }}">{{ item.title }}</a>
     </h3>
     <div class="card-meta-row">
       <div class="card-meta-text">
         <p class="card-channel">
-          <a class="card-link" href="/player/{{ item.id }}">{{ item.feed.channel_title }}</a>
+          <a class="card-link" href="/#player/{{ item.id }}">{{ item.feed.channel_title }}</a>
         </p>
         {% if item.published_at %}
         <p class="card-date">{{ item.published_at.strftime('%d %b %Y') }}</p>

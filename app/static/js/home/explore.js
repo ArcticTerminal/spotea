@@ -3,6 +3,8 @@
 // kicks off a history backfill worth showing progress for).
 
 import { api, debounce, escapeHtml, formatDuration, showToast } from "../core.js";
+import { refreshFragments } from "../fragments.js";
+import { openDetail } from "./detail.js";
 import { openPlayer } from "./overlay.js";
 
 function formatSubscribers(count) {
@@ -145,7 +147,7 @@ function backfillPhaseParts(phase, done, total) {
 
 const isActiveBackfillPhase = (phase) => phase === "scanning" || phase === "saving";
 
-// Polls until a just-added channel's backfill is done, then navigates to it.
+// Polls until a just-added channel's backfill is done, then opens it.
 // Assumes showBackfillOverlay() is already up (callers show it when the add
 // starts, before the POST even resolves, so there's no gap where the screen
 // looks idle while the RSS sync — itself a couple of seconds — is in flight).
@@ -173,7 +175,13 @@ async function waitForBackfillThenOpen(feedId, title) {
     await new Promise((r) => setTimeout(r, 400));
   }
 
-  window.location.href = `/channel/${feedId}`;
+  hideBackfillOverlay();
+  // The old page-navigation version of this got Library's grid for free (it
+  // was a full reload away). Staying on the same document means asking for
+  // it explicitly, so "back" from the new channel doesn't land on a Library
+  // tab that still looks like the channel was never added.
+  refreshFragments();
+  openDetail("channel", feedId);
 }
 
 async function addChannel(channelUrl, button) {

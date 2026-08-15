@@ -9,7 +9,7 @@
 #}
 {% if feeds %}
     <div class="channel-grid">
-      <a class="channel-card" href="/favorites">
+      <a class="channel-card" href="/#favorites" data-detail-kind="favorites">
         <span class="channel-card-avatar channel-card-icon is-favorites">
           <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-heart" /></svg>
         </span>
@@ -18,7 +18,7 @@
           <span class="channel-card-count" id="library-count-favorites">{{ favorites_count }} video{{ '' if favorites_count == 1 else 's' }}</span>
         </span>
       </a>
-      <a class="channel-card" href="/saved">
+      <a class="channel-card" href="/#saved" data-detail-kind="saved">
         <span class="channel-card-avatar channel-card-icon is-saved">
           <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-bookmark" /></svg>
         </span>
@@ -27,7 +27,7 @@
           <span class="channel-card-count" id="library-count-saved">{{ saved_count }} video{{ '' if saved_count == 1 else 's' }}</span>
         </span>
       </a>
-      <a class="channel-card" href="/new-uploads">
+      <a class="channel-card" href="/#new-uploads" data-detail-kind="new-uploads">
         <span class="channel-card-avatar channel-card-icon is-new-uploads">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-upload" /></svg>
         </span>
@@ -36,7 +36,7 @@
           <span class="channel-card-count">{{ new_uploads_count }} video{{ '' if new_uploads_count == 1 else 's' }}</span>
         </span>
       </a>
-      <a class="channel-card" href="/recently-played">
+      <a class="channel-card" href="/#recently-played" data-detail-kind="recently-played">
         <span class="channel-card-avatar channel-card-icon is-recently-played">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-clock" /></svg>
         </span>
@@ -47,7 +47,7 @@
       </a>
       {% for feed in feeds %}
       {% set video_count = channel_video_counts.get(feed.id, 0) %}
-      <a class="channel-card" href="/channel/{{ feed.id }}">
+      <a class="channel-card" href="/#channel/{{ feed.id }}" data-detail-kind="channel" data-detail-id="{{ feed.id }}">
         {% if feed.avatar_url %}
         <img class="channel-card-avatar" src="{{ feed.avatar_url }}" alt="" />
         {% else %}

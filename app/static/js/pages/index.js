@@ -1,11 +1,14 @@
-// Entry point for index.html — Home, Library, Explore and Settings.
+// Entry point for index.html — Home, Library, Explore, Settings, and the
+// channel/playlist detail panel and player overlay drilled into from them.
 
 import { setupSaveButtons } from "../content-actions.js";
 import { setupBulkImport, setupBulkImportOverlay } from "../home/bulk-import.js";
+import { handleInitialRoute, setupDetailPanel } from "../home/detail.js";
 import { setupExploreSearch } from "../home/explore.js";
 import {
   setupHomeChannels,
   setupHorizontalScrollers,
+  setupLibraryChannelGrid,
   setupLibrarySearch,
   setupMobileMenu,
   setupRefreshButton,
@@ -24,7 +27,12 @@ setupTabs();
 setupPlayer();
 setupFavorite();
 setupPlayerOverlay();
+setupDetailPanel();
 resumeOverlayIfNeeded();
+// resumeOverlayIfNeeded only reopens a track left playing in a previous
+// session; a #channel/42 or #player/123 hash in the URL right now is a
+// separate, higher-priority thing to resolve on boot.
+handleInitialRoute();
 setupSaveButtons();
 setupExploreSearch();
 setupDownloadsOverlay();
@@ -33,6 +41,7 @@ setupBulkImport();
 setupStorage();
 setupSettings();
 setupHomeChannels();
+setupLibraryChannelGrid();
 setupLibrarySearch();
 setupHorizontalScrollers();
 setupRefreshButton();

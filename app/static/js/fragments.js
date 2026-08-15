@@ -49,9 +49,32 @@ function restoreScroll(positions) {
   });
 }
 
+// Parses a fragment response's <template data-target="…"> block(s) and
+// swaps each into the matching element by id, preserving that element's
+// horizontal scroll position across the swap. Shared with home/detail.js,
+// which fetches /partials/detail/... the same way but drives its own
+// loading state and error handling instead of refreshOne's silent-fail one
+// (a failed background refresh is invisible by design; a failed detail
+// panel load is the entire thing the user just asked for).
+export function swapFragmentHtml(html) {
+  const holder = document.createElement("div");
+  holder.innerHTML = html;
+
+  let swapped = false;
+  holder.querySelectorAll("template[data-target]").forEach((template) => {
+    const target = document.getElementById(template.dataset.target);
+    if (!target) return;
+    const positions = captureScroll(target);
+    target.replaceChildren(template.content.cloneNode(true));
+    restoreScroll(positions);
+    swapped = true;
+  });
+  return swapped;
+}
+
 async function refreshOne({ name, targets }) {
-  // Skip regions this page doesn't have — content-actions.js runs on the
-  // channel and playlist pages too, where none of these exist.
+  // Skip regions this page doesn't have — content-actions.js runs while a
+  // detail panel is open too, where none of these exist.
   const present = targets.filter((id) => document.getElementById(id));
   if (!present.length) return false;
 
@@ -66,19 +89,7 @@ async function refreshOne({ name, targets }) {
     return false;
   }
 
-  const holder = document.createElement("div");
-  holder.innerHTML = html;
-
-  let swapped = false;
-  holder.querySelectorAll("template[data-target]").forEach((template) => {
-    const target = document.getElementById(template.dataset.target);
-    if (!target) return;
-    const positions = captureScroll(target);
-    target.replaceChildren(template.content.cloneNode(true));
-    restoreScroll(positions);
-    swapped = true;
-  });
-  return swapped;
+  return swapFragmentHtml(html);
 }
 
 export async function refreshFragments() {
