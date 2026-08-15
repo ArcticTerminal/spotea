@@ -12,21 +12,55 @@ const SKIP_SECONDS = 15;
 // dead air after the file was already on disk. Start tight and back off, so
 // the common case feels immediate without a genuinely slow download turning
 // into a request every 300ms for minutes on end.
-const POLL_SCHEDULE_MS = [250, 250, 400, 400, 700, 1000, 1500];
-const POLL_STEADY_MS = 2500;
+// Poll tightly through the window where downloads actually land, then back
+// off. Measured end to end, server side: ~1.8s when android_vr resolves a URL
+// YouTube honours, ~3.5s when the ladder falls through to tv_simply.
+//
+// The schedule this replaces ramped 250ms up to 2500ms, which put its widest
+// gaps exactly where those two land — a 1s gap between 2s and 3s, a 1.5s gap
+// between 3s and 4.5s. A file ready at 3.2s wasn't picked up until 4.5s.
+// Across the plausible range the average dead air was ~700ms: more than a
+// third of the wait was the client simply not asking yet, after the audio was
+// already on disk.
+//
+// 200ms costs 20 requests over four seconds, each a single indexed SQLite
+// read on localhost. That is nothing next to the two thirds of a second it
+// gives back, and the tight window is bounded so a genuinely slow download
+// doesn't keep it up for minutes.
+const POLL_TIGHT_MS = 200;
+const POLL_TIGHT_UNTIL_MS = 4000;
+const POLL_RELAXED_MS = 500;
+const POLL_RELAXED_UNTIL_MS = 12000;
+const POLL_STEADY_MS = 2000;
 
-// If a download shows literally no sign of life — no byte progress, no
-// "converting" phase — within this long, it's worth abandoning and asking
-// the server to start a fresh attempt (POST .../download/restart) rather
-// than waiting out whatever the stuck attempt is doing: YouTube not
-// answering at all is exactly what a stalled attempt looks like from here.
-// Capped at MAX_STALL_ATTEMPTS total rounds (the original attempt plus
-// restarts) rather than forever — a video that's going to stall on every
-// attempt (geo-blocked, taken down) needs to actually fail eventually
-// instead of restarting every few seconds indefinitely.
-const STALL_TIMEOUT_MS = 3000;
-const MAX_STALL_ATTEMPTS = 3;
-let stallTimer = null;
+// Driven by elapsed time rather than a step counter, so a slow response
+// can't shift the whole schedule out from under the window it's aimed at.
+function nextPollDelay(elapsedMs) {
+  if (elapsedMs < POLL_TIGHT_UNTIL_MS) return POLL_TIGHT_MS;
+  if (elapsedMs < POLL_RELAXED_UNTIL_MS) return POLL_RELAXED_MS;
+  return POLL_STEADY_MS;
+}
+
+// There used to be a 3s "stall watchdog" here: if no byte progress had shown
+// up by then it POSTed .../download/restart, up to three rounds, and showed
+// "(attempt 2 of 3)" in the status text. It was making things worse, not
+// better, and the whole mechanism is gone:
+//
+//   - 3s was shorter than a healthy attempt. Resolving a URL takes 1.4-3s
+//     and produces no byte progress at all, so the watchdog fired on
+//     downloads that were working.
+//   - It couldn't cancel what it abandoned. yt-dlp can't be interrupted, so
+//     a restart left the old attempt running and started a second one beside
+//     it — two, then three, concurrent yt-dlp runs per play, all writing the
+//     same .part file (one play in the logs died on "Unable to rename file").
+//   - It threw away successes. The abandoned attempts often finished fine,
+//     but a superseded generation's result was discarded on arrival, so the
+//     user waited for a later attempt to redo work already done. That is
+//     exactly why "the third attempt" appeared to be the one that worked.
+//
+// Retrying now lives entirely in downloader.py's ladder, which doesn't have
+// to guess: it sees the failure itself, in ~1.4s, and moves to the next
+// client immediately. This side just polls.
 
 // prepareAudio() can be called repeatedly for different tracks in the same
 // page load (switching tracks in the overlay) — this tracks the in-flight
@@ -304,15 +338,9 @@ export async function prepareAudio(audio, onStart) {
     return;
   }
 
-  // Surfaced in the "Downloading audio…"/"Converting…" text throughout, so
-  // a restart is never invisible — see the stall watchdog below.
-  let attemptNumber = 1;
-  const attemptSuffix = () => ` (attempt ${attemptNumber} of ${MAX_STALL_ATTEMPTS})`;
-
   prepare.hidden = false;
   transport.classList.add("is-disabled");
-  prepareText.textContent =
-    root.dataset.status === "downloading" ? "Downloading audio…" + attemptSuffix() : "Preparing audio…";
+  prepareText.textContent = "Preparing audio…";
 
   if (root.dataset.status !== "downloading") {
     // 409 just means another tab already started it; keep polling either way.
@@ -321,7 +349,6 @@ export async function prepareAudio(audio, onStart) {
       fail("Could not start the download");
       return;
     }
-    prepareText.textContent = "Downloading audio…" + attemptSuffix();
   }
 
   // The download itself is a server-side background task, independent of
@@ -332,11 +359,6 @@ export async function prepareAudio(audio, onStart) {
   // misses; a lone one is silently retried on the next tick.
   const MAX_CONSECUTIVE_POLL_FAILURES = 4;
   let consecutiveFailures = 0;
-
-  // Set the moment checkStatus sees any real sign of life, so the stall
-  // watchdog below knows the attempt it's watching has actually gotten
-  // going and stops trying to restart it.
-  let sawProgress = false;
 
   const checkStatus = async () => {
     // This track may no longer be the one loaded (a later openPlayer() call
@@ -362,58 +384,38 @@ export async function prepareAudio(audio, onStart) {
     } else if (data.status === "error") {
       stopPolling();
       // A 403 here means YouTube resolved a media URL and then refused it.
-      // This used to be reported as rate-limiting the whole server, which
-      // measurement didn't support (see downloader.py's _ATTEMPTS — the
-      // refusals are per-request, and other tracks download fine in the same
-      // minute). By the time this shows, downloader.py has already retried
-      // with two different client families, so trying again right now is
-      // worth a shot but not something to promise.
+      // By the time this shows, downloader.py has already been through every
+      // rung of its ladder — android_vr and then tv_simply twice — so trying
+      // again right now is worth a shot but not something to promise.
       const refused = data.error_message && /\b403\b|Forbidden/i.test(data.error_message);
       fail(refused ? "YouTube wouldn't serve this track — try again" : "Download failed");
     } else if (data.phase === "converting") {
-      sawProgress = true;
-      prepareText.textContent = "Converting…" + attemptSuffix();
-    } else if (data.progress_percent != null) {
-      sawProgress = true;
-      prepareText.textContent = `Downloading audio… ${data.progress_percent}%` + attemptSuffix();
+      prepareText.textContent = "Converting…";
+    } else if (data.phase === "downloading") {
+      // The percentage is absent when YouTube serves no length to divide by,
+      // which is a reason to drop the number — not to say nothing and leave
+      // the text on the previous phase.
+      prepareText.textContent =
+        data.progress_percent != null ? `Downloading audio… ${data.progress_percent}%` : "Downloading audio…";
+    } else if (data.phase === "extracting") {
+      // The 1.4-3s where the server is resolving a URL YouTube will honour.
+      // No bytes move yet, so without this the text would sit on "Preparing
+      // audio…" for the entire slowest part of a play.
+      prepareText.textContent = "Finding audio…";
     }
   };
 
   const pollToken = {};
   activePollToken = pollToken;
-  let pollStep = 0;
+  const startedAt = Date.now();
 
   const poll = async () => {
     if (activePollToken !== pollToken) return;
     await checkStatus();
     if (activePollToken !== pollToken) return; // checkStatus stopped us, or a newer track took over
-    activePollTimer = setTimeout(poll, POLL_SCHEDULE_MS[pollStep++] ?? POLL_STEADY_MS);
+    activePollTimer = setTimeout(poll, nextPollDelay(Date.now() - startedAt));
   };
-  activePollTimer = setTimeout(poll, POLL_SCHEDULE_MS[pollStep++]);
-
-  // Re-arms itself after each restart, so a track that stalls again on the
-  // next attempt gets restarted again too — up to MAX_STALL_ATTEMPTS total
-  // rounds, at which point it's treated as a real failure (see fail() below)
-  // instead of retrying forever.
-  const armStallTimer = () => {
-    stallTimer = setTimeout(async () => {
-      if (activePollToken !== pollToken || sawProgress) return;
-      if (attemptNumber >= MAX_STALL_ATTEMPTS) {
-        stopPolling();
-        fail("YouTube isn't responding — try again");
-        return;
-      }
-      attemptNumber += 1;
-      const { ok } = await api(`/content/${contentId}/download/restart`, { method: "POST" });
-      // Whether or not this actually landed, keep going — the poll loop
-      // above keeps running either way and will pick up whatever the server
-      // ends up doing, and the next stall window still needs to be watched.
-      if (activePollToken !== pollToken) return;
-      if (ok) prepareText.textContent = "Downloading audio…" + attemptSuffix();
-      armStallTimer();
-    }, STALL_TIMEOUT_MS);
-  };
-  armStallTimer();
+  activePollTimer = setTimeout(poll, nextPollDelay(0));
 
   // Mobile browsers throttle/suspend timers for a backgrounded tab, so the
   // interval above may not have ticked in a while by the time the user
@@ -425,22 +427,17 @@ export async function prepareAudio(audio, onStart) {
   document.addEventListener("visibilitychange", activeVisibilityHandler);
 }
 
-// Stops the poll, the stall watchdog, and the visibilitychange check-in —
-// anything that ends a track's polling (ready, error, giving up, or a new
-// track superseding it) needs all three gone. Leaving the visibilitychange
-// listener behind after the interval is cleared turns it into a zombie: the
-// next foreground/background cycle would still fire it, see "ready" again,
-// and call startPlayback() a second time — restarting a track that was
-// already playing fine from 0:00.
+// Stops both the poll and the visibilitychange check-in — anything that ends
+// a track's polling (ready, error, or a new track superseding it) needs both
+// gone. Leaving the visibilitychange listener behind after the timer is
+// cleared turns it into a zombie: the next foreground/background cycle would
+// still fire it, see "ready" again, and call startPlayback() a second time —
+// restarting a track that was already playing fine from 0:00.
 function stopPolling() {
   activePollToken = null;
   if (activePollTimer) {
     clearTimeout(activePollTimer);
     activePollTimer = null;
-  }
-  if (stallTimer) {
-    clearTimeout(stallTimer);
-    stallTimer = null;
   }
   if (activeVisibilityHandler) {
     document.removeEventListener("visibilitychange", activeVisibilityHandler);

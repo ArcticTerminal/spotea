@@ -946,31 +946,151 @@ the repo, not installed as a package.
 ### YouTube refusing a download (HTTP 403)
 
 The common failure isn't extraction — it's YouTube resolving a media URL and
-then refusing to serve it (`unable to download video data: HTTP Error 403`).
-Measured against the live instance rather than assumed (see the comment on
-`_ATTEMPTS` in `app/downloader.py`):
+then refusing to serve it (`unable to download video data: HTTP Error 403`,
+raised from `YoutubeDL.process_info`, i.e. the media transfer, not the player
+API). **Which client resolved that URL is what decides whether it gets
+served**, so the ladder in `app/downloader.py` is a sequence of client
+changes, not of waits.
 
-- The refusals are **per-request**, not per-IP and not per-video. In one
-  minute, one video downloaded end to end in 2.2s while another 403'd four
-  times in a row across four different client and network configurations.
-  A video that succeeded first time needed a retry half an hour later.
-- **Retrying works, and works immediately** — a second attempt 2 seconds
-  later succeeded. Longer waits bought nothing measurable, so the ladder is
-  0s / 2s / 5s across three attempts (~20s worst case) rather than the
-  5s/15s/30s it used to be (~70s, nearly all sleeping).
-- The transfer is never the bottleneck: 5.4MB arrived in under a second.
-  Typical audio here averages ~44kbps, so an hour of content is ~19MB.
-- Things that did **not** help, tested and rejected: forcing IPv4, and
-  Chrome TLS impersonation via `curl_cffi` (so it isn't a dependency). The
-  `tv` client is not usable unauthenticated — it reports every format as DRM
-  protected without cookies.
-- `sleep_interval_requests` was removed. It spaced out yt-dlp's own internal
-  requests, costing ~1.5s on every play including the successful ones, with
-  no measured effect on how often YouTube refused.
+Measured per client against the live instance — one extraction each, plus a
+2-byte range GET on the URL it produced:
+
+| client | extract | usable mp4a URL | range GET |
+|---|---|---|---|
+| `android_vr` | ~1.4s | yes, **no** PO token | 206, but 403s at random |
+| `tv_simply` | ~2.9s | yes, **PO-token-bound** | 206 |
+| `web_safari` | ~1.5s | **none** — SABR-forced, formats have no URL | — |
+| `mweb` | ~3.7s | yes, PO-token-bound | **403** |
+| `web_embedded` | ~3.3s | yes, no PO token | **403** |
+| `ios` | ~1.3s | **none** — needs a GVS token it can't get | — |
+
+So the ladder is `android_vr` → `tv_simply` → `tv_simply`, with **no sleeps**:
+fast client first because it works most of the time and costs ~1.4s to rule
+out, then the one whose URL carries a PO token, which is the mechanism
+YouTube actually checks. `tv_simply` needs a JS runtime for `nsig`, but the
+image already ships Deno, so it needs no `remote_components` fetch. Format
+selection lands on plain `140` either way — same bitrate, no audio change.
+
+Two things that had been assumed here were false, and cost a lot of user-
+visible waiting before being measured:
+
+- **`web_safari` was never a fallback.** It was carried as `android_vr`'s
+  safety net; YouTube forces SABR on it (yt-dlp#12482) so every https format
+  comes back without a URL and yt-dlp drops all of them — silently, under
+  `no_warnings`. Every download this app ever served came from `android_vr`
+  alone, which is precisely why an `android_vr` 403 had nothing to fall back
+  to.
+- **`mweb` was the "different client family" last rung**, costing 3.7s and a
+  JS solver fetch to produce a URL that 403s.
+
+Waiting is not part of the fix. The refusals are per-URL: a fresh extraction
+produces a fresh URL, and sitting still first doesn't make that URL more
+acceptable. The transfer itself is never the bottleneck either — 5.4MB
+arrived in under a second, and typical audio here averages ~44kbps (an hour
+is ~19MB).
+
+Things tested and rejected, so nobody repeats them: forcing IPv4; Chrome TLS
+impersonation via `curl_cffi` (so it isn't a dependency); `fetch_pot=always`
+(does **not** bind a PO token to `android_vr` — it has no GVS token support
+at all); `sleep_interval_requests` (cost ~1.5s on every play including the
+successful ones, no measured effect on refusals). The `tv` client is not
+usable unauthenticated — every format comes back DRM protected without
+cookies.
 
 Cookies would unlock more (`tv` formats, age-restricted content) but carry a
 real risk of the Google account being restricted, so the app stays
 unauthenticated by default.
+
+#### Retrying belongs to the server, not the client
+
+For one day there was also a client-side "stall watchdog": `player.js` armed
+a 3s timer and, if no byte progress had appeared, POSTed
+`/content/{id}/download/restart` to dispatch a fresh attempt, up to three
+rounds, showing "(attempt 2 of 3)" in the status text. It has been removed
+entirely, along with the restart endpoint and the generation-number
+bookkeeping that made a superseded attempt's result discardable. It was
+making playback slower, not faster:
+
+- **3s was shorter than a healthy attempt.** Resolving a URL takes 1.4-3s and
+  moves no bytes, so the watchdog fired on downloads that were working fine.
+- **It couldn't cancel what it abandoned.** yt-dlp can't be interrupted from
+  Python, so a restart left the old attempt running and started a second one
+  beside it — two, then three, concurrent yt-dlp runs per play, all writing
+  the same `.part` path. One real play in the logs died on
+  `Unable to rename file: ... .m4a.part -> .m4a`.
+- **It threw away successes.** The abandoned attempts usually finished fine,
+  but a superseded generation's result was discarded on arrival, so the user
+  waited for a later attempt to redo work already done. That is exactly why
+  "the third attempt" looked like the one that worked: it was simply the
+  first attempt allowed to keep its result.
+
+The server never had to guess in the first place — it catches the failure
+itself, in ~1.4s, and moves to the next client immediately. The client just
+polls. To keep one hung request from holding the whole ladder open,
+`socket_timeout` is set (`SOCKET_TIMEOUT_SECONDS`), which is the real version
+of what the watchdog was trying to do.
+
+`download_audio` also reports an `extracting` phase at the start of every
+attempt. That 1.4-3s is the slowest part of a play and produces no byte
+progress of its own, so without it the UI would sit on "Preparing audio…" for
+the entire wait.
+
+### Where a play's time actually goes
+
+Measured end to end on a fresh download (2.15MiB, `android_vr` first try):
+
+| | |
+|---|---|
+| resolving a URL YouTube will honour | **1.42s** |
+| transferring the audio | 0.33s |
+| FFmpeg remux to `.m4a` | 0.04s |
+| **total** | **1.79s** |
+
+Broken down further, that 1.42s is two YouTube round trips plus yt-dlp
+overhead:
+
+| | |
+|---|---|
+| `YoutubeDL()` construction (1744 extractors, warm process) | 0.06s |
+| `GET /watch?v=…` — the watch page | **0.71-0.93s** |
+| `POST /youtubei/v1/player` | 0.14s |
+| format sorting and selection | 0.10s |
+
+**The watch page is the whole cost, and its size is not why.** It is ~1.24MB
+of HTML, but served gzipped that's 306KB in 0.93s, brotli 140KB in 0.81s, and
+*uncompressed* 1275KB in 0.83s — over four times the bytes for less time.
+What's being waited on is YouTube generating the page, not sending it. So
+`brotli` is not worth adding as a dependency: it halves the wire bytes and
+buys ~0.1s, inside run-to-run noise.
+
+Things that don't help, measured:
+
+- **`webpage_client`** only accepts `web` and `web_safari` — both the same
+  full watch page. There is no lighter page to ask for.
+- **`player_skip=webpage`** alone fails outright: the player response comes
+  back as "Sign in to confirm you're not a bot".
+- **`player_skip=webpage` + a harvested `visitor_data`** does work, and gets
+  `android_vr` from 1.32s to 0.93s — but only because yt-dlp swaps the watch
+  page for a `/youtubei/v1/next` call that costs 0.55-0.68s of its own. ~0.3s
+  for a request pattern (player calls from one long-lived visitor ID that
+  never loads a watch page) that is a textbook bot signature. Not taken: the
+  403s this app spent a day fixing are the exact thing it would risk.
+- **Reusing one `YoutubeDL` instance** across downloads would save the 56ms
+  construction, at the cost of sharing extractor state between plays.
+
+The one real win was on this side of the wire — see the poll schedule in
+`player.js`. The client used to ramp 250ms → 2500ms, leaving a 1s gap between
+2s and 3s and a 1.5s gap between 3s and 4.5s, i.e. its widest gaps exactly
+where downloads land. Average dead air after the file was already on disk:
+**~700ms**, with a worst case of 2s. A flat 200ms through the first four
+seconds brings that to ~50ms for 20 local SQLite reads.
+
+> Note on diagnosing this: `logger.info` in this app used to go nowhere.
+> uvicorn configures only its own loggers and leaves the root at WARNING, so
+> the ladder's "Download attempt failed" line never reached a handler —
+> which is why the retries stayed invisible for a day. `app/main.py` now
+> calls `logging.basicConfig(level=INFO)`; uvicorn's own loggers don't
+> propagate, so the access log isn't duplicated.
 
 ## 9. Deployment (Docker)
 

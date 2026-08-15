@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
@@ -22,6 +23,14 @@ from app.routers import profiles as profiles_router
 from app.routers import settings as settings_router
 from app.routers import storage as storage_router
 from app.scheduler import run_scheduler
+
+# uvicorn configures only its own loggers, leaving the root at WARNING, so
+# every logger.info() this app makes went nowhere. That's not cosmetic: the
+# download ladder logged which attempt failed and why at INFO, and a day of
+# "why does it always take three tries?" was spent without that line ever
+# reaching a handler. uvicorn's own loggers don't propagate, so this doesn't
+# duplicate the access log.
+logging.basicConfig(level=logging.INFO, format="%(levelname)s:     %(name)s: %(message)s")
 
 
 def _ensure_app_settings() -> None:

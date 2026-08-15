@@ -196,83 +196,40 @@ def test_start_download_409s_while_already_downloading(client, db_session):
     assert res.status_code == 409
 
 
-def test_restart_download_is_a_noop_once_ready(client, db_session, monkeypatch):
-    from app.routers import content as content_router
-
-    item = _seed_one(db_session, status="ready", file_path="/nonexistent.m4a")
-    called = []
-    monkeypatch.setattr(content_router, "download_audio", lambda *a, **k: called.append(1))
-
+def test_there_is_no_restart_endpoint(client, db_session):
+    """The client used to POST this every 3s while a download showed no byte
+    progress, which restarted attempts that were working and left the
+    abandoned ones running. Retrying is downloader.py's ladder's job now, and
+    nothing should be able to dispatch a second concurrent attempt for one
+    row — two yt-dlp runs writing the same .part file is how a real play died
+    on "Unable to rename file"."""
+    item = _seed_one(db_session, status="downloading")
     res = client.post(f"/content/{item.id}/download/restart")
-    assert res.status_code == 200
-    assert res.json()["status"] == "ready"
-    assert not called  # no attempt dispatched at all
+    assert res.status_code == 404
 
 
-def test_restart_download_does_not_409_while_already_downloading(client, db_session, monkeypatch, tmp_path):
-    """Unlike POST /download, this is exactly for the case where a download
-    is already running — that's the whole point (see player.js's stall
-    watchdog)."""
+def test_the_extracting_phase_reaches_the_status_endpoint(client, db_session, monkeypatch, tmp_path):
+    """Resolving a URL YouTube will honour is the slow part of a play and
+    moves no bytes, so the phase downloader.py reports during it has to make
+    it out to the poller — otherwise the UI sits on "Preparing audio…" for
+    the entire wait."""
     from app.routers import content as content_router
 
     item = _seed_one(db_session, status="downloading")
     fake_file = tmp_path / f"{item.video_id}.m4a"
     fake_file.write_bytes(b"audio")
-    monkeypatch.setattr(content_router, "download_audio", lambda *a, **k: fake_file)
 
-    res = client.post(f"/content/{item.id}/download/restart")
-    assert res.status_code == 200
+    def fake_download(video_id, quality="high", on_progress=None):
+        on_progress("extracting", None)
+        assert client.get(f"/content/{item.id}/status").json()["phase"] == "extracting"
+        return fake_file
 
-    db_session.refresh(item)
-    assert item.status == "ready"
+    monkeypatch.setattr(content_router, "download_audio", fake_download)
+    content_router._run_download(item.id, item.video_id, "high")
 
-
-def test_a_superseded_generations_result_never_touches_the_row(client, db_session, monkeypatch, tmp_path):
-    """The core of the stall-restart feature: once a restart bumps the
-    generation, whatever the abandoned attempt does later — even succeeding
-    — must not reach the DB, since a fresher attempt now owns the row."""
-    from app.routers import content as content_router
-
-    item = _seed_one(db_session, status="downloading")
-    fake_file = tmp_path / f"{item.video_id}.m4a"
-    fake_file.write_bytes(b"audio")
-    monkeypatch.setattr(content_router, "download_audio", lambda *a, **k: fake_file)
-
-    stale_generation = content_router._next_generation(item.id)
-    current_generation = content_router._next_generation(item.id)
-
-    # The stale attempt "finishes" (successfully!) after being superseded.
-    content_router._run_download(item.id, item.video_id, "high", stale_generation)
-    db_session.refresh(item)
-    assert item.status == "downloading"
-    assert item.file_path is None
-
-    # The attempt that's actually current still writes normally.
-    content_router._run_download(item.id, item.video_id, "high", current_generation)
-    db_session.refresh(item)
-    assert item.status == "ready"
-    assert item.file_path == str(fake_file)
-
-
-def test_a_superseded_generations_failure_is_also_ignored(client, db_session, monkeypatch):
-    from app.downloader import DownloadError
-    from app.routers import content as content_router
-
-    item = _seed_one(db_session, status="downloading")
-
-    def fail(*a, **k):
-        raise DownloadError("boom")
-
-    monkeypatch.setattr(content_router, "download_audio", fail)
-
-    stale_generation = content_router._next_generation(item.id)
-    content_router._next_generation(item.id)  # a newer attempt supersedes it
-
-    content_router._run_download(item.id, item.video_id, "high", stale_generation)
-
-    db_session.refresh(item)
-    assert item.status == "downloading"  # not downgraded to "error"
-    assert item.error_message is None
+    # ...and it's cleared once the download settles, rather than leaving a
+    # finished track reporting a phase forever.
+    assert client.get(f"/content/{item.id}/status").json()["phase"] is None
 
 
 def test_download_routes_require_login():
@@ -281,7 +238,6 @@ def test_download_routes_require_login():
     from app.main import app
 
     with TestClient(app) as anonymous:
-        for path in ["/content/1/download", "/content/1/download/restart"]:
-            res = anonymous.post(path, follow_redirects=False)
-            assert res.status_code == 303
-            assert res.headers["location"] == "/login"
+        res = anonymous.post("/content/1/download", follow_redirects=False)
+        assert res.status_code == 303
+        assert res.headers["location"] == "/login"
