@@ -14,6 +14,22 @@ import { api, formatDuration, showToast } from "../core.js";
 import { refreshFragments } from "../fragments.js";
 import { paintRange, prepareAudio, whenVisible } from "../player.js";
 import { clearResumeState, readResumeState } from "../resume.js";
+import {
+  QUEUE_CHANGED,
+  clearQueue,
+  isShuffled,
+  nextId,
+  noteCurrent,
+  peekNextId,
+  peekPreviousId,
+  previousId,
+  toggleShuffle,
+} from "./queue.js";
+
+// How much of the current track has to have actually played before the next
+// one is pulled down in the background (see setupPlayerOverlay's timeupdate
+// handler for why it isn't immediate).
+const PREFETCH_AFTER_SECONDS = 8;
 
 function expandPlayer() {
   document.getElementById("player-overlay").hidden = false;
@@ -40,6 +56,13 @@ export async function openPlayer(contentId, { expanded = true } = {}) {
   contentId = String(contentId);
   const root = document.getElementById("player-root");
   const audio = document.getElementById("audio");
+
+  // Every route into the player lands here, so this is the one place that can
+  // keep the queue pointer honest — including the routes that have nothing to
+  // do with a queue (a Home shelf, an Explore result), which is exactly when
+  // the queue has to be dropped rather than left to advance into a list the
+  // user has moved on from. See queue.js's noteCurrent.
+  noteCurrent(contentId);
 
   if (root.dataset.contentId === contentId) {
     // Same track already loaded — just surface it, don't touch playback.
@@ -130,6 +153,55 @@ export async function openPlayer(contentId, { expanded = true } = {}) {
   });
 }
 
+/**
+ * Opens a track the queue handed us, keeping the overlay however the user
+ * left it. A fixed `expanded: true` would be right for a tapped next button
+ * and wrong for everything else — auto-advance and the lock-screen/headset
+ * controls both fire while the app is collapsed to the mini bar or not on
+ * screen at all, and throwing the full "now playing" view up in those cases
+ * hijacks whatever the user was actually doing.
+ */
+function playFromQueue(contentId) {
+  if (contentId == null) return;
+  openPlayer(contentId, { expanded: !document.getElementById("player-overlay").hidden });
+}
+
+/**
+ * Mirrors the queue into every control that depends on it: the overlay's
+ * previous/next buttons, the mini bar's skip button, the shuffle toggle's
+ * on-state, and the lock-screen transport. Driven by queue.js's
+ * QUEUE_CHANGED event rather than called from each mutation site, so a new
+ * way of changing the queue can't forget to update the UI.
+ */
+function syncQueueControls() {
+  const hasNext = peekNextId() !== null;
+  const hasPrevious = peekPreviousId() !== null;
+
+  document.getElementById("next-track").disabled = !hasNext;
+  document.getElementById("prev-track").disabled = !hasPrevious;
+  document.getElementById("mini-player-next").hidden = !hasNext;
+
+  const shuffleBtn = document.getElementById("player-shuffle");
+  shuffleBtn.classList.toggle("is-on", isShuffled());
+  shuffleBtn.setAttribute("aria-pressed", String(isShuffled()));
+
+  if (!("mediaSession" in navigator)) return;
+  // Nulled rather than left registered when there's nowhere to skip to: the
+  // handler's presence is what decides whether the OS draws the button at
+  // all, so a no-op handler would put a dead control on the lock screen.
+  // Wrapped because a browser that doesn't implement these actions throws
+  // rather than ignoring them, which would take the rest of this sync with it.
+  try {
+    navigator.mediaSession.setActionHandler("nexttrack", hasNext ? () => playFromQueue(nextId()) : null);
+    navigator.mediaSession.setActionHandler(
+      "previoustrack",
+      hasPrevious ? () => playFromQueue(previousId()) : null
+    );
+  } catch (err) {
+    /* Not supported here — the in-page transport still works. */
+  }
+}
+
 export function closePlayer() {
   const audio = document.getElementById("audio");
   audio.pause();
@@ -144,6 +216,11 @@ export function closePlayer() {
   document.getElementById("player-overlay").hidden = true;
   document.getElementById("mini-player").hidden = true;
   document.body.classList.remove("has-mini-player");
+
+  // Dismissing the player dismisses what it was working through. Leaving the
+  // queue loaded would mean the next single track opened from a Home shelf
+  // silently inherited a list the user has already closed.
+  clearQueue();
 
   if ("mediaSession" in navigator) {
     navigator.mediaSession.metadata = null;
@@ -184,6 +261,41 @@ export function setupPlayerOverlay() {
   audio.addEventListener("ended", syncMiniIcon);
   audio.addEventListener("timeupdate", syncMiniProgress);
   audio.addEventListener("loadedmetadata", syncMiniProgress);
+
+  // A track running out is the whole point of having a queue; with none
+  // loaded nextId() is null and playback simply stops, as it always did.
+  audio.addEventListener("ended", () => playFromQueue(nextId()));
+
+  // Downloads are triggered by playing something, so without this every
+  // track change in a queue costs the same 2-4s "Preparing audio…" wait as
+  // the first one — on a "Play all" that's a gap between every pair of
+  // tracks. Fetching one ahead covers it, since a track that's already on
+  // disk starts instantly.
+  //
+  // Deliberately not fired at the moment playback starts: skipping quickly
+  // through a queue would then kick off a download per track passed over.
+  // Waiting until the current track has genuinely been listened to for a
+  // few seconds means a skipped-past track never pulls its successor down,
+  // while a track anyone is actually hearing still leaves minutes of lead
+  // time. Server-side the request is a no-op for anything already on disk
+  // (see routers/content.py's start_download).
+  let prefetchedFor = null;
+  audio.addEventListener("timeupdate", () => {
+    const playing = document.getElementById("player-root").dataset.contentId;
+    if (!playing || prefetchedFor === playing) return;
+    if (audio.currentTime < PREFETCH_AFTER_SECONDS) return;
+    prefetchedFor = playing;
+    const upcoming = peekNextId();
+    if (upcoming != null) api(`/content/${upcoming}/download`, { method: "POST" });
+  });
+
+  document.getElementById("prev-track").addEventListener("click", () => playFromQueue(previousId()));
+  document.getElementById("next-track").addEventListener("click", () => playFromQueue(nextId()));
+  document.getElementById("mini-player-next").addEventListener("click", () => playFromQueue(nextId()));
+  document.getElementById("player-shuffle").addEventListener("click", () => toggleShuffle());
+
+  document.addEventListener(QUEUE_CHANGED, syncQueueControls);
+  syncQueueControls();
 
   document.getElementById("mini-player-expand").addEventListener("click", expandPlayer);
   document.getElementById("overlay-collapse-btn").addEventListener("click", (event) => {

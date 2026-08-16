@@ -186,6 +186,19 @@ PLAYLIST_KINDS: dict[str, tuple] = {
 }
 
 
+def playlist_filter(kind: str) -> str | None:
+    """The query_content_page/query_content_ids filter one pinned playlist
+    means, or None for an unknown kind.
+
+    Read off PLAYLIST_KINDS rather than spelled out again: the queue endpoint
+    (routers/content.py) has to select exactly the rows the same playlist's
+    detail panel renders, and a second copy of this mapping is how "Play all"
+    would end up playing a different list than the one on screen.
+    """
+    config = PLAYLIST_KINDS.get(kind)
+    return config[1] if config else None
+
+
 def playlist_detail_context(db: Session, user_id: int, kind: str, page: int) -> dict | None:
     """One of the four pinned virtual playlists (Favorites/Saved/New
     Uploads/Recently Played), rendered through the same track-list/

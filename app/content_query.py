@@ -85,24 +85,17 @@ def followed_feeds(db: Session, user_id: int | None = None) -> Query[Feed]:
 CHANNEL_FILTER_PREFIX = "__channel__:"
 
 
-def query_content_page(
-    db: Session,
-    user_id: int,
-    page: int = 1,
-    filter: str = "",
-    page_size: int = DEFAULT_PAGE_SIZE,
-    feed_id: int | None = None,
-) -> tuple[list[Content], int, int]:
-    """A page of a user's content, newest first, optionally filtered. Shared
-    by the Library grid's server-rendered first page (pages.py) and the AJAX
-    endpoint that serves every subsequent page/filter change
-    (routers/content.py), so the two never disagree on what "page 1, no
-    filter" actually contains.
+def _content_query(
+    db: Session, user_id: int, filter: str = "", feed_id: int | None = None
+) -> Query[Content]:
+    """What one filter/feed selection *means*, ordered but unpaginated.
 
-    feed_id restricts to a single channel — used by the channel detail page,
-    which has no other filter UI, so it's applied independently of `filter`.
-
-    Returns (items, clamped page, total_pages).
+    Split out because two callers need the same selection at different
+    granularities: query_content_page below wants one page of full rows,
+    query_content_ids wants every id in the same order (the play queue). A
+    second spelling of these filters is exactly the drift this module exists
+    to prevent — a "Play all" that quietly played a different set than the
+    list it was launched from would be indistinguishable from a shuffle bug.
     """
     # is_preview excludes Explore videos not yet favorited/saved — see
     # routers/explore.py's add_single_video and routers/content.py's
@@ -113,7 +106,7 @@ def query_content_page(
     # every caller, not just some — except __played__ (Recently Played),
     # where a preview that's actually been listened to still belongs on the
     # list; same carve-out pages.py's home_recently_played shelf documents.
-    query = db.query(Content).options(joinedload(Content.feed)).filter(Content.user_id == user_id)
+    query = db.query(Content).filter(Content.user_id == user_id)
     if filter != "__played__":
         query = query.filter(Content.is_preview.is_(False))
 
@@ -149,7 +142,35 @@ def query_content_page(
     # Recently Played means "most recently played," not "most recently
     # published" — every other filter sorts by publish date.
     order_column = Content.last_played_at if filter == "__played__" else Content.published_at
-    query = query.order_by(order_column.desc())
+    return query.order_by(order_column.desc())
+
+
+def query_content_page(
+    db: Session,
+    user_id: int,
+    page: int = 1,
+    filter: str = "",
+    page_size: int = DEFAULT_PAGE_SIZE,
+    feed_id: int | None = None,
+) -> tuple[list[Content], int, int]:
+    """A page of a user's content, newest first, optionally filtered. Shared
+    by the Library grid's server-rendered first page (pages.py) and the AJAX
+    endpoint that serves every subsequent page/filter change
+    (routers/content.py), so the two never disagree on what "page 1, no
+    filter" actually contains.
+
+    feed_id restricts to a single channel — used by the channel detail page,
+    which has no other filter UI, so it's applied independently of `filter`.
+
+    Returns (items, clamped page, total_pages).
+    """
+    # joinedload lives here rather than in _content_query: every renderer of
+    # these rows reads .feed (channel name, avatar), but query_content_ids
+    # never materialises a Content object at all and would only pay for the
+    # join.
+    query = _content_query(db, user_id, filter=filter, feed_id=feed_id).options(
+        joinedload(Content.feed)
+    )
 
     total_items = query.count()
     total_pages = max(1, -(-total_items // page_size))
@@ -157,3 +178,28 @@ def query_content_page(
     items = query.offset((page - 1) * page_size).limit(page_size).all()
 
     return items, page, total_pages
+
+
+# How far a "Play all" reaches. A followed channel that's been backfilled can
+# be several thousand videos deep, and a queue that long is neither something
+# anyone listens through nor something worth shipping to the client and
+# keeping in sessionStorage. 1000 tracks is on the order of three days of
+# continuous playback — past the point where the cap is what limits the
+# session.
+QUEUE_MAX_ITEMS = 1000
+
+
+def query_content_ids(
+    db: Session, user_id: int, filter: str = "", feed_id: int | None = None
+) -> list[int]:
+    """Every content id one channel/playlist selects, in the same order its
+    track list shows them — the play queue behind "Play all" (see
+    routers/content.py's queue endpoints and static/js/home/queue.js).
+
+    Ids only: the client already has titles and artwork for the page it's
+    looking at, and fetches the rest one track at a time as it plays them, so
+    shipping full rows for a thousand-track queue would be almost entirely
+    waste.
+    """
+    query = _content_query(db, user_id, filter=filter, feed_id=feed_id)
+    return [row[0] for row in query.with_entities(Content.id).limit(QUEUE_MAX_ITEMS).all()]

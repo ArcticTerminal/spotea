@@ -37,11 +37,25 @@
   <div class="channel-hero-info">
     <h1 class="channel-hero-title">{{ title }}</h1>
     <p class="muted">{{ video_count }} video{{ '' if video_count == 1 else 's' }}</p>
+    {% if feed %}
+    <button type="button" id="unfollow-channel-btn" class="btn-quiet channel-hero-unfollow" data-feed-id="{{ feed.id }}">
+      Unfollow
+    </button>
+    {% endif %}
   </div>
-  {% if feed %}
-  <button type="button" id="unfollow-channel-btn" class="btn-quiet channel-hero-unfollow" data-feed-id="{{ feed.id }}">
-    Unfollow
-  </button>
+  {% if content %}
+  {# Play/Shuffle act on the whole channel or playlist, not just this page —
+     home/queue.js fetches the full id list from /content/queue/... rather than
+     reading the twenty rows below. Only rendered when there's something to
+     play; an empty playlist gets its empty_message and no controls. #}
+  <div class="detail-actions">
+    <button type="button" id="detail-play-all" class="btn-play-all" aria-label="Play all" title="Play all">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><use href="#i-play" /></svg>
+    </button>
+    <button type="button" id="detail-shuffle" class="btn-quiet-icon btn-shuffle" aria-pressed="false" aria-label="Shuffle" title="Shuffle">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-shuffle" /></svg>
+    </button>
+  </div>
   {% endif %}
 </div>
 

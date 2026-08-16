@@ -73,6 +73,13 @@ class ContentPageOut(BaseModel):
     total_pages: int
 
 
+class QueueOut(BaseModel):
+    """One channel's or pinned playlist's full track order, ids only — what
+    "Play all" loads. Capped at content_query.QUEUE_MAX_ITEMS."""
+
+    ids: list[int]
+
+
 class StatusOut(BaseModel):
     id: int
     status: str

@@ -153,6 +153,59 @@ def test_get_single_content_404_for_another_users_content(client, db_session):
     assert res.status_code == 404
 
 
+def test_channel_queue_is_the_whole_channel_in_list_order(client, db_session):
+    """The queue behind "Play all" deliberately ignores pagination — the
+    detail panel shows twenty rows at a time, but playing a channel means the
+    channel."""
+    feed, _ = _seed(db_session, count=25)
+
+    ids = client.get(f"/content/queue/channel/{feed.id}").json()["ids"]
+    assert len(ids) == 25
+
+    # Same order the track list renders, newest-first — a queue that agreed
+    # on the set but not the order would look like shuffle was stuck on.
+    listed = [item["id"] for page in (1, 2) for item in client.get(f"/content?page={page}").json()["items"]]
+    assert ids == listed
+
+
+def test_playlist_queue_matches_its_detail_panel(client, db_session):
+    feed, items = _seed(db_session, count=25)
+    ids = client.get("/content/queue/playlist/favorites").json()["ids"]
+    # _seed favorites exactly one row (i == 0, the newest).
+    assert ids == [item["id"] for item in client.get("/content?filter=__favorites__").json()["items"]]
+    assert len(ids) == 1
+
+
+def test_queue_endpoints_404_for_unknown_targets(client, db_session):
+    assert client.get("/content/queue/channel/9999").status_code == 404
+    assert client.get("/content/queue/playlist/bogus").status_code == 404
+
+
+def test_channel_queue_404s_for_another_profiles_channel(client, db_session):
+    other_profile = User(name="Music", account_id=DEFAULT_ACCOUNT_ID)
+    db_session.add(other_profile)
+    db_session.commit()
+    db_session.refresh(other_profile)
+
+    other_feed = Feed(user_id=other_profile.id, rss_url="https://example.com/queue-other")
+    db_session.add(other_feed)
+    db_session.commit()
+    db_session.refresh(other_feed)
+
+    assert client.get(f"/content/queue/channel/{other_feed.id}").status_code == 404
+
+
+def test_queue_is_capped(client, db_session, monkeypatch):
+    """A backfilled channel can be thousands of videos deep; the queue stops
+    well before that rather than shipping (and storing) all of it."""
+    from app import content_query
+
+    monkeypatch.setattr(content_query, "QUEUE_MAX_ITEMS", 5)
+    feed, _ = _seed(db_session, count=25)
+
+    assert len(client.get(f"/content/queue/channel/{feed.id}").json()["ids"]) == 5
+
+
 def _seed_one(db_session, **overrides):
     feed = Feed(user_id=USER_ID, rss_url="https://example.com/dl-feed", channel_title="Download Channel")
     db_session.add(feed)
@@ -194,6 +247,47 @@ def test_start_download_409s_while_already_downloading(client, db_session):
     item = _seed_one(db_session, status="downloading")
     res = client.post(f"/content/{item.id}/download")
     assert res.status_code == 409
+
+
+def test_start_download_leaves_a_track_thats_already_on_disk_alone(client, db_session, monkeypatch, tmp_path):
+    """The queue's one-track-ahead prefetch (home/overlay.js) fires without
+    knowing the next track's status, so asking for something already
+    downloaded has to be free — not a second fetch of the same audio."""
+    from app.routers import content as content_router
+
+    on_disk = tmp_path / "already-here.m4a"
+    on_disk.write_bytes(b"audio")
+    item = _seed_one(db_session, status="ready", file_path=str(on_disk))
+
+    def fail(*args, **kwargs):
+        raise AssertionError("re-downloaded a track that was already on disk")
+
+    monkeypatch.setattr(content_router, "download_audio", fail)
+
+    res = client.post(f"/content/{item.id}/download")
+    assert res.status_code == 200
+    assert res.json()["status"] == "ready"
+
+    db_session.refresh(item)
+    assert item.status == "ready"
+    assert item.file_path == str(on_disk)
+
+
+def test_start_download_refetches_when_the_file_is_gone(client, db_session, monkeypatch, tmp_path):
+    """"ready" taken at face value would strand playback whenever storage was
+    cleared out from under the row."""
+    from app.routers import content as content_router
+
+    item = _seed_one(db_session, status="ready", file_path=str(tmp_path / "vanished.m4a"))
+    replacement = tmp_path / f"{item.video_id}.m4a"
+    replacement.write_bytes(b"audio")
+    monkeypatch.setattr(content_router, "download_audio", lambda *a, **k: replacement)
+
+    assert client.post(f"/content/{item.id}/download").json()["status"] == "downloading"
+
+    db_session.refresh(item)
+    assert item.status == "ready"
+    assert item.file_path == str(replacement)
 
 
 def test_there_is_no_restart_endpoint(client, db_session):

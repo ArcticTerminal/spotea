@@ -10,6 +10,7 @@ import { unfollowChannel } from "../content-actions.js";
 import { classifyHash, showToast } from "../core.js";
 import { refreshFragments, swapFragmentHtml } from "../fragments.js";
 import { openPlayer } from "./overlay.js";
+import { QUEUE_CHANGED, isShuffled, loadQueue, queueSource, toggleShuffle } from "./queue.js";
 import { activate } from "./tabs.js";
 
 // What's currently open, so a pagination click knows what to re-fetch
@@ -72,6 +73,50 @@ export async function openDetail(kind, id, { page = 1, replace = false } = {}) {
     return;
   }
   swapFragmentHtml(await res.text());
+  // The swap brings in a brand-new shuffle button, which knows nothing about
+  // a preference set on some other view or in the player.
+  syncShuffleButton();
+}
+
+// What the panel currently shows, in the shape queue.js takes: the channel
+// or playlist "Play all" would fill the queue from.
+function currentSource() {
+  return current && { kind: current.kind, id: current.id ?? null };
+}
+
+function isSameSource(a, b) {
+  return Boolean(a && b && a.kind === b.kind && String(a.id) === String(b.id));
+}
+
+function syncShuffleButton() {
+  const btn = document.getElementById("detail-shuffle");
+  if (!btn) return;
+  btn.classList.toggle("is-on", isShuffled());
+  btn.setAttribute("aria-pressed", String(isShuffled()));
+}
+
+/**
+ * "Play all": fills the queue from the whole channel/playlist — every page of
+ * it, not the twenty rows on screen — and starts on whichever track that
+ * order puts first, which is a random one while shuffle is on.
+ */
+async function playAll(button) {
+  const source = currentSource();
+  if (!source) return;
+  // The fetch is a round trip and the button is the kind people press twice;
+  // without this the second press would build a second queue and jump
+  // playback back to its start.
+  button.disabled = true;
+  try {
+    const startId = await loadQueue(source);
+    if (startId == null) {
+      showToast("Nothing to play here");
+      return;
+    }
+    openPlayer(startId);
+  } finally {
+    button.disabled = false;
+  }
 }
 
 // The in-panel "Back to Library" control ends up here (the browser's own
@@ -124,6 +169,22 @@ export function setupDetailPanel() {
       return;
     }
 
+    const playAllBtn = event.target.closest("#detail-play-all");
+    if (playAllBtn) {
+      playAll(playAllBtn);
+      return;
+    }
+
+    // Shuffle is a toggle, not a second play button: it reorders a queue
+    // already running through this view in place (keeping the current track
+    // playing) and otherwise just decides the order the next Play builds. So
+    // pressing it while something plays doesn't interrupt anything, and
+    // pressing it on a view nobody is listening to doesn't start anything.
+    if (event.target.closest("#detail-shuffle")) {
+      toggleShuffle();
+      return;
+    }
+
     if (event.ctrlKey || event.metaKey || event.shiftKey || event.button !== 0) return;
 
     const pageLink = event.target.closest(".pagination-btn:not(.is-disabled)");
@@ -136,9 +197,25 @@ export function setupDetailPanel() {
     const trackLink = event.target.closest(".track-row .track-link");
     if (trackLink) {
       event.preventDefault();
-      openPlayer(trackLink.closest(".track-row").dataset.contentId);
+      const contentId = trackLink.closest(".track-row").dataset.contentId;
+      const source = currentSource();
+      // Clicking a row means "start here and keep going", the same as it does
+      // in any music app — so the rest of this channel/playlist becomes the
+      // queue, not just this one track. Checked before openPlayer, which
+      // clears a queue the clicked track isn't part of (see queue.js's
+      // noteCurrent) and would otherwise make this always look like a miss.
+      const alreadyQueued = isSameSource(queueSource(), source);
+      // Not awaited: the queue is only needed when this track ends, minutes
+      // from now, and holding playback for a request that has nothing to do
+      // with it would put a round trip in front of every single play.
+      openPlayer(contentId);
+      if (!alreadyQueued && source) loadQueue(source, { startId: contentId });
     }
   });
+
+  // The player has its own shuffle toggle, and both drive the same
+  // preference — whichever one is pressed, this panel's button has to follow.
+  document.addEventListener(QUEUE_CHANGED, syncShuffleButton);
 
   window.addEventListener("popstate", () => {
     const info = classifyHash(location.hash.slice(1));

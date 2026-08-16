@@ -4,15 +4,16 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session, joinedload
 
-from app.content_query import query_content_page
+from app.content_query import query_content_ids, query_content_page
 from app.database import SessionLocal
 from app.deps import get_current_profile, get_db, require_login
 from app.downloader import DownloadError, download_audio
 from app.feed_sync import cache_thumbnail
 from app.formatting import safe_filename
-from app.models import Content, User
+from app.models import Content, Feed, User
+from app.page_context import playlist_filter
 from app.progress import ProgressRegistry
-from app.schemas import ContentOut, ContentPageOut, FavoriteOut, SavedOut, StatusOut
+from app.schemas import ContentOut, ContentPageOut, FavoriteOut, QueueOut, SavedOut, StatusOut
 from app.storage import unlink_if_unshared
 from app.timeutil import utcnow
 from app.youtube.urls import VIDEO_ID_RE
@@ -113,6 +114,41 @@ def list_content(
     )
 
 
+# Both registered ahead of /{content_id} for the same reason
+# /recently-played is (see its comment below) — three path segments can't
+# collide with a one-segment route, but keeping every literal-prefixed route
+# above the catch-all is what stops the next one from being subtly shadowed.
+@router.get("/queue/channel/{feed_id}", response_model=QueueOut)
+def channel_queue(
+    feed_id: int,
+    profile: User = Depends(get_current_profile),
+    db: Session = Depends(get_db),
+) -> QueueOut:
+    """Every track in one channel, in the order its detail panel lists them.
+
+    The detail panel is paginated and the queue deliberately isn't: "Play
+    all" on a channel means the channel, not the twenty rows that happen to
+    be on screen.
+    """
+    exists = db.query(Feed.id).filter(Feed.id == feed_id, Feed.user_id == profile.id).first()
+    if exists is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Channel not found")
+    return QueueOut(ids=query_content_ids(db, profile.id, feed_id=feed_id))
+
+
+@router.get("/queue/playlist/{kind}", response_model=QueueOut)
+def playlist_queue(
+    kind: str,
+    profile: User = Depends(get_current_profile),
+    db: Session = Depends(get_db),
+) -> QueueOut:
+    """Same, for one of the four pinned virtual playlists."""
+    filter_value = playlist_filter(kind)
+    if filter_value is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown playlist")
+    return QueueOut(ids=query_content_ids(db, profile.id, filter=filter_value))
+
+
 @router.get("/{content_id}", response_model=ContentOut)
 def get_content(
     content_id: int,
@@ -170,6 +206,17 @@ def start_download(
 
     if content.status == "downloading":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Already downloading")
+
+    # Already on disk — say so instead of fetching it a second time. The
+    # player never asks for a ready track (prepareAudio checks its own
+    # dataset first), but the queue's one-track-ahead prefetch
+    # (home/overlay.js) fires without knowing the next track's status, and
+    # re-downloading everything it looks at would be the opposite of what
+    # it's for. Still re-downloads when the row says ready but the file is
+    # gone (storage cleared out from under us), which is the one case where
+    # taking "ready" at face value would strand playback.
+    if content.status == "ready" and content.file_path and Path(content.file_path).exists():
+        return StatusOut(id=content.id, status=content.status, error_message=None)
 
     if not VIDEO_ID_RE.match(content.video_id):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid video id")

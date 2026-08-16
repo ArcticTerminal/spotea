@@ -44,6 +44,12 @@
       <svg id="mini-icon-play" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><use href="#i-play" /></svg>
       <svg id="mini-icon-pause" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" hidden><use href="#i-pause" /></svg>
     </button>
+    <!-- Only present while a queue is loaded: with a single track open there
+         is nothing to skip to, and the collapsed bar is the one surface
+         where a permanently dead control costs real width on a phone. -->
+    <button type="button" id="mini-player-next" class="mini-player-next" aria-label="Next track" hidden>
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><use href="#i-skip-next" /></svg>
+    </button>
     <button type="button" id="mini-player-close" class="mini-player-close" aria-label="Close player">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-close" /></svg>
     </button>

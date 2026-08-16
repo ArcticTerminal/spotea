@@ -101,7 +101,8 @@ spotea/
       explore.py                             # channel/video search + single-video
                                               # add/remove (still under /feeds)
       content.py                             # list/get/download/status/stream/
-                                              # favorite/save/delete
+                                              # favorite/save/delete, plus the
+                                              # play-queue id lists (see §4)
       storage.py                             # clear-all + zip export endpoints
       settings.py                            # per-profile audio quality +
                                               # deployment-wide refresh interval
@@ -127,10 +128,12 @@ spotea/
       _player_overlay.html                          # persistent in-page player
                                                      # + mini-player bar, usable
                                                      # from anywhere in the app
-      _player_controls.html                         # the transport/seek/volume/
-                                                     # favorite half of the
-                                                     # player, shared verbatim by
-                                                     # the overlay (its only caller)
+      _player_controls.html                         # the transport (±15s, prev/
+                                                     # next, play)/seek/volume/
+                                                     # shuffle/favorite half of
+                                                     # the player, shared verbatim
+                                                     # by the overlay (its only
+                                                     # caller)
       _home_shelves.html                           # Home's chips + four shelves
                                                      # (also GET /partials/home)
       _library_grid.html                           # Library's channel grid
@@ -138,9 +141,11 @@ spotea/
       _downloads.html                              # Downloads modal body
                                                      # (also GET /partials/downloads)
       _detail_panel.html                           # one channel or pinned
-                                                     # playlist's track list —
-                                                     # index.html's 5th panel,
-                                                     # client-fetched (see §5)
+                                                     # playlist's Play all /
+                                                     # shuffle controls + track
+                                                     # list — index.html's 5th
+                                                     # panel, client-fetched
+                                                     # (see §5)
       _fragment_{home,library,downloads,detail}.html  # the <template data-target>
                                                      # wrappers those endpoints return
       _content_card.html                           # grid card partial (Home
@@ -173,7 +178,12 @@ spotea/
         home/library.js                      # channel chips, library search,
                                               # drag-scroll rows, mobile menu,
                                               # manual refresh
-        home/overlay.js                      # in-page player + mini bar
+        home/overlay.js                      # in-page player + mini bar,
+                                              # auto-advance and the transport's
+                                              # previous/next/shuffle controls
+        home/queue.js                        # the play queue behind "Play all"
+                                              # — order, shuffle, position;
+                                              # state only, no player access
         home/explore.js                      # search, add channel, backfill
                                               # progress overlay
         home/settings.js                     # settings controls + downloads modal
@@ -364,8 +374,10 @@ anywhere, so they're the *only* render of that markup, not a refresh of one
 |---|---|---|
 | GET | `/content?page=&filter=` | JSON content page, newest-first (server-side filter/pagination; not currently called by the UI, but kept as a tested API surface — see §5) |
 | GET | `/content/{id}` | Single-item JSON fetch, powers the Home/Library/Explore overlay |
+| GET | `/content/queue/channel/{feed_id}` | Every content id in one channel, in track-list order — the "Play all" queue (unpaginated, capped at `QUEUE_MAX_ITEMS`) |
+| GET | `/content/queue/playlist/{kind}` | Same for one pinned playlist |
 | DELETE | `/content/recently-played` | Clear the "Recently played" shelf (doesn't delete downloads) |
-| POST | `/content/{id}/download` | Start yt-dlp download in the background |
+| POST | `/content/{id}/download` | Start yt-dlp download in the background; a no-op for a track already on disk |
 | GET | `/content/{id}/status` | Current status (+ download/convert progress) |
 | GET | `/content/{id}/stream?download=` | Serve the audio file (Range-request support); `download=1` skips the `last_played_at` update |
 | POST/DELETE | `/content/{id}/favorite` | Mark/unmark as favorite |
@@ -820,8 +832,8 @@ item export, and "Clear all"/"Export all". Two things to keep in mind:
 **Play** — The overlay renders a custom player (`_player_controls.html`)
 (no native `<audio controls>`, which renders as a light pill clashing with
 the dark theme): large artwork, title/channel, a seek bar, ±15s skip
-buttons, a large round play/pause, volume, and the favorite toggle.
-Keyboard: Space toggles playback, ←/→ skip. Media Session API integration
+buttons, previous/next track, a large round play/pause, volume, a shuffle
+toggle and the favorite toggle. Keyboard: Space toggles playback, ←/→ skip. Media Session API integration
 (`setupMediaSession`) drives lock-screen/notification-shade transport
 controls and Bluetooth/headset buttons; `openPlayer()` re-sets its metadata
 explicitly on every track switch since `setupMediaSession` itself only reads
@@ -831,6 +843,55 @@ The stream endpoint returns 409 if `status != ready`; the file path always
 comes from the DB, never the request. Every real stream request stamps
 `last_played_at = now()` (skipped for `?download=1`) — this is what feeds
 "Recently played".
+
+**Play all, shuffle, and the queue** — A channel or pinned playlist's detail
+panel carries a round **Play** button and a **Shuffle** toggle above its
+track list. Play fills the queue from the *whole* channel/playlist and
+starts on whatever that order puts first; clicking any individual track row
+does the same thing starting from that row, because "play this and keep
+going" is what clicking a track in a list means. Either way the queue comes
+from `GET /content/queue/{channel|playlist}/…`, which returns ids only, in
+exactly the order the track list renders them, unpaginated (so "Play all" on
+a 832-video channel means all 832, not the 20 rows on screen) and capped at
+`content_query.QUEUE_MAX_ITEMS`. Both selections come from the same
+`_content_query()` the detail panel's own page does — a second spelling of
+those filters is how "Play all" would quietly play a different set than the
+list it was launched from.
+
+`static/js/home/queue.js` holds the state and nothing else: it never touches
+the player, and everything that reacts to it (`home/overlay.js`'s transport,
+`home/detail.js`'s shuffle button) listens for a `spotea:queuechange` event
+rather than being called directly, which is what keeps the dependency
+one-way. It keeps *two* orderings — the source's own order and the order
+playback follows — because collapsing them into one shuffled array would
+make turning shuffle back off mid-queue impossible. Shuffle is a standing
+preference, not an action: toggling it reorders a live queue in place around
+whatever is currently playing (so nothing restarts) and otherwise just
+decides the order the next Play builds, which is why the same toggle appears
+in the player footer and above the track list and both drive one value. The
+whole record is mirrored into `sessionStorage`, since `resume.js` forces a
+full reload on every bfcache restore and an in-memory queue would evaporate
+mid-listen.
+
+A finished track advances automatically (`audio`'s `ended`), keeping the
+overlay exactly as expanded or collapsed as the user left it. Previous/next
+appear in the transport either side of play/pause, disabled when there is
+nowhere to go, and mirror onto the lock screen through Media Session's
+`nexttrack`/`previoustrack`; the mini bar gets a skip button too, hidden
+rather than disabled when no queue is loaded, since a permanently dead
+control costs real width on a phone. Notably, previous/next stay live while
+`.transport` is in its `is-disabled` (downloading/failed) state — a track
+stuck on "Download failed" is exactly when someone wants to skip past it.
+
+Because a download is only triggered by playing something, every track
+change in a queue would otherwise cost the same 2-4s wait as the first (see
+§8's "Where a play's time actually goes"). The overlay fetches one track
+ahead to cover it — but only once the current track has genuinely been
+listened to for `PREFETCH_AFTER_SECONDS`, so skipping quickly through a
+queue doesn't pull down a file per track passed over. `POST
+/content/{id}/download` is a no-op for anything already on disk, which is
+what lets the prefetch fire without first asking about the next track's
+status.
 
 **Delete** — Removing a download deletes the file and resets the row to
 `status='not_downloaded'` + `file_path=NULL`. The row is kept, so the item
@@ -1307,6 +1368,17 @@ Post-MVP additions, same one-at-a-time/test-then-continue approach:
     Library/Explore for a channel or pinned playlist, since there's no
     longer a document boundary for it to fall off of; the old real routes
     became one-line redirects to their hash equivalent
+41. A real play queue (`home/queue.js`): "Play all" and a shuffle toggle on
+    every channel/playlist detail panel, previous/next in the transport and
+    on the mini bar and lock screen, and auto-advance when a track ends.
+    Playback had until now been strictly one track at a time — the app could
+    play a channel's videos but not *the channel*. Two supporting changes
+    fell out of it: `content_query`'s filter/order logic split into a shared
+    `_content_query()` so the queue and the visible track list can't
+    disagree about what a playlist contains, and `POST /content/{id}/
+    download` made a no-op for a track already on disk, which is what lets
+    the queue fetch one track ahead without first asking about its status —
+    see §5's "Play all, shuffle, and the queue"
 
 ### Verifying UI work
 

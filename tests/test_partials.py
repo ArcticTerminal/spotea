@@ -196,6 +196,15 @@ def test_playlist_detail_fragments(client, db_session):
         assert unexpected not in body, kind
 
 
+def test_detail_fragments_carry_the_play_all_controls(client, db_session):
+    feed = _seed(db_session)
+
+    for url in [f"/partials/detail/channel/{feed.id}", "/partials/detail/playlist/favorites"]:
+        body = _fragment_body(client.get(url).text, "detail-panel")
+        assert 'id="detail-play-all"' in body, url
+        assert 'id="detail-shuffle"' in body, url
+
+
 def test_empty_playlist_detail_fragments_render_their_empty_message(client):
     for kind, message in [
         ("favorites", "No favorites yet."),
@@ -206,6 +215,9 @@ def test_empty_playlist_detail_fragments_render_their_empty_message(client):
         res = client.get(f"/partials/detail/playlist/{kind}")
         assert res.status_code == 200, kind
         assert message in res.text, kind
+        # Nothing to play — a Play button on an empty list is a control that
+        # can only ever do nothing.
+        assert 'id="detail-play-all"' not in res.text, kind
 
 
 def test_playlist_detail_fragment_404s_for_an_unknown_kind(client):

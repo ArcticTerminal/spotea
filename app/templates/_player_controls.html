@@ -31,15 +31,27 @@
       </div>
     </div>
 
+    {# prev/next start disabled and stay that way until a queue exists (see
+       home/overlay.js's syncQueueControls) — nothing is loaded yet on the
+       overlay, and opening a single track from a Home shelf never builds
+       one. #}
     <div class="transport">
       <button type="button" id="back15" class="btn-transport" aria-label="Back 15 seconds">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-rewind" /></svg>
         <span class="transport-num">15</span>
       </button>
 
+      <button type="button" id="prev-track" class="btn-transport" aria-label="Previous track" disabled>
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><use href="#i-skip-previous" /></svg>
+      </button>
+
       <button type="button" id="play-pause" class="btn-play-main" aria-label="Play">
         <svg id="icon-play" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><use href="#i-play" /></svg>
         <svg id="icon-pause" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" hidden><use href="#i-pause" /></svg>
+      </button>
+
+      <button type="button" id="next-track" class="btn-transport" aria-label="Next track" disabled>
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><use href="#i-skip-next" /></svg>
       </button>
 
       <button type="button" id="fwd15" class="btn-transport" aria-label="Forward 15 seconds">
@@ -49,6 +61,12 @@
     </div>
 
     <div class="player-footer">
+      {# Shuffle is a standing preference, not an action: it survives with no
+         queue loaded and decides the order the next "Play all" builds. #}
+      <button type="button" id="player-shuffle" class="btn-quiet-icon btn-shuffle" aria-pressed="false" aria-label="Shuffle" title="Shuffle">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-shuffle" /></svg>
+      </button>
+
       <div class="volume-group">
         <button type="button" id="mute-btn" class="btn-quiet-icon" aria-label="Mute">
           <svg id="icon-volume" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-volume" /></svg>
