@@ -1101,6 +1101,17 @@ controls and Bluetooth/headset buttons; `openPlayer()` re-sets its metadata
 explicitly on every track switch since `setupMediaSession` itself only reads
 the DOM once, at page-load time.
 
+`setPositionState()` (the call behind the lock screen's elapsed-time
+display and scrubber) always passes an explicit `playbackRate`, matching
+whether the element is actually paused (`0` or `1`) — never left to its
+default of `1`. iOS extrapolates the displayed time locally from that rate,
+on its own clock, independent of `playbackState`. Without it, a track that
+was opened but is still refused a `play()` (see the single-element notes
+below — `loadedmetadata` fires even while backgrounded, ahead of and
+regardless of whether playback actually starts) reports its position once
+with the default rate, and the lock screen visibly ticks the clock forward
+for a track that never actually started.
+
 The stream endpoint returns 409 if `status != ready`; the file path always
 comes from the DB, never the request. Every real stream request stamps
 `last_played_at = now()` (skipped for `?download=1`) — this is what feeds

@@ -466,7 +466,21 @@ function setupMediaSession() {
     const audio = activeAudio();
     if (!audio.duration || Number.isNaN(audio.duration)) return;
     try {
-      navigator.mediaSession.setPositionState({ duration: audio.duration, position: audio.currentTime });
+      // playbackRate has to be explicit, not left to its default of 1: the OS
+      // extrapolates the lock-screen's displayed elapsed time locally from
+      // this rate, on its own clock, independent of playbackState. loadedmetadata
+      // (one of this function's two callers) fires as soon as the resource's
+      // metadata is available, which — unlike actually rendering audio — iOS
+      // permits even while backgrounded and even though play() itself is being
+      // silently refused (see the single-element notes above). Without this, a
+      // background handoff into a track iOS won't yet start reports metadata,
+      // that call defaults playbackRate to 1, and the lock screen's clock
+      // visibly ticks forward for a track that is, in fact, still paused.
+      navigator.mediaSession.setPositionState({
+        duration: audio.duration,
+        position: audio.currentTime,
+        playbackRate: audio.paused ? 0 : 1,
+      });
     } catch (err) {
       /* Throws if position momentarily exceeds duration mid-seek; harmless to skip. */
     }
