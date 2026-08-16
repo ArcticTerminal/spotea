@@ -428,50 +428,10 @@ def test_streaming_a_track_records_it_as_played(client, db_session, tmp_path):
     assert item.last_played_at is not None
 
 
-def test_preloading_the_next_track_is_not_a_play(client, db_session, tmp_path):
-    """The player reads the next queued track ahead of time, while the current
-    one is still playing, so that the handoff needs no network (player.js's
-    deck helpers). Counting that as listening would put a track the user may
-    well skip past into Recently Played a minute before it ever starts."""
+def test_downloading_a_track_does_not_record_it_as_played(client, db_session, tmp_path):
     item = _seed_ready(db_session, tmp_path)
 
-    assert client.get(f"/content/{item.id}/stream?preload=1").status_code == 200
+    assert client.get(f"/content/{item.id}/stream?download=1").status_code == 200
 
     db_session.refresh(item)
     assert item.last_played_at is None
-
-
-def test_a_preloaded_track_is_recorded_once_it_really_starts(client, db_session, tmp_path):
-    item = _seed_ready(db_session, tmp_path)
-    client.get(f"/content/{item.id}/stream?preload=1")
-
-    assert client.post(f"/content/{item.id}/played").status_code == 204
-
-    db_session.refresh(item)
-    assert item.last_played_at is not None
-
-
-def test_marking_another_profiles_track_as_played_404s(client, db_session, tmp_path):
-    other = User(name="Someone Else", account_id=DEFAULT_ACCOUNT_ID)
-    db_session.add(other)
-    db_session.commit()
-    db_session.refresh(other)
-
-    audio = tmp_path / "theirs.m4a"
-    audio.write_bytes(b"audio")
-    feed = Feed(user_id=other.id, rss_url="https://example.com/theirs", channel_title="Theirs")
-    db_session.add(feed)
-    db_session.commit()
-    db_session.refresh(feed)
-    theirs = Content(
-        feed_id=feed.id,
-        user_id=other.id,
-        video_id="theirsvid1",
-        title="Theirs",
-        status="ready",
-        file_path=str(audio),
-    )
-    db_session.add(theirs)
-    db_session.commit()
-
-    assert client.post(f"/content/{theirs.id}/played").status_code == 404

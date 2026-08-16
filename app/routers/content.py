@@ -317,29 +317,10 @@ def remove_saved(
     return SavedOut(id=content.id, is_saved=content.is_saved)
 
 
-@router.post("/{content_id}/played", status_code=status.HTTP_204_NO_CONTENT)
-def mark_played(
-    content_id: int, profile: User = Depends(get_current_profile), db: Session = Depends(get_db)
-) -> None:
-    """Record a play that the stream request itself deliberately didn't.
-
-    The player reads the next queued track ahead of time, while the current
-    one is still playing, so that the handoff needs no network (see
-    player.js's deck helpers). That read-ahead asks for ?preload=1 precisely
-    so it doesn't count as listening — the listener may well skip past it, and
-    it has no business in Recently Played until it actually starts. This is
-    what the player calls when one does.
-    """
-    content = _get_content_or_404(db, content_id, profile.id)
-    content.last_played_at = utcnow()
-    db.commit()
-
-
 @router.get("/{content_id}/stream")
 def stream_content(
     content_id: int,
     download: bool = False,
-    preload: bool = False,
     profile: User = Depends(get_current_profile),
     db: Session = Depends(get_db),
 ) -> FileResponse:
@@ -352,11 +333,9 @@ def stream_content(
     if not file_path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File missing on disk")
 
-    # Skipped for a plain file export (?download=1) and for the player's
-    # read-ahead of the next queued track (?preload=1) — neither is anyone
-    # actually listening. A preloaded track that does go on to play reports
-    # itself through mark_played above.
-    if not download and not preload:
+    # Skipped for a plain file export (?download=1) — nobody's actually
+    # listening to that.
+    if not download:
         content.last_played_at = utcnow()
         db.commit()
 

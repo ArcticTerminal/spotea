@@ -16,30 +16,16 @@
    stays in the two callers: the page renders them from `content`
    server-side, the overlay starts them empty and home/overlay.js fills them in.
 #}
-    {# Two interchangeable decks, not one element whose src gets reassigned
-       per track.
-
-       iOS suspends a backgrounded web app the moment it stops emitting audio,
-       and a suspended process runs nothing at all — no timers, no fetches,
-       and above all no media loading. Loading the next track at the instant
-       the current one ends therefore starts a fetch the OS is about to
-       freeze: play() hangs rather than failing, and the track begins seconds
-       or minutes later, exactly when the app is next opened.
-
-       So the next track is loaded into whichever deck isn't playing, while
-       the current one still is (the app is awake then, by definition), and
-       the handoff is a bare play() on already-buffered audio.
-
-       Which one is live is carried by the id — everything in the app finds
-       the player as #audio, and player.js swaps the two ids on handoff. #}
     <audio id="audio" preload="auto"></audio>
-    <audio id="audio-standby" preload="auto"></audio>
 
-    {# Plays a looping, effectively-inaudible clip during the gaps when neither
-       deck has anything to play — see player.js's keep-alive. Its own element
-       rather than borrowing a deck, so none of the transport's listeners (seek
-       bar, play icon, mini-player progress, media session) have to learn to
-       ignore a source that isn't the track. #}
+    {# Plays a looping, effectively-inaudible clip while a track is
+       downloading and nothing is otherwise playing — see player.js's
+       keep-alive. A backgrounded iOS app is suspended the moment it stops
+       emitting audio, and a suspended process runs nothing at all: no
+       timers, no fetches. This is its own element rather than reusing
+       #audio so none of the transport's listeners (seek bar, play icon,
+       mini-player progress, media session) have to learn to ignore a source
+       that isn't the track. #}
     <audio id="keepalive" loop preload="auto"></audio>
 
     <div id="prepare-state" class="prepare-state" hidden>

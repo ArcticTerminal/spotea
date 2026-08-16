@@ -43,9 +43,6 @@ export function installBfcacheReload() {
 // resumeOverlayIfNeeded (the Home/Library/Explore overlay, which starts
 // closed on a fresh load and has to be reopened first).
 function saveResumeState() {
-  // #audio is whichever of player.js's two decks is currently live — they
-  // trade ids on every queue handoff, precisely so that a plain lookup here
-  // keeps working without this module having to know decks exist.
   const audio = document.getElementById("audio");
   const root = document.getElementById("player-root");
   const contentId = root?.dataset.contentId;

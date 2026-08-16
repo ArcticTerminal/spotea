@@ -437,8 +437,7 @@ anywhere, so they're the *only* render of that markup, not a refresh of one
 | DELETE | `/content/recently-played` | Clear the "Recently played" shelf (doesn't delete downloads) |
 | POST | `/content/{id}/download` | Start yt-dlp download in the background; a no-op for a track already on disk |
 | GET | `/content/{id}/status` | Current status (+ download/convert progress) |
-| GET | `/content/{id}/stream?download=&preload=` | Serve the audio file (Range-request support); `download=1` (a file export) and `preload=1` (the player's read-ahead of the next queued track) both skip the `last_played_at` update |
-| POST | `/content/{id}/played` | Record a play the stream request didn't — how a `?preload=1` track reports itself once it actually starts |
+| GET | `/content/{id}/stream?download=` | Serve the audio file (Range-request support); `download=1` (a file export) skips the `last_played_at` update |
 | POST/DELETE | `/content/{id}/favorite` | Mark/unmark as favorite |
 | POST/DELETE | `/content/{id}/save` | Save/un-save for later |
 | DELETE | `/content/{id}` | Delete file, reset status to `not_downloaded` |
@@ -935,135 +934,59 @@ down the `<audio>` element; that's what fixed the mini-player silently
 stopping whenever you left Home/Library/Explore before this (see the
 Library section above and §11).
 
-**Two decks, so a queue can advance in the background** — Playback runs on
-*two* interchangeable `<audio>` elements (`#audio` and `#audio-standby` in
-`_player_controls.html`), not on one whose `src` is reassigned per track.
-This is half the fix for "it doesn't move to the next song until I open the
-app again" on iOS. The other half is the pre-roll below, and the two are
-worth reading together, because the first diagnosis was wrong and the
-breadcrumbs in `routers/debug.py` are what corrected it.
+**Playback runs on a single `<audio>` element**, its `src` reassigned per
+track. That single fact used to be two interchangeable elements
+(`#audio` / `#audio-standby`), pre-rolling the next track on the second one a
+few seconds before the current one ended so a background handoff never had to
+call `play()` on a paused element — iOS silently refuses that while
+backgrounded (see below). It genuinely fixed background auto-advance, but
+traded it for a worse, better-documented problem: Apple's own HTML5
+audio/video docs say *"all devices running iOS are limited to playback of a
+single audio or video stream at any time [...] playing multiple simultaneous
+audio streams is also not supported"* — and the crossfade needed exactly
+that, two elements genuinely playing at once. In practice this meant iOS's
+Now Playing system couldn't tell which element was the real one: Dynamic
+Island stopped updating on track change, the play/pause button and
+lock-screen controls fell out of sync, and the two tracks were audibly both
+there in a way that wasn't just the intended crossfade. Reverted to one
+element, which every one of those systems tracks unambiguously.
 
-The symptom: `play-requested` at 20:30:22 while hidden, `playing` at
-20:34:31 on the way back in, nothing in between. The first reading was that
-iOS had suspended the app and frozen the media load a track change depends
-on. Preloading the audio ahead of time fixed nothing, and the next capture
-said why:
+The refusal that motivated the two-deck detour in the first place is real
+and still applies, and is worth keeping on record since it'll be the first
+thing anyone re-derives if background auto-advance is revisited: a
+backgrounded iOS app may keep playing what is already playing, but it may
+not *start* a paused element, and the refusal is silent — `play()` neither
+resolves nor rejects. Measured via `routers/debug.py` breadcrumbs:
 
 ```
-play-requested    hidden   43958  preloaded=true readyState=4
+play-requested    hidden   43958  readyState=4
 playback-stalled  hidden   43958  readyState=4      (+3.0s)
 playing           visible  43958                    (+7.7s)
 ```
 
-`readyState 4` means the whole track was already in memory, so nothing was
-waiting on the network. And `playback-stalled` is an ordinary `setTimeout` —
-it *fired*, three seconds in, still hidden, so the page was not frozen and
-neither were its timers. The app was awake, the audio was in hand, and
-`play()` still did nothing: it neither threw nor started, and the element
-stayed `paused` until the app came back on screen.
-
-That is WebKit refusing a playback-state change, not anything being slow or
-suspended. **A backgrounded iOS app may keep playing what is already
-playing** — the previous track ran to its end off screen, as it always did —
-**but it may not start a paused element, and the refusal is silent.**
-
-So there are two requirements, and both have to hold: the next track's bytes
-have to be here already (the decks), *and* the next element has to already be
-playing before it is needed (the pre-roll).
-
-The two decks remove the load from the critical moment:
-
-- `home/overlay.js`'s `cacheUpcoming()` already runs ~8s into the current
-  track and follows the next one's download to completion. The moment the
-  server says `ready`, it calls `player.js`'s `preloadNext()`, which points
-  the *standby* deck at `/content/{id}/stream?preload=1`. This happens while
-  the current track is still playing, which is the only window in which a
-  backgrounded app is reliably awake enough to fetch anything.
-- On `ended`, `prepareAudio`'s `startPlayback()` calls `adoptStandby()`:
-  if that deck is holding this exact track, the two elements **exchange
-  ids** and it becomes the live one.
-- Ids rather than a module variable, because every other module in the app
-  (`resume.js`, `home/overlay.js`) finds the player as `#audio` — swapping
-  the attributes moves all of them at once. Listeners go through
-  `onPlayerEvent()`, which registers on both elements and drops events from
-  whichever is standby, so a preloading deck's `loadedmetadata` can't paint
-  the *next* track's duration over the one that's playing.
-- `?preload=1` exists so the read-ahead isn't recorded as a play — a track
-  the listener skips past has no business in Recently Played. When a
-  preloaded deck does go live, the player reports it with
-  `POST /content/{id}/played` instead.
-
-**Pre-roll and crossfade** — The standby deck is *started*, inaudibly, four
-seconds before the current track runs out (`prerollStandby()`, driven off
-`timeupdate`; `PREROLL_SECONDS`). Playback is still under way then, so
-beginning it is still permitted. Across that same four seconds, `.volume` on
-both decks is ramped linearly — the outgoing deck down to `0`, the incoming
-one up to the listener's real volume — so the handoff has no audible seam.
-The handoff itself then asks the OS for nothing at all: no seek, and the
-volume is already where it needs to be, neither of which any policy refuses.
-
-The handoff used to also seek the incoming deck back to `0`, on the theory
-that pre-roll only exists to warm up the audio session and the listener
-should hear the track from its start. In practice that meant up to four
-seconds of the crossfade played audibly and then the track visibly jumped
-backwards at the handoff instant — indistinguishable from a real rewind,
-because it was one. Removed: the position pre-roll has reached by then **is**
-the track's actual start, just a few seconds further into it, exactly as if
-it had been playing the whole time.
-
-Three details are load-bearing:
-
-- The pre-roll starts at `volume 0.0001`, **not muted and not `volume 0`**.
-  WebKit decides whether an element gets a real audio session by measuring
-  its output, and a silent element can be written off — which would leave
-  the deck holding no session to take over with, putting the handoff right
-  back to acquiring one in the background. It's also the crossfade's floor,
-  for the same reason.
-- The crossfade ramps against a volume captured once, at the moment pre-roll
-  arms (`crossfadeBaseVolume`) — not against the live deck's own `.volume`
-  read fresh each tick, since this same code is what's changing it. On
-  handoff, `swapDecks()` hands the incoming deck that captured volume
-  explicitly rather than copying from the outgoing deck (its ordinary
-  behaviour), which by then has been faded down to near `0`.
-- `stopPreroll()` is bound to `pause` **with an `event.currentTarget.ended`
-  guard**. A track running out fires `pause` immediately *before* `ended`
-  (the spec has reaching the end set `paused` and fire the event, then fire
-  `ended`), so without that guard every handoff tore down its own pre-roll
-  microseconds before claiming it — and left no trace, since by the time the
-  handoff looked, the deck was paused back at 0:00. `stopPreroll()` also
-  restores the live deck's volume to `crossfadeBaseVolume`, in case it fires
-  mid-fade (a manual pause or skip).
-- A running-preroll handoff replays a `play` event on the newly-adopted deck
-  (`audio.dispatchEvent(new Event("play"))` — same idiom as the
-  `loadedmetadata` replay just above it). No native `play` DOM event fires
-  there for anything wired through `onPlayerEvent("play", ...)` to catch —
-  the incoming deck's real `play` already fired earlier, while it was still
-  `#audio-standby`, and `onPlayerEvent` dropped it. Three consumers depend on
-  this and broke together the first time it was missed: the play/pause
-  button and the mini-bar icon (both stuck showing "paused" while audio
-  audibly played), and `navigator.mediaSession.playbackState` (stuck at
-  `"paused"`, set moments earlier by the outgoing track's own pre-`ended`
-  `pause`). `mediaSession.metadata` is updated separately
-  (`home/overlay.js`'s `openPlayer`, every track, unconditionally) and is
-  unaffected, so the lock-screen widget looks correct throughout — only the
-  **Dynamic Island**, which needs an actual `playbackState: "playing"`
-  transition and not just correct metadata, drops out. Lock screen fine +
-  Dynamic Island stuck + play button showing the wrong icon is the signature
-  of this bug.
-
-`handoff-adopt` reports `running`/`prerolled`/`paused`/`position` on every
-track change; it is the breadcrumb that caught the `pause`-before-`ended`
-bug and the first thing to read if this ever regresses.
+(`playback-stalled` is an ordinary `setTimeout` that *fired* while still
+hidden, three seconds in — the page was not frozen, and neither was the
+network: `readyState 4` means the whole track was already in memory. `play()`
+still did nothing until the app came back on screen.) The consequence: a
+queued track that runs out while the app is backgrounded does not
+auto-advance until the app is foregrounded again — at which point it resumes
+immediately, from wherever the previous track had actually finished. Fixing
+that properly (without reintroducing the two-stream problem above) would mean
+a single element that never actually stops between tracks — gapless playback
+via Media Source Extensions, appending each track's bytes into one continuous
+buffer rather than swapping `src`. That's a materially bigger project, not
+attempted here.
 
 The keep-alive (`startKeepAlive`, a looping inaudible clip on its own
-`#keepalive` element) is the fallback for the gaps two decks can't cover:
-the *first* track of a session, and any handoff into a track that still has
-to be downloaded. It holds the audio session — and with it the app — open
-across those. Note that it is stopped on the live deck's `playing` event,
-never before the swap: pausing it first left the page silent for exactly the
-window a media load has to happen in, which is the window iOS suspends in,
-and that ordering bug is what made background advance fail *completely*
-rather than just sometimes.
+`#keepalive` element) covers the gap while a track is still downloading —
+without it, the page's only excuse to stay awake in the background
+disappears the moment the previous track's audio stops, and a backgrounded
+iOS app is suspended the instant it stops emitting audio: no timers, no
+fetches, and the download-status poll driving `prepareAudio` would simply
+never run again until the app is reopened. It's stopped on the live
+element's `playing` event, never before playback actually starts: pausing
+it first left the page silent for exactly the window a media load has to
+happen in, which is the window iOS suspends in.
 
 That leaves one real seam: the audio element still doesn't survive a genuine
 full document reload (an actual F5, reopening the tab, or landing via one of

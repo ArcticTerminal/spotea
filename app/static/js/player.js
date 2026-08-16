@@ -198,324 +198,39 @@ export function stopKeepAlive() {
 }
 
 // ---------------------------------------------------------------------------
-// Decks
+// Playback element
 //
-// Playback runs on two interchangeable <audio> elements rather than on one
-// whose src is reassigned per track. The reason is iOS-specific and load-
-// bearing: iOS suspends a backgrounded web app the moment it stops emitting
-// audio, and a suspended process runs nothing — no timers, no fetches, and
-// above all no media loading. Assigning a fresh src at the instant a track
-// ends therefore starts a network load the OS is about to freeze. The play()
-// call neither resolves nor rejects; it simply hangs, and the track starts
-// seconds or minutes later, at the exact moment the app is brought back to
-// the foreground. The breadcrumb log showed precisely that: `play-requested`
-// at 20:30:22 while hidden, `playing` at 20:34:31 on the way back in.
+// A single <audio> element, its src reassigned per track — the ordinary way
+// to do this, and the only way that keeps iOS's Now Playing/Dynamic Island
+// system unambiguous.
 //
-// So the next track is loaded into the *other* deck while the current one is
-// still playing — the app is awake then, by definition — and the handoff
-// itself is a bare play() on an already-buffered element. No resource
-// selection, no request, nothing left for a suspended process to defer.
-//
-// Which deck is live is carried by the element's id rather than by a variable
-// here: every module in the app (resume.js, home/overlay.js, this file) finds
-// the player as #audio, and exchanging the two ids moves all of them at once.
-// Listeners are registered on both elements and filtered by id, so they
-// follow the swap too — see onPlayerEvent.
+// This used to be two interchangeable decks, pre-rolling the next track on a
+// second element a few seconds before the current one ended so a background
+// handoff never had to call play() on a paused element (which iOS silently
+// refuses while backgrounded). It genuinely worked around that refusal, but
+// traded it for a worse, better-documented problem: Apple's own docs say
+// "all devices running iOS are limited to playback of a single audio or
+// video stream at any time [...] playing multiple simultaneous audio streams
+// is also not supported" — and having two elements truly playing at once
+// (which the crossfade needed) is exactly that. In practice it meant iOS's
+// Now Playing system couldn't tell which element was the "real" one:
+// Dynamic Island stopped updating on track change, the play/pause button and
+// lock-screen controls fell out of sync, and the two tracks were audibly
+// both there at once in a way that wasn't just the intended crossfade.
+// Reverted for a single element, which every one of those systems tracks
+// unambiguously — at the cost of the one thing the two-deck version bought:
+// a track that runs out while the app is backgrounded doesn't auto-advance
+// until the app is foregrounded again, same as before that work started.
 // ---------------------------------------------------------------------------
 
-/** The deck currently driving the transport. */
+/** The element driving the transport. */
 export function activeAudio() {
   return document.getElementById("audio");
 }
 
-function standbyAudio() {
-  return document.getElementById("audio-standby");
-}
-
-function swapDecks(volume) {
-  const active = activeAudio();
-  const standby = standbyAudio();
-  if (!active || !standby) return;
-  // Volume and mute live on the element, not on the page, so they have to be
-  // carried across or every handoff would silently reset them to full.
-  // `volume`, when given, overrides copying it from `active` — needed for a
-  // crossfaded handoff, where `active` (the outgoing deck) has just been
-  // faded down to near 0 and copying it would hand the incoming deck that
-  // same near-silence instead of the level it was actually faded up to.
-  standby.volume = volume ?? active.volume;
-  standby.muted = active.muted;
-  active.id = "audio-standby";
-  standby.id = "audio";
-}
-
-/**
- * Registers a media listener on both decks, firing only for whichever is live.
- *
- * Both, because the pair swap roles on every queue handoff and a listener
- * bound to just the element that happened to be live at page load would go
- * quiet the first time a track ended. Filtered, because the standby deck
- * genuinely fires events of its own while it preloads — `loadedmetadata`
- * above all — and rendering those would paint the *next* track's duration
- * over the one that's playing.
- */
+/** Registers a media listener on the player's audio element. */
 export function onPlayerEvent(type, handler) {
-  for (const deck of [activeAudio(), standbyAudio()]) {
-    if (!deck) continue;
-    deck.addEventListener(type, (event) => {
-      if (event.currentTarget.id !== "audio") return;
-      handler(event);
-    });
-  }
-}
-
-/**
- * Loads a track into the standby deck so that starting it later costs no
- * network at all.
- *
- * Called while the current track is still playing, which is the whole point:
- * the app is awake then and the fetch goes through, so by the time the handoff
- * needs the bytes they are already here.
- *
- * `?preload=1` keeps the server from recording this as a play (see
- * routers/content.py's stream_content) — it isn't one yet, and a preloaded
- * track the listener skips past should not turn up in Recently Played. The
- * play gets recorded separately if and when one actually starts.
- */
-export function preloadNext(contentId) {
-  const deck = standbyAudio();
-  if (!deck) return;
-  const id = String(contentId);
-  if (deck.dataset.preloadFor === id) return;
-  deck.dataset.preloadFor = id;
-  deck.src = `/content/${id}/stream?preload=1`;
-  deck.load();
-  reportPlayback("preload-armed", { contentId: id });
-
-  // Disarmed on failure rather than left in place: adoptStandby only checks
-  // *which* track a deck is holding, so a preload that 404'd or was refused
-  // would otherwise be handed the next track change and play nothing at all —
-  // strictly worse than never having armed, since it also displaces the
-  // ordinary load that would have worked.
-  deck.addEventListener(
-    "error",
-    () => {
-      if (deck.dataset.preloadFor !== id) return;
-      delete deck.dataset.preloadFor;
-      reportPlayback("preload-failed", { contentId: id });
-    },
-    { once: true }
-  );
-
-  // Not decorative: `preload="auto"` is a hint, and whether iOS honours it
-  // for a backgrounded page is the single assumption this whole arrangement
-  // rests on. This is what says, from the device itself, that the bytes were
-  // really here before the handoff needed them.
-  deck.addEventListener(
-    "canplaythrough",
-    () => {
-      // Guarded like the error case: by the time this fires the deck may
-      // already have gone live, and reporting it then would read as a
-      // preload that landed in time when it did no such thing.
-      if (deck.dataset.preloadFor !== id) return;
-      reportPlayback("preload-buffered", { contentId: id, readyState: deck.readyState });
-    },
-    { once: true }
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Pre-roll
-//
-// Preloading the bytes turned out not to be enough, and the breadcrumb log is
-// what said so. On the device, a handoff looked like this:
-//
-//   track-ended       hidden   43957 -> 43958 (prepared)
-//   play-requested    hidden   43958  preloaded=true readyState=4
-//   playback-stalled  hidden   43958  readyState=4      (+3.0s)
-//   playing           visible  43958                    (+7.7s)
-//
-// Two things in there rule out most explanations. readyState 4 means the whole
-// next track was already in memory, so nothing was waiting on the network. And
-// the stall watchdog — an ordinary setTimeout — *fired* three seconds in while
-// still hidden, so the page was not frozen and neither were its timers. The
-// app was awake, the audio was in hand, and play() still did nothing: it
-// neither threw nor started, and the element stayed paused until the app came
-// back on screen.
-//
-// That is WebKit refusing a playback-state change rather than anything being
-// slow or suspended. A backgrounded iOS app may keep playing what is already
-// playing — the previous track ran to its end off screen, as it always did —
-// but it may not *start* a paused element, and the refusal is silent.
-//
-// So the next track has to already be playing before it is needed. It gets
-// started a few seconds early, inaudibly, while the current track is still
-// going and playback is therefore still allowed to begin. The handoff itself
-// then asks for nothing: a volume change, which no policy can refuse — and,
-// now, not even a seek. It used to also snap the incoming deck's position
-// back to zero at the handoff instant, on the theory that pre-roll was only
-// ever meant to warm up the audio session and the listener should hear the
-// track from its actual start. In practice that meant the track played
-// audibly for up to PREROLL_SECONDS during the fade-up below and then visibly
-// jumped backwards the moment it became "the" track — indistinguishable from
-// a real rewind, because it was one. Removed: the position pre-roll reaches
-// by the time of the handoff **is** the track's actual start, just a few
-// seconds further into it, exactly as if it had been playing the whole time —
-// which, audibly, it has.
-//
-// Crossfade rides the same window: as the pre-rolled deck fades up from
-// PREROLL_VOLUME to the listener's real volume, the outgoing deck fades down
-// from it to 0 in lockstep, so the handoff has no audible seam at all rather
-// than a click from one deck's volume to the other's.
-// ---------------------------------------------------------------------------
-
-// How long before the end of a track its successor is quietly started, and
-// the width of the crossfade that runs across that same window. Long enough
-// that `timeupdate` (which fires roughly four times a second, and less often
-// on a backgrounded page) is certain to land inside the window and give the
-// fade several steps to work with, short enough to keep two decoders running
-// together to a few seconds per track.
-const PREROLL_SECONDS = 4;
-
-// Inaudible, but deliberately not silent. WebKit decides whether a media
-// element gets a real audio session by measuring its output, and a muted
-// element (or one at volume 0) can be written off as silent — which would
-// leave the pre-rolled deck holding no session to take over with, putting the
-// handoff right back to acquiring one in the background. Also doubles as the
-// crossfade's floor, for the same reason: never let the fade-up dip back to
-// true silence.
-const PREROLL_VOLUME = 0.0001;
-
-// The listener's real volume for the deck currently crossfading, captured the
-// instant pre-roll arms so the fade has a fixed target to ramp toward — reading
-// the live deck's own .volume on every tick would be reading a value this same
-// code is in the middle of changing.
-let crossfadeBaseVolume = null;
-
-/**
- * Starts the standby deck, quietly, once the live one is nearly out, and
- * carries the crossfade forward on every tick after that.
- *
- * Driven straight off `timeupdate` and safe to call on every one: it owns the
- * "is it time yet?" decision, so no caller has to keep a copy of the window
- * in step with this one.
- */
-export function prerollStandby() {
-  const deck = standbyAudio();
-  if (!deck) return;
-  const id = deck.dataset.preloadFor;
-  if (!id) return;
-
-  const live = activeAudio();
-  const remaining = (live.duration || 0) - live.currentTime;
-
-  if (deck.dataset.prerolled !== "1") {
-    if (!(remaining > 0 && remaining <= PREROLL_SECONDS)) return;
-    // Nothing to start yet. The ordinary play() path is a better answer than
-    // a pre-roll that has to buffer first, since that's a load, and a load is
-    // the thing this is trying to keep out of the handoff.
-    if (deck.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) return;
-
-    deck.dataset.prerolled = "1";
-    deck.currentTime = 0;
-    deck.muted = false;
-    deck.volume = PREROLL_VOLUME;
-    crossfadeBaseVolume = live.volume;
-    reportPlayback("preroll-requested", { contentId: id, readyState: deck.readyState });
-    deck.addEventListener(
-      "playing",
-      () => reportPlayback("preroll-playing", { contentId: id }),
-      { once: true }
-    );
-    deck.play().catch((err) =>
-      reportPlayback("preroll-rejected", { contentId: id, error: String(err?.name || err) })
-    );
-    return;
-  }
-
-  // Already running: ride the crossfade. Muted has nothing to fade — leave it
-  // alone rather than do silent volume arithmetic that will never be heard.
-  if (crossfadeBaseVolume == null || live.muted) return;
-  const t = remaining > 0 ? Math.min(1, Math.max(0, 1 - remaining / PREROLL_SECONDS)) : 1;
-  live.volume = crossfadeBaseVolume * (1 - t);
-  deck.volume = Math.max(PREROLL_VOLUME, crossfadeBaseVolume * t);
-}
-
-/**
- * Stops a pre-roll that isn't going to be handed over after all — the listener
- * paused, or skipped somewhere else entirely. Without this the standby deck
- * would keep running inaudibly for the rest of the track it was meant to
- * follow, and then past it.
- */
-export function stopPreroll() {
-  const deck = standbyAudio();
-  if (!deck || deck.dataset.prerolled !== "1") return;
-  delete deck.dataset.prerolled;
-  deck.pause();
-  deck.currentTime = 0;
-  // Undo whatever the crossfade had faded the live deck down to — it was
-  // mid-fade, not mid-handoff, so the track that's staying deserves its real
-  // volume back rather than whatever level it happened to be passing through.
-  const live = activeAudio();
-  if (crossfadeBaseVolume != null) live.volume = crossfadeBaseVolume;
-  crossfadeBaseVolume = null;
-}
-
-/**
- * Whether the standby deck is already playing this track, quietly, ready to
- * be handed over. The caller's cue that this switch needs no bridging: the
- * audio isn't going to stop, so nothing has to be held open across it.
- */
-export function standbyIsRunningFor(contentId) {
-  const deck = standbyAudio();
-  if (!deck || deck.dataset.preloadFor !== String(contentId)) return false;
-  return deck.dataset.prerolled === "1" && !deck.paused;
-}
-
-/**
- * Makes the standby deck the live one when it's holding this exact track.
- *
- * Returns null when it isn't, meaning the caller loads the track the ordinary
- * way. Otherwise `{ running }` says whether the deck was pre-rolled and is
- * genuinely playing right now — the difference between a handoff that needs
- * no permission at all and one that still has to call play().
- */
-function adoptStandby(contentId) {
-  const deck = standbyAudio();
-  if (!deck || deck.dataset.preloadFor !== String(contentId)) return null;
-  const running = deck.dataset.prerolled === "1" && !deck.paused;
-  reportPlayback("handoff-adopt", {
-    contentId: String(contentId),
-    running,
-    prerolled: deck.dataset.prerolled ?? null,
-    paused: deck.paused,
-    position: deck.currentTime,
-    readyState: deck.readyState,
-  });
-  delete deck.dataset.preloadFor;
-  delete deck.dataset.prerolled;
-  // Hand the crossfade's target volume to the swap explicitly when this deck
-  // was actually faded in — copying it from the outgoing deck (swapDecks'
-  // ordinary behaviour) would hand over the near-silence it was just faded
-  // down to instead.
-  swapDecks(running ? crossfadeBaseVolume : undefined);
-  if (running) crossfadeBaseVolume = null;
-  return { running };
-}
-
-/** Drops a preload nothing is going to play, and the fetch behind it. */
-export function clearPreload() {
-  const deck = standbyAudio();
-  if (!deck || (!deck.dataset.preloadFor && deck.dataset.prerolled !== "1")) return;
-  const wasCrossfading = deck.dataset.prerolled === "1";
-  delete deck.dataset.preloadFor;
-  delete deck.dataset.prerolled;
-  deck.pause();
-  deck.removeAttribute("src");
-  deck.load();
-  // Same reason as stopPreroll: closing mid-crossfade shouldn't leave the
-  // deck that's staying live faded down.
-  if (wasCrossfading && crossfadeBaseVolume != null) activeAudio().volume = crossfadeBaseVolume;
-  crossfadeBaseVolume = null;
+  activeAudio()?.addEventListener(type, handler);
 }
 
 // A single-sample silent WAV, used only as a throwaway source for
@@ -549,23 +264,17 @@ function unlockAudio() {
   if (audioUnlocked) return;
   audioUnlocked = true;
 
-  // Both decks, not just the live one. WebKit's unlocked state is per
-  // element, and the restriction it lifts covers loading as well as playing
-  // (RequireUserGestureForLoad, not only ...ForRateChange) — so leaving the
-  // standby deck locked wouldn't merely block its play(), it would make the
-  // preload itself a no-op, which is the one thing this whole arrangement
-  // exists to make possible.
-  for (const deck of [activeAudio(), standbyAudio()]) {
-    // No element, or something is already loaded on it — either nothing to
-    // do, or a play() already ran on it some other way. Either way, don't
-    // stomp a loaded (possibly playing) source with the silent clip.
-    if (!deck || deck.src) continue;
+  const audio = activeAudio();
+  // No element, or something is already loaded on it — either nothing to do,
+  // or a play() already ran on it some other way. Either way, don't stomp a
+  // loaded (possibly playing) source with the silent clip.
+  if (audio && !audio.src) {
     // What WebKit needs is the *call* happening synchronously inside the
     // click — not that the promise resolves, which is why this doesn't wait
     // on .then() before pausing.
-    deck.src = SILENT_AUDIO_DATA_URI;
-    deck.play().catch(() => {});
-    deck.pause();
+    audio.src = SILENT_AUDIO_DATA_URI;
+    audio.play().catch(() => {});
+    audio.pause();
   }
 
   // The keep-alive element needs the same treatment for the same reason:
@@ -634,11 +343,6 @@ export function setupPlayer() {
     else audio.pause();
   });
 
-  // Every media listener from here down goes through onPlayerEvent rather
-  // than binding to one element: the two decks trade places on each queue
-  // handoff, and a listener attached to whichever was live at page load
-  // would stop firing the first time a track ended. Nothing below may close
-  // over the element either, for the same reason — activeAudio(), every time.
   onPlayerEvent("play", syncPlayIcon);
   onPlayerEvent("pause", syncPlayIcon);
   onPlayerEvent("ended", syncPlayIcon);
@@ -688,23 +392,15 @@ export function setupPlayer() {
   });
 
   volume.addEventListener("input", () => {
-    // Set on both decks, not just the live one: the standby deck is already
-    // buffering the next track and becomes the live one at the next handoff,
-    // where a volume it never heard about would come back as a jump to full.
-    for (const deck of [activeAudio(), standbyAudio()]) {
-      if (!deck) continue;
-      deck.volume = Number(volume.value) / 100;
-      deck.muted = false;
-    }
+    const audio = activeAudio();
+    audio.volume = Number(volume.value) / 100;
+    audio.muted = false;
     paintRange(volume);
     syncMuteIcon();
   });
 
   muteBtn.addEventListener("click", () => {
-    const muted = !activeAudio().muted;
-    for (const deck of [activeAudio(), standbyAudio()]) {
-      if (deck) deck.muted = muted;
-    }
+    activeAudio().muted = !activeAudio().muted;
     syncMuteIcon();
   });
 
@@ -813,12 +509,7 @@ export function whenVisible(run) {
  * hold the transport disabled until the file is ready.
  *
  * onStart (optional) fires exactly once, right as this track becomes the one
- * loaded in the live deck. It receives `{ preloaded }` — whether that came
- * from adopting an already-buffered standby deck rather than assigning a
- * fresh src — because the two differ in how the server learns about the play:
- * a fresh src records it on the /stream request itself (see
- * routers/content.py's stream_content), while a preloaded one was fetched
- * with ?preload=1 precisely so it wouldn't, and has to be reported.
+ * loaded in the audio element.
  *
  * onFail (optional) fires every time this ends in the disabled "Download
  * failed" state — a track pulled from a queue (e.g. one YouTube has since
@@ -853,26 +544,8 @@ export async function prepareAudio(onStart, onFail) {
     prepare.hidden = true;
     transport.classList.remove("is-disabled");
 
-    // The fast path, and the only one that can be trusted while the app is
-    // backgrounded: the standby deck already holds this track's bytes, so
-    // going live on it is a bare play() with no resource load behind it —
-    // nothing a suspended iOS process can defer. Falling through to a fresh
-    // src is the ordinary first-track path, and the fallback whenever a
-    // preload didn't happen or hadn't landed in time.
-    const adopted = adoptStandby(contentId);
-    const preloaded = adopted !== null;
     const audio = activeAudio();
-    if (!preloaded) audio.src = streamUrl;
-
-    // An adopted deck fired loadedmetadata back when it was preloading, on
-    // the standby element, where onPlayerEvent correctly dropped it — so the
-    // seek bar's range, the duration readout and the media-session position
-    // would all still be describing the track that just finished. Replaying
-    // the event now runs that wiring against the deck that's live, without
-    // any of it needing to know a handoff is a special case.
-    if (preloaded && audio.readyState >= HTMLMediaElement.HAVE_METADATA) {
-      audio.dispatchEvent(new Event("loadedmetadata"));
-    }
+    audio.src = streamUrl;
 
     // Deliberately NOT stopped here, which is where it used to be. The
     // keep-alive is what holds the audio session — and with it, on iOS, the
@@ -887,45 +560,17 @@ export async function prepareAudio(onStart, onFail) {
     // right now, and it must not survive to fire again on some later track.
     audio.addEventListener("playing", stopKeepAlive, { once: true });
 
-    if (onStart) onStart({ preloaded });
+    if (onStart) onStart();
 
     const resume = consumeResumeState(contentId);
     if (resume) {
-      // Waiting for loadedmetadata on a deck that has already loaded would
-      // wait forever, so a ready one is seeked outright.
+      // Waiting for loadedmetadata on an element that has already loaded
+      // would wait forever, so a ready one is seeked outright.
       if (audio.readyState >= HTMLMediaElement.HAVE_METADATA) audio.currentTime = resume.currentTime;
       else audio.addEventListener("loadedmetadata", () => { audio.currentTime = resume.currentTime; }, { once: true });
     }
-    if (adopted?.running && (!resume || resume.wasPlaying)) {
-      // Already playing, quietly, since a few seconds before the previous
-      // track ended, and already crossfaded up to its real volume by
-      // prerollStandby — see the pre-roll notes above. There is nothing left
-      // to do here at all: no seek (its position is genuinely where the
-      // track has been playing since pre-roll started — snapping it back to
-      // 0 here is what used to make every handoff sound like a rewind, because
-      // it was one) and no volume change (swapDecks already carried the
-      // crossfade's target volume onto this deck). The handoff asks
-      // permission for nothing, which is the entire point: a backgrounded iOS
-      // app is not allowed to start a paused element.
-      reportPlayback("handoff-preroll", { contentId, readyState: audio.readyState });
-      // Same reasoning as the loadedmetadata replay above, for the same
-      // reason: the audio never stopped, so no native `play` event fires here
-      // for anything bound through onPlayerEvent to catch — it already fired
-      // once, back when this deck was still the standby one, and
-      // onPlayerEvent dropped it because it wasn't `#audio` yet. Left
-      // unreplayed, the play/pause button and mini-bar icon are stuck showing
-      // "paused" (both are wired to onPlayerEvent("play"/"pause", ...), and
-      // the last real event either saw was the outgoing track's pre-`ended`
-      // `pause`) and mediaSession.playbackState is stuck at "paused" too —
-      // metadata is still correct (home/overlay.js's openPlayer sets it
-      // separately, every track), so the lock-screen widget looks fine, but
-      // iOS treats the session as not actively playing, which is what drops
-      // it out of the Dynamic Island specifically.
-      audio.dispatchEvent(new Event("play"));
-      stopKeepAlive();
-      watchPlaybackStarted(contentId);
-    } else if (!resume || resume.wasPlaying) {
-      reportPlayback("play-requested", { contentId, preloaded, readyState: audio.readyState });
+    if (!resume || resume.wasPlaying) {
+      reportPlayback("play-requested", { contentId, readyState: audio.readyState });
       audio.play().then(
         () => reportPlayback("playing", { contentId }),
         (err) => reportPlayback("play-rejected", { contentId, error: String(err?.name || err) })
@@ -933,9 +578,7 @@ export async function prepareAudio(onStart, onFail) {
       watchPlaybackStarted(contentId);
     } else {
       // Restored deliberately paused: nothing is going to start, so nothing
-      // should be holding the session open waiting for it — and a deck that
-      // was pre-rolled into playing has to be stopped, since the reason it
-      // was running was to hand over to playback that isn't happening.
+      // should be holding the session open waiting for it.
       audio.pause();
       stopKeepAlive();
     }

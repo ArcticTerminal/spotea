@@ -14,17 +14,12 @@ import { api, formatDuration, showToast } from "../core.js";
 import { refreshFragments } from "../fragments.js";
 import {
   activeAudio,
-  clearPreload,
   onPlayerEvent,
   paintRange,
   prepareAudio,
-  preloadNext,
-  prerollStandby,
   reportPlayback,
-  standbyIsRunningFor,
   startKeepAlive,
   stopKeepAlive,
-  stopPreroll,
   whenVisible,
 } from "../player.js";
 import { clearResumeState, readResumeState } from "../resume.js";
@@ -134,13 +129,7 @@ export async function openPlayer(contentId, { expanded = true, requireVisible = 
   // audio — which, at this exact moment, it has just stopped doing. Hold the
   // session open across the switch. First and synchronously: the gap starts
   // the instant the previous track ended, not once we get around to it.
-  //
-  // Skipped when the next deck is already playing this very track (the
-  // pre-roll took), because then there is no gap to bridge — and starting the
-  // keep-alive only to pause it again a few lines later is the exact
-  // play()/pause() churn on a third element that this code has no business
-  // doing at the one moment the audio session must not be disturbed.
-  if (!requireVisible && !standbyIsRunningFor(contentId)) startKeepAlive();
+  if (!requireVisible) startKeepAlive();
 
   // Switching tracks (or starting fresh): stop whatever's currently loaded
   // immediately, rather than leaving it playing underneath the new track's
@@ -238,22 +227,13 @@ export async function openPlayer(contentId, { expanded = true, requireVisible = 
 
   const start = () => {
     prepareAudio(
-      ({ preloaded }) => {
-        if (preloaded) {
-          // The bytes came from a ?preload=1 fetch, which the server
-          // deliberately does not count as a play (a preloaded track the
-          // listener skips past has no business in Recently Played). Now that
-          // one has actually started, say so — and only refresh the shelves
-          // once the server has been told, or they'd re-render without it.
-          api(`/content/${data.id}/played`, { method: "POST" }).then(refreshFragments);
-        } else {
-          // The server records the play when /stream is requested, which only
-          // happens after audio.src is assigned — refreshing right here would
-          // race it and re-render shelves that don't know about this play yet.
-          // loadedmetadata fires once the first bytes are back, by which point
-          // the server has already written last_played_at.
-          activeAudio().addEventListener("loadedmetadata", refreshFragments, { once: true });
-        }
+      () => {
+        // The server records the play when /stream is requested, which only
+        // happens after audio.src is assigned — refreshing right here would
+        // race it and re-render shelves that don't know about this play yet.
+        // loadedmetadata fires once the first bytes are back, by which point
+        // the server has already written last_played_at.
+        activeAudio().addEventListener("loadedmetadata", refreshFragments, { once: true });
         consecutiveAutoSkipFailures = 0;
         consecutiveUnavailableSkips = 0;
       },
@@ -321,16 +301,13 @@ export async function openPlayer(contentId, { expanded = true, requireVisible = 
 }
 
 /**
- * Pulls the next track down and keeps watching until it's actually playable,
- * caching what the handoff will need: its metadata in `upcomingTrack`, and —
- * the moment the server says the file is on disk — its audio in the standby
- * deck (player.js's preloadNext).
+ * Pulls the next track down ahead of time and caches its metadata in
+ * `upcomingTrack`, so the handoff to it doesn't have to wait on either.
  *
- * The download POST is the older half of this and the reason it exists at
- * all: without it every track change in a queue costs the same "Preparing
- * audio…" wait as the first one. The metadata fetch beside it, the follow-up
- * polling, and the preload are what let the handoff itself be synchronous and
- * network-free — see `upcomingTrack` and player.js's deck helpers.
+ * The download POST is the reason this exists at all: without it every track
+ * change in a queue costs the same "Preparing audio…" wait as the first one.
+ * The metadata fetch beside it and the follow-up polling are what let the
+ * handoff skip its own `/content/{id}` round trip too.
  *
  * Runs while the current track is still playing, which is what makes the
  * polling affordable and reliable: the page is awake by definition, each
@@ -354,7 +331,6 @@ async function cacheUpcoming(contentId) {
     data.is_unavailable = download.data.is_unavailable === true;
   }
   upcomingTrack = { id, data };
-  if (data.status === "ready") preloadNext(id);
   if (data.is_unavailable || data.status === "ready" || data.status === "error") return;
 
   for (let attempt = 0; attempt < UPCOMING_POLL_LIMIT; attempt += 1) {
@@ -366,15 +342,7 @@ async function cacheUpcoming(contentId) {
     if (!ok) continue;
     upcomingTrack.data.status = status.status;
     upcomingTrack.data.is_unavailable = status.is_unavailable === true;
-    if (status.status === "ready") {
-      // The file exists now, so this is the earliest the audio can be pulled
-      // into the standby deck — and it has to happen while the current track
-      // is still playing, which is the only window in which a backgrounded
-      // app is awake enough to fetch anything at all.
-      preloadNext(id);
-      return;
-    }
-    if (status.status === "error") return;
+    if (status.status === "ready" || status.status === "error") return;
   }
 }
 
@@ -436,9 +404,6 @@ export function closePlayer() {
   audio.removeAttribute("src");
   audio.load();
   stopKeepAlive();
-  // Dismissing the player also calls off the read-ahead it had running, and
-  // the download behind it — nothing is going to play that track now.
-  clearPreload();
 
   const root = document.getElementById("player-root");
   root.dataset.contentId = "";
@@ -492,9 +457,6 @@ export function setupPlayerOverlay() {
     if (audio.paused) audio.play().catch(() => {});
     else audio.pause();
   });
-  // onPlayerEvent rather than a direct bind, and activeAudio() rather than a
-  // captured element, throughout: the two decks trade places on every queue
-  // handoff — see player.js.
   onPlayerEvent("play", syncMiniIcon);
   onPlayerEvent("pause", syncMiniIcon);
   onPlayerEvent("ended", syncMiniIcon);
@@ -503,11 +465,6 @@ export function setupPlayerOverlay() {
 
   // A track running out is the whole point of having a queue; with none
   // loaded nextId() is null and playback simply stops, as it always did.
-  //
-  // Registered after the two syncs above so it stays the last "ended"
-  // listener on each deck: this is the one that swaps them, and anything
-  // registered behind it would find itself running against the standby deck
-  // and be filtered out.
   onPlayerEvent("ended", () => {
     const finished = document.getElementById("player-root").dataset.contentId;
     const next = nextId();
@@ -531,29 +488,6 @@ export function setupPlayerOverlay() {
   // while a track anyone is actually hearing still leaves minutes of lead
   // time. Server-side the request is a no-op for anything already on disk
   // (see routers/content.py's start_download).
-  // The other half of a background handoff, and the half the download
-  // prefetch can't provide: having the bytes is not enough, the next deck has
-  // to already be *playing* before the current track runs out. Started here,
-  // a few seconds out, while playback is still under way and therefore still
-  // allowed to begin — see player.js's pre-roll notes.
-  onPlayerEvent("timeupdate", prerollStandby);
-
-  // A pre-roll only makes sense as a handover from playback that's actually
-  // running. Once the listener pauses, the deck waiting behind would
-  // otherwise keep going quietly on its own, through the rest of the track it
-  // was meant to follow and out the other side.
-  //
-  // The `ended` guard is not a detail: a track running out fires `pause`
-  // immediately *before* `ended` (the spec has playback reaching the end set
-  // `paused` and fire the event, then fire `ended`), so without it every
-  // handoff tore down its own pre-roll microseconds before claiming it —
-  // which is not a state any breadcrumb could show, since by the time the
-  // handoff looked, the deck was paused back at 0:00 with nothing to say why.
-  onPlayerEvent("pause", (event) => {
-    if (event.currentTarget.ended) return;
-    stopPreroll();
-  });
-
   let prefetchedFor = null;
   onPlayerEvent("timeupdate", () => {
     const playing = document.getElementById("player-root").dataset.contentId;
