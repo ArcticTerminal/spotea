@@ -14,9 +14,11 @@ itsdangerous==2.2.0
 bcrypt==5.0.0
 feedparser==6.0.13
 
-# Deliberately NOT pinned. YouTube changes its player/extraction constantly
-# and yt-dlp ships fixes within days; a pin here means downloads start
-# failing until someone notices and bumps it. The pot-provider plugin
-# tracks yt-dlp's own extractor API, so it floats with it.
-yt-dlp
-bgutil-ytdlp-pot-provider
+# yt-dlp and its PO-token plugin used to be listed here, unpinned, on the
+# reasoning that YouTube changes its player constantly and yt-dlp ships
+# fixes within days. That reasoning still holds — but leaving them in this
+# file didn't deliver it: this file barely changes, so Docker reused the
+# cached `pip install` layer on every rebuild and the running image sat six
+# weeks behind upstream while looking, from here, like it floated. They're
+# installed in their own layer after `COPY app` instead (see Dockerfile),
+# which any real change to the app invalidates.

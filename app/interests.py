@@ -1,0 +1,67 @@
+"""A profile's interests — the free-text tags Settings collects, and the only
+input Explore's recommendations are built from (see
+services/recommendations.py).
+
+Stored as one newline-separated string on `users.interests` rather than in a
+table of its own: nothing ever queries a single interest in SQL. The
+recommendation builder reads the whole list, hands each entry to YouTube
+search verbatim, and that's the end of it — a join table would buy ordering
+and nothing else.
+"""
+
+import hashlib
+from collections.abc import Iterable
+
+# Both caps exist to bound what a single recommendation run can be asked to
+# do (see services/recommendations.py, which samples from this list) and to
+# keep one profile's row from growing without limit. Neither is a value a
+# real user is likely to hit.
+MAX_INTERESTS = 20
+MAX_INTEREST_LENGTH = 60
+
+
+def normalize_interests(values: Iterable[str]) -> list[str]:
+    """Trims each tag, collapses inner whitespace, drops blanks, and removes
+    case-insensitive duplicates while keeping the order they were added in.
+
+    Whitespace collapsing isn't cosmetic: it's what guarantees no tag can
+    contain a newline, which is what makes the newline-separated storage
+    format above safe to split back apart.
+    """
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        tag = " ".join(str(value).split())[:MAX_INTEREST_LENGTH].strip()
+        if not tag:
+            continue
+        key = tag.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(tag)
+        if len(result) == MAX_INTERESTS:
+            break
+    return result
+
+
+def parse_interests(raw: str | None) -> list[str]:
+    """The stored column back as a list. Normalizes on the way out too, so a
+    row written before a cap changed still comes back within it."""
+    return normalize_interests((raw or "").splitlines())
+
+
+def serialize_interests(values: Iterable[str]) -> str:
+    return "\n".join(normalize_interests(values))
+
+
+def interests_signature(values: Iterable[str]) -> str:
+    """Stable id for one exact set of interests — what tells a cached
+    recommendation batch apart from one built before the user edited the list
+    (see services/recommendations.py).
+
+    Order-insensitive and case-insensitive: reordering or recapitalizing the
+    same tags would produce the same searches, so neither should throw away a
+    perfectly good cached batch.
+    """
+    joined = "\n".join(sorted(tag.casefold() for tag in normalize_interests(values)))
+    return hashlib.sha256(joined.encode()).hexdigest()[:32]

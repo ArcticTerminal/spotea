@@ -33,7 +33,9 @@ from app.page_context import (
     playlist_detail_context,
     queue_thumbnail_caching,
 )
+from app.services.remote_detail import remote_channel_context, remote_playlist_context
 from app.templating import templates
+from app.youtube.urls import CHANNEL_ID_RE, PLAYLIST_ID_RE
 
 router = APIRouter(prefix="/partials", tags=["partials"], dependencies=[Depends(require_login)])
 
@@ -99,4 +101,40 @@ def playlist_detail_fragment(
     if context is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown playlist")
     queue_thumbnail_caching(background_tasks, context["content"])
+    return templates.TemplateResponse(request, "_fragment_detail.html", context)
+
+
+# The two below render the same panel from YouTube rather than the database —
+# Explore's recommendations drill into them (see services/remote_detail.py).
+# No queue_thumbnail_caching: that works on Content rows, and nothing here has
+# one yet. Both are slow (a live yt-dlp read) where the three above are not,
+# which is why the client shows its loading state for them the same way.
+
+
+@router.get("/detail/yt-playlist/{playlist_id}", response_class=HTMLResponse)
+def remote_playlist_fragment(playlist_id: str, request: Request) -> HTMLResponse:
+    # Validated before it's interpolated into a youtube.com URL — it arrives
+    # as a raw path parameter.
+    if not PLAYLIST_ID_RE.match(playlist_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Playlist not found")
+
+    context = remote_playlist_context(playlist_id)
+    if context is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Could not open this playlist")
+    return templates.TemplateResponse(request, "_fragment_detail.html", context)
+
+
+@router.get("/detail/yt-channel/{channel_id}", response_class=HTMLResponse)
+def remote_channel_fragment(
+    channel_id: str,
+    request: Request,
+    profile: User = Depends(get_current_profile),
+    db: Session = Depends(get_db),
+) -> HTMLResponse:
+    if not CHANNEL_ID_RE.match(channel_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Channel not found")
+
+    context = remote_channel_context(db, profile.id, channel_id)
+    if context is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Could not open this channel")
     return templates.TemplateResponse(request, "_fragment_detail.html", context)

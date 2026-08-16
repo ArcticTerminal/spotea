@@ -13,13 +13,19 @@
 // place everything after that first paint agrees with it.
 const VALID_TABS = ["home", "library", "explore", "settings"];
 const PLAYLIST_KINDS = ["favorites", "saved", "new-uploads", "recently-played"];
+// Detail routes that carry an id. "yt-channel"/"yt-playlist" are the same
+// panel showing something the library doesn't have yet — a recommended
+// YouTube playlist, or a channel nobody follows (see
+// app/services/remote_detail.py).
+const ID_DETAIL_KINDS = ["channel", "yt-channel", "yt-playlist"];
 
 export function classifyHash(hash) {
   const [path, query] = hash.split("?");
   const page = query ? Number(query.replace("page=", "")) || 1 : 1;
 
-  if (path.startsWith("channel/")) {
-    return { type: "detail", kind: "channel", id: path.slice("channel/".length), page };
+  const kind = ID_DETAIL_KINDS.find((candidate) => path.startsWith(`${candidate}/`));
+  if (kind) {
+    return { type: "detail", kind, id: path.slice(kind.length + 1), page };
   }
   if (PLAYLIST_KINDS.includes(path)) {
     return { type: "detail", kind: path, id: null, page };
@@ -188,6 +194,24 @@ export function confirmDialog(message, confirmLabel) {
     overlay.addEventListener("click", onBackdrop);
     document.addEventListener("keydown", onKey);
   });
+}
+
+// Mobile keyboards resize/scroll the visual viewport independently of the
+// layout viewport that `position: fixed` is normally anchored to — open a
+// modal-overlay's input and the flex-centered box can drift off toward
+// wherever the layout viewport happens to be, instead of the area actually
+// on screen. Mirroring the visual viewport's rect onto these vars, kept
+// current on every resize/scroll tick, keeps .modal-overlay pinned to what's
+// really visible with the keyboard up.
+if (window.visualViewport) {
+  const syncViewportVars = () => {
+    const vv = window.visualViewport;
+    document.documentElement.style.setProperty("--vvh", `${vv.height}px`);
+    document.documentElement.style.setProperty("--vvt", `${vv.offsetTop}px`);
+  };
+  syncViewportVars();
+  window.visualViewport.addEventListener("resize", syncViewportVars);
+  window.visualViewport.addEventListener("scroll", syncViewportVars);
 }
 
 // One Escape handler for every overlay, rather than one per overlay. Four

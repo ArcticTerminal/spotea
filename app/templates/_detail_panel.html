@@ -1,21 +1,38 @@
-{# One channel or one pinned playlist's track list — swapped into index.html's
-   #detail-panel by home/detail.js (GET /partials/detail/channel/{id} or
-   /partials/detail/playlist/{kind}). Replaces the old standalone
-   channel.html/content_list.html pages; no <main class="layout"> wrapper
-   here since #tab-detail already sits inside index.html's one shared
-   <main class="layout">.
+{# One track list, four sources — swapped into index.html's #detail-panel by
+   home/detail.js:
 
-   `feed` is set for a channel, None for a playlist — that's also what picks
-   the hero icon vs avatar and whether track rows repeat the channel name
-   (show_channel below).
+     GET /partials/detail/channel/{id}       a followed channel   (feed set)
+     GET /partials/detail/playlist/{kind}    a pinned playlist    (feed None)
+     GET /partials/detail/yt-playlist/{id}   a YouTube playlist   (remote)
+     GET /partials/detail/yt-channel/{id}    an unfollowed channel (remote)
+
+   The last two are Explore drilling into something the library doesn't have
+   yet (see services/remote_detail.py). They deliberately render through this
+   same template rather than getting a page of their own — the only real
+   differences are that their rows have no Content row behind them yet (so
+   `_remote_track_row.html` instead of `_content_row.html`, and no save
+   toggle or downloaded badge), that the hero offers Follow instead of
+   Unfollow, and that there's nothing to paginate.
+
+   No <main class="layout"> wrapper here since #tab-detail already sits
+   inside index.html's one shared <main class="layout">.
 #}
 <button type="button" class="back-link" id="detail-back-btn">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-arrow-left" /></svg>
-  Library
+  {{ back_label | default("Library") }}
 </button>
 
 <div class="channel-hero">
-  {% if feed %}
+  {% if remote %}
+  {# Artwork is the playlist's first track or, for a channel, whatever avatar
+     the recommendation search already cached — either can be missing, and the
+     empty span is the same placeholder box a feed with no avatar renders. #}
+  {% if hero_image %}
+  <img class="channel-hero-avatar{{ '' if hero_is_avatar else ' is-artwork' }}" src="{{ hero_image }}" alt="" />
+  {% else %}
+  <span class="channel-hero-avatar"></span>
+  {% endif %}
+  {% elif feed %}
   {% if feed.avatar_url %}
   <img class="channel-hero-avatar" src="{{ feed.avatar_url }}" alt="" />
   {% else %}
@@ -36,18 +53,40 @@
   {% endif %}
   <div class="channel-hero-info">
     <h1 class="channel-hero-title">{{ title }}</h1>
-    <p class="muted">{{ video_count }} video{{ '' if video_count == 1 else 's' }}</p>
+    <p class="muted">
+      {%- if count_label -%}
+      {{ count_label }}
+      {%- else -%}
+      {{ video_count }} video{{ '' if video_count == 1 else 's' }}
+      {%- endif -%}
+    </p>
     {% if feed %}
     <button type="button" id="unfollow-channel-btn" class="btn-quiet channel-hero-unfollow" data-feed-id="{{ feed.id }}">
       Unfollow
     </button>
+    {% elif kind == "yt-channel" %}
+    {# Already following it? Then the library's own copy of this channel is
+       the more useful page of the two, so offer that instead of a Follow
+       button that would do nothing. #}
+    {% if followed_feed_id %}
+    <button type="button" id="open-followed-channel-btn" class="btn-quiet channel-hero-unfollow" data-feed-id="{{ followed_feed_id }}">
+      In your library
+    </button>
+    {% else %}
+    <button type="button" id="follow-channel-btn" class="btn-primary channel-hero-follow" data-channel-url="{{ channel_url }}">
+      Follow
+    </button>
+    {% endif %}
     {% endif %}
   </div>
   {% if content %}
   {# Play/Shuffle act on the whole channel or playlist, not just this page —
      home/queue.js fetches the full id list from /content/queue/... rather than
-     reading the twenty rows below. Only rendered when there's something to
-     play; an empty playlist gets its empty_message and no controls. #}
+     reading the twenty rows below. On a remote list there is no such endpoint
+     and no second page: the rows on screen *are* the whole list, so
+     home/remote.js builds the queue from them directly. Only rendered when
+     there's something to play; an empty playlist gets its empty_message and
+     no controls. #}
   <div class="detail-actions">
     <button type="button" id="detail-play-all" class="btn-play-all" aria-label="Play all" title="Play all">
       <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><use href="#i-play" /></svg>
@@ -64,7 +103,11 @@
 <div class="track-list">
   {% for item in content %}
   {% set index = start_index + loop.index0 %}
+  {% if remote %}
+  {% include "_remote_track_row.html" %}
+  {% else %}
   {% include "_content_row.html" %}
+  {% endif %}
   {% endfor %}
 </div>
 

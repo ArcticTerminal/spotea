@@ -37,6 +37,9 @@ class ContentOut(BaseModel):
     is_favorite: bool
     is_saved: bool
     is_played: bool
+    # See Content.is_unavailable — openPlayer reads it off this payload to
+    # decide whether to even attempt a download.
+    is_unavailable: bool = False
 
     @classmethod
     def from_content(cls, content: "Content") -> "ContentOut":
@@ -64,6 +67,7 @@ class ContentOut(BaseModel):
             is_favorite=content.is_favorite,
             is_saved=content.is_saved,
             is_played=content.last_played_at is not None,
+            is_unavailable=content.is_unavailable,
         )
 
 
@@ -86,6 +90,9 @@ class StatusOut(BaseModel):
     error_message: str | None = None
     progress_percent: int | None = None
     phase: str | None = None
+    # See Content.is_unavailable. The player treats this as "skip now" rather
+    # than "failed", so it has to travel with every status the player reads.
+    is_unavailable: bool = False
 
 
 class FavoriteOut(BaseModel):
@@ -125,6 +132,36 @@ class VideoSearchResultOut(BaseModel):
     thumbnail_url: str | None
     duration_seconds: int | None
     channel_title: str | None
+    # See VideoSearchResult in youtube/search.py — reliable for playlist and
+    # channel listings, absent or unreliable for search results.
+    channel_id: str | None = None
+
+
+class PlaylistSearchResultOut(BaseModel):
+    playlist_id: str
+    title: str
+    thumbnail_url: str | None
+    channel_title: str | None
+
+
+class RecommendationsOut(BaseModel):
+    """Explore's "For you" shelves. The three result lists are the same
+    shapes the search box returns, because they come from the same searches —
+    the client renders a recommended song and a searched one identically, and
+    "listen" on either goes through POST /feeds/videos."""
+
+    # Everything the profile listed, so Explore can say what it's working
+    # from (and tell "no interests set" apart from "interests set, nothing
+    # found") without a second request to /settings.
+    interests: list[str]
+    # The subset this batch was actually built from — see
+    # services/recommendations.py's INTERESTS_PER_RUN.
+    interests_used: list[str]
+    # None only when there are no interests, i.e. nothing was ever built.
+    generated_at: datetime | None
+    videos: list[VideoSearchResultOut]
+    channels: list[ChannelSearchResultOut]
+    playlists: list[PlaylistSearchResultOut]
 
 
 class VideoAddCreate(BaseModel):
@@ -137,6 +174,28 @@ class VideoAddCreate(BaseModel):
 
 class VideoAddResult(BaseModel):
     content_id: int
+
+
+class VideoBatchItem(VideoAddCreate):
+    """One track of a remote playlist/channel being turned into a playable
+    row. Unlike VideoAddCreate on its own, this carries the owning channel,
+    so nothing has to be resolved over the network — a *playlist page's*
+    per-entry `channel_id` is the real uploader, not the ambiguous guess a
+    flat *search* result gives (which is why add_single_video still resolves
+    its own)."""
+
+    channel_id: str
+
+
+class VideoBatchCreate(BaseModel):
+    items: list[VideoBatchItem]
+
+
+class VideoBatchResult(BaseModel):
+    """The created/reused rows, in exactly the order they were sent — that
+    order is the play queue, so it can't be reshuffled by the server."""
+
+    content_ids: list[int]
 
 
 class FeedAddResult(BaseModel):
@@ -158,11 +217,17 @@ class BackfillStatusOut(BaseModel):
 class SettingsOut(BaseModel):
     audio_quality: str
     feed_refresh_interval_minutes: int
+    interests: list[str]
 
 
 class SettingsUpdate(BaseModel):
     audio_quality: str | None = None
     feed_refresh_interval_minutes: int | None = None
+    # Always the complete list, never a single tag to add or remove: the
+    # Settings editor holds the whole list client-side anyway, and a
+    # whole-list PUT means add, remove and reorder are one code path instead
+    # of three endpoints.
+    interests: list[str] | None = None
 
 
 class ProfileOut(BaseModel):

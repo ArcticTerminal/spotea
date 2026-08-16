@@ -84,7 +84,13 @@ export function setupHorizontalScrollers() {
   onFragmentsSwapped(wireScrollers);
 }
 
-function wireScrollers() {
+/**
+ * Makes every not-yet-wired `.shelf-row`/`.channel-row` on the page
+ * drag-scrollable. Idempotent (each row is marked once), so anything that
+ * builds a new row client-side — Explore's recommendation shelves — can just
+ * call this afterwards rather than repeating the behaviour.
+ */
+export function wireScrollers() {
   // Shelf/channel rows are wider than their container by design. Genuine
   // horizontal gestures (trackpad two-finger swipe, shift+wheel, a tilt
   // wheel) already scroll these natively via overflow-x:auto — no JS needed.
@@ -171,7 +177,7 @@ function wireScrollers() {
 // The overlay (rather than just the button's own spin state) is the feedback
 // here because refresh-feeds-btn itself is hidden under the mobile-menu
 // breakpoint (see style.css); the overlay covers that entry point too.
-async function refreshFeeds() {
+async function refreshFeeds(alsoRefresh) {
   const overlay = document.getElementById("refresh-overlay");
   const btn = document.getElementById("refresh-feeds-btn");
   if (overlay) overlay.hidden = false;
@@ -180,7 +186,13 @@ async function refreshFeeds() {
     btn.classList.add("is-spinning");
   }
 
-  const { ok } = await api("/feeds/refresh", { method: "POST" });
+  // Explore's recommendations are rebuilt alongside the feeds rather than
+  // having a refresh control of their own — one button means "go and look at
+  // everything again". Run together, since both are slow and independent.
+  const [{ ok }] = await Promise.all([
+    api("/feeds/refresh", { method: "POST" }),
+    alsoRefresh ? alsoRefresh() : Promise.resolve(),
+  ]);
 
   // Always re-render, regardless of new_content_count: that figure only
   // counts rows this exact call inserted, not rows apply_feed_data re-marked
@@ -200,15 +212,22 @@ async function refreshFeeds() {
   }
 }
 
-export function setupRefreshButton() {
-  document.getElementById("refresh-feeds-btn")?.addEventListener("click", () => refreshFeeds());
+// `alsoRefresh` is injected rather than imported (pages/index.js passes
+// home/explore.js's refreshRecommendations) — importing it here would make
+// library.js and explore.js import each other, since explore.js already takes
+// wireScrollers from this module. Same arrangement as setupMobileMenu's
+// openProfileSwitcher below.
+export function setupRefreshButton(alsoRefresh) {
+  document
+    .getElementById("refresh-feeds-btn")
+    ?.addEventListener("click", () => refreshFeeds(alsoRefresh));
 }
 
 // Below the mobile-menu-btn breakpoint (see style.css), the profile/refresh/
 // logout row collapses into this single hamburger dropdown instead — same
 // underlying actions, just consolidated so the topbar doesn't have to fit
 // three separate controls (and any more added later) on one narrow line.
-export function setupMobileMenu(openProfileSwitcher) {
+export function setupMobileMenu(openProfileSwitcher, alsoRefresh) {
   const btn = document.getElementById("mobile-menu-btn");
   const menu = document.getElementById("mobile-menu");
   if (!btn || !menu) return;
@@ -233,7 +252,7 @@ export function setupMobileMenu(openProfileSwitcher) {
 
   document.getElementById("mobile-menu-refresh")?.addEventListener("click", () => {
     setOpen(false);
-    refreshFeeds();
+    refreshFeeds(alsoRefresh);
   });
 
   document.getElementById("mobile-menu-profile")?.addEventListener("click", () => {

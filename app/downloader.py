@@ -1,6 +1,7 @@
 """yt-dlp audio extraction. Image caching lives in app/images.py."""
 
 import logging
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,6 +33,54 @@ SOCKET_TIMEOUT_SECONDS = 10
 
 class DownloadError(Exception):
     pass
+
+
+class VideoUnavailableError(DownloadError):
+    """YouTube itself won't serve this video to us, and no retry will change
+    that — see is_permanent_failure below."""
+
+
+# YouTube answers an extraction with a `playabilityStatus`, and only some of
+# its outcomes are worth another attempt. These are the ones that aren't: the
+# video is gone, private, members-only, age-gated behind a sign-in we don't
+# have, or — by far the most common case here — simply not licensed in this
+# country.
+#
+# That last one is not a corner case. Nearly every music track in a library
+# like this comes from a "<Artist> - Topic" channel, which is YouTube Music's
+# auto-generated art-track upload, and those are licensed *per country*. A
+# track whose id isn't licensed here answers UNPLAYABLE / "Video unavailable"
+# to every client there is — confirmed against android_vr, tv_simply, tv,
+# tv_embedded, web, web_safari, web_embedded, web_music, web_creator, mweb,
+# ios, ios_music, android and android_music, and against a plain browser
+# request for the watch page, which returns the same status with no yt-dlp in
+# the picture at all. The video record still exists (oEmbed answers 200), so
+# nothing upstream of here can tell it apart from a healthy one.
+#
+# Recognising these matters for two reasons. Running the rest of the ladder
+# spends two more extractions to be told the same thing, and that request
+# volume is itself a contributor to the 403/bot-check failures the ladder
+# exists for. And it lets everything above this treat them as settled rather
+# than as "failed, try again next time you open it" — see Content.is_unavailable.
+_PERMANENT_FAILURE_PATTERNS = (
+    r"video unavailable",
+    r"this video is not available",
+    r"not made this video available in your country",
+    r"no longer available",
+    r"private video",
+    r"removed by the uploader",
+    r"account associated with this video has been terminated",
+    r"members[- ]only",
+    r"join this channel",
+    r"sign in to confirm your age",
+    r"age[- ]restricted",
+)
+_PERMANENT_FAILURE_RE = re.compile("|".join(_PERMANENT_FAILURE_PATTERNS), re.IGNORECASE)
+
+
+def is_permanent_failure(message: str | None) -> bool:
+    """Whether a yt-dlp error message means "don't bother trying again"."""
+    return bool(message) and _PERMANENT_FAILURE_RE.search(message) is not None
 
 
 @dataclass(frozen=True)
@@ -176,6 +225,13 @@ def download_audio(video_id: str, quality: str = "high", on_progress: ProgressCa
                 "Download attempt %d/%d failed for %s (clients=%s): %s",
                 number, len(_ATTEMPTS), video_id, ",".join(attempt.player_clients), str(exc)[:200],
             )
+            # The rungs are client changes, and this class of failure is the
+            # same on every client (see is_permanent_failure) — so there is
+            # nothing left to try. Stop rather than spend the remaining
+            # attempts confirming it.
+            if is_permanent_failure(str(exc)):
+                logger.warning("Giving up on %s: unavailable to every client", video_id)
+                raise VideoUnavailableError(str(exc)) from exc
 
     if last_exc is not None:
         raise DownloadError(str(last_exc)) from last_exc

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, ForeignKey, Index, String, UniqueConstraint
+from sqlalchemy import CheckConstraint, ForeignKey, Index, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -45,10 +45,44 @@ class User(Base):
     account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"))
     name: Mapped[str] = mapped_column(String(100))
     audio_quality: Mapped[str] = mapped_column(String(10), default="high")
+    # Newline-separated free-text tags — genres, artists, topics — that
+    # Explore's recommendations are built from. Parsed and written only
+    # through app/interests.py, which owns the format (and the reason it
+    # isn't a table of its own).
+    interests: Mapped[str | None] = mapped_column(Text, default=None)
 
     account: Mapped["Account"] = relationship(back_populates="profiles")
     feeds: Mapped[list["Feed"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     content: Mapped[list["Content"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    recommendation_cache: Mapped["RecommendationCache | None"] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+
+
+class RecommendationCache(Base):
+    """One profile's last batch of interest-based Explore recommendations.
+
+    Cached in the database rather than recomputed per request because
+    building a batch means several live YouTube searches — seconds of
+    latency, and request volume this app has good reason to keep low (see
+    services/recommendations.py). One row per profile: a batch is only ever
+    read and replaced whole, never merged, so there's nothing to gain from
+    storing the individual results as rows.
+
+    `payload` is the JSON the API hands back verbatim; `interests_signature`
+    is what the profile's interests hashed to when it was built (see
+    interests.interests_signature), which is how an edit to the interest list
+    invalidates it without anything having to explicitly delete this row.
+    """
+
+    __tablename__ = "recommendation_cache"
+
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    interests_signature: Mapped[str] = mapped_column(String(64))
+    payload: Mapped[str] = mapped_column(Text)
+    generated_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+    user: Mapped["User"] = relationship(back_populates="recommendation_cache")
 
 
 class AppSettings(Base):
@@ -114,6 +148,20 @@ class Content(Base):
     # existed (see collect_usage).
     file_size_bytes: Mapped[int | None] = mapped_column(default=None)
     error_message: Mapped[str | None] = mapped_column(String(1000), default=None)
+    # True when the last download failed for a reason no retry can fix —
+    # YouTube refuses this video id to every client there is, usually because
+    # it's a "- Topic" art track licensed for other countries but not this
+    # one (see downloader.is_permanent_failure). A separate flag rather than
+    # a fifth `status` value because SQLite can't alter the CHECK constraint
+    # above on an existing database, and because it *is* orthogonal: the row
+    # is still an errored row, it just has a settled answer rather than a
+    # provisional one. What it buys is that nothing re-attempts it — the
+    # player skips it instantly instead of spending an extraction to be told
+    # the same thing again, which is request volume that feeds the very
+    # rate-limiting the retry ladder exists for. Cleared by a successful
+    # download and by DELETE /content/{id}, which is the manual "try this
+    # again" path.
+    is_unavailable: Mapped[bool] = mapped_column(default=False)
     added_at: Mapped[datetime] = mapped_column(default=utcnow)
     downloaded_at: Mapped[datetime | None] = mapped_column(default=None)
     is_favorite: Mapped[bool] = mapped_column(default=False)

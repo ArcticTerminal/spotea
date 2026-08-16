@@ -190,9 +190,22 @@ export function toggleShuffle() {
 export async function loadQueue(source, { startId = null } = {}) {
   const { ok, data } = await api(queueUrl(source), { errorMessage: "Could not load the queue" });
   if (!ok || !data?.ids?.length) return null;
+  return setQueue(source, data.ids, { startId });
+}
+
+/**
+ * The same thing with the ids already in hand.
+ *
+ * Explore's remote channel/playlist pages have no /content/queue/... endpoint
+ * to ask: their rows only become Content rows at the moment playback starts,
+ * and the request that creates them hands back the ids in list order (see
+ * home/remote.js). Everything after that is an ordinary queue.
+ */
+export function setQueue(source, ids, { startId = null } = {}) {
+  if (!ids?.length) return null;
 
   state.source = { kind: source.kind, id: source.id ?? null };
-  state.ids = data.ids;
+  state.ids = ids;
   // Number(): startId reaches here as a string from dataset reads, and the
   // ids are JSON numbers — indexOf across the two would never match.
   const start = startId == null ? null : Number(startId);

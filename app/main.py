@@ -15,11 +15,13 @@ from app.deps import NotAuthenticated, require_login
 from app.migrations import run_migrations
 from app.routers import auth as auth_router
 from app.routers import content as content_router
+from app.routers import debug as debug_router
 from app.routers import explore as explore_router
 from app.routers import feeds as feeds_router
 from app.routers import pages as pages_router
 from app.routers import partials as partials_router
 from app.routers import profiles as profiles_router
+from app.routers import recommendations as recommendations_router
 from app.routers import settings as settings_router
 from app.routers import storage as storage_router
 from app.scheduler import run_scheduler
@@ -91,7 +93,9 @@ app.include_router(explore_router.router)
 app.include_router(content_router.router)
 app.include_router(storage_router.router)
 app.include_router(settings_router.router)
+app.include_router(recommendations_router.router)
 app.include_router(profiles_router.router)
+app.include_router(debug_router.router)
 app.include_router(partials_router.router)
 app.include_router(pages_router.router)
 

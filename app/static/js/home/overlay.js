@@ -12,7 +12,21 @@
 
 import { api, formatDuration, showToast } from "../core.js";
 import { refreshFragments } from "../fragments.js";
-import { paintRange, prepareAudio, whenVisible } from "../player.js";
+import {
+  activeAudio,
+  clearPreload,
+  onPlayerEvent,
+  paintRange,
+  prepareAudio,
+  preloadNext,
+  prerollStandby,
+  reportPlayback,
+  standbyIsRunningFor,
+  startKeepAlive,
+  stopKeepAlive,
+  stopPreroll,
+  whenVisible,
+} from "../player.js";
 import { clearResumeState, readResumeState } from "../resume.js";
 import {
   QUEUE_CHANGED,
@@ -30,6 +44,51 @@ import {
 // one is pulled down in the background (see setupPlayerOverlay's timeupdate
 // handler for why it isn't immediate).
 const PREFETCH_AFTER_SECONDS = 8;
+
+// How the prefetch follows its own download to completion, so the handoff
+// knows whether the next track is actually playable before it gets there
+// (see cacheUpcoming). Bounded well inside the length of a track — a
+// download that hasn't landed by then won't be helped by asking again, and
+// the handoff falls back to preparing it the ordinary way.
+const UPCOMING_POLL_MS = 1500;
+const UPCOMING_POLL_LIMIT = 20;
+
+/**
+ * The next track, fetched while the current one is still playing: its
+ * metadata and its download status as of the last check.
+ *
+ * This exists so that a track ending doesn't have to ask the server anything
+ * before it can start the next one. `ended` fires, and everything from there
+ * to audio.play() — the queue pointer, the dataset, the artwork, the play
+ * call itself — can run synchronously inside that one event, with no fetch
+ * in the middle for a browser that's busy suspending the page to defer
+ * indefinitely. That deferral is exactly what "it didn't move to the next
+ * song until I opened the app again" was.
+ */
+let upcomingTrack = null;
+
+// Caps openPlayer's auto-skip-on-failure (below) at this many failures in a
+// row before it gives up instead of trying yet another track. Without a
+// cap, a systemic hiccup — YouTube rate-limiting/bot-checking the IP, the
+// PO token provider having a bad moment — reads as "every remaining track in
+// the queue is broken" and the skip chain burns through all of them in
+// seconds, each one running its own multi-attempt retry ladder against
+// YouTube. That volume is itself what trips the bot check in the first
+// place, which is how one bad track once took out an entire session: every
+// track after it failed with the exact same "Sign in to confirm you're not
+// a bot" error in under two minutes, not because they were all actually
+// unavailable.
+const MAX_CONSECUTIVE_AUTO_SKIPS = 3;
+let consecutiveAutoSkipFailures = 0;
+
+// A track YouTube has settled on refusing (see Content.is_unavailable) is a
+// different thing entirely: skipping it costs one local lookup, hits YouTube
+// zero times, and says nothing at all about whether the next one will work —
+// so the reasoning behind the cap above simply doesn't apply. It gets a much
+// looser limit of its own, there only so that a queue of nothing but
+// unavailable tracks terminates rather than racing to the end of the list.
+const MAX_CONSECUTIVE_UNAVAILABLE_SKIPS = 10;
+let consecutiveUnavailableSkips = 0;
 
 function expandPlayer() {
   document.getElementById("player-overlay").hidden = false;
@@ -52,10 +111,9 @@ function syncMiniPlayerInfo(data) {
   }
 }
 
-export async function openPlayer(contentId, { expanded = true } = {}) {
+export async function openPlayer(contentId, { expanded = true, requireVisible = true } = {}) {
   contentId = String(contentId);
   const root = document.getElementById("player-root");
-  const audio = document.getElementById("audio");
 
   // Every route into the player lands here, so this is the one place that can
   // keep the queue pointer honest — including the routes that have nothing to
@@ -70,26 +128,65 @@ export async function openPlayer(contentId, { expanded = true } = {}) {
     return;
   }
 
+  // A queue handoff (auto-advance, or a lock-screen/headset next) can happen
+  // with the app off screen, where the page's only protection from having
+  // its timers throttled and its fetches deferred is that it's playing
+  // audio — which, at this exact moment, it has just stopped doing. Hold the
+  // session open across the switch. First and synchronously: the gap starts
+  // the instant the previous track ended, not once we get around to it.
+  //
+  // Skipped when the next deck is already playing this very track (the
+  // pre-roll took), because then there is no gap to bridge — and starting the
+  // keep-alive only to pause it again a few lines later is the exact
+  // play()/pause() churn on a third element that this code has no business
+  // doing at the one moment the audio session must not be disturbed.
+  if (!requireVisible && !standbyIsRunningFor(contentId)) startKeepAlive();
+
   // Switching tracks (or starting fresh): stop whatever's currently loaded
   // immediately, rather than leaving it playing underneath the new track's
   // own "Downloading audio…" state until that one's ready.
-  audio.pause();
+  //
+  // Guarded because on an auto-advance there is nothing to stop — the track
+  // ran out, so the element is already paused. Calling pause() there only
+  // told the OS we were done with audio, at the one moment we most needed it
+  // to think otherwise.
+  if (!activeAudio().paused) activeAudio().pause();
   const seekBar = document.getElementById("seek-bar");
   seekBar.value = 0;
   document.getElementById("current-time").textContent = "0:00";
   paintRange(seekBar);
   document.getElementById("mini-player-progress-fill").style.width = "0%";
 
-  const { ok, data } = await api(`/content/${contentId}`);
-  if (!ok) {
-    showToast("Could not load this track");
-    // If this call came from resumeOverlayIfNeeded, the sessionStorage record
-    // it read is exactly what just failed to load (e.g. a profile switch made
-    // the old content id inaccessible) — consumeResumeState only ever clears
-    // it on a *successful* startPlayback, so without this a permanently
-    // invalid record would re-trigger this same failure on every page load.
-    clearResumeState();
-    return;
+  // Taken, not read: the cached copy is only good for the one handoff it was
+  // fetched for, and leaving it in place would let a later, unrelated open of
+  // the same track run on however stale it had become by then.
+  let data = null;
+  if (upcomingTrack && upcomingTrack.id === contentId) {
+    data = upcomingTrack.data;
+    reportPlayback("handoff-cached", { contentId, status: data.status });
+  }
+  upcomingTrack = null;
+
+  // Only when there was nothing prepared — this is the await the cache
+  // exists to avoid, and reaching it is fine (the keep-alive above covers
+  // it), just slower.
+  if (!data) {
+    const res = await api(`/content/${contentId}`);
+    if (!res.ok) {
+      showToast("Could not load this track");
+      // If this call came from resumeOverlayIfNeeded, the sessionStorage
+      // record it read is exactly what just failed to load (e.g. a profile
+      // switch made the old content id inaccessible) — consumeResumeState
+      // only ever clears it on a *successful* startPlayback, so without this
+      // a permanently invalid record would re-trigger this same failure on
+      // every page load.
+      clearResumeState();
+      // Nothing is going to start playing after this, so nothing should be
+      // holding the audio session open waiting for it.
+      stopKeepAlive();
+      return;
+    }
+    data = res.data;
   }
 
   document.querySelector(".player-title").textContent = data.title;
@@ -115,6 +212,7 @@ export async function openPlayer(contentId, { expanded = true } = {}) {
 
   root.dataset.contentId = String(data.id);
   root.dataset.status = data.status;
+  root.dataset.unavailable = String(data.is_unavailable === true);
   root.dataset.stream = `/content/${data.id}/stream`;
 
   syncMiniPlayerInfo(data);
@@ -138,19 +236,146 @@ export async function openPlayer(contentId, { expanded = true } = {}) {
   document.getElementById("mini-player").hidden = false;
   document.body.classList.add("has-mini-player");
 
+  const start = () => {
+    prepareAudio(
+      ({ preloaded }) => {
+        if (preloaded) {
+          // The bytes came from a ?preload=1 fetch, which the server
+          // deliberately does not count as a play (a preloaded track the
+          // listener skips past has no business in Recently Played). Now that
+          // one has actually started, say so — and only refresh the shelves
+          // once the server has been told, or they'd re-render without it.
+          api(`/content/${data.id}/played`, { method: "POST" }).then(refreshFragments);
+        } else {
+          // The server records the play when /stream is requested, which only
+          // happens after audio.src is assigned — refreshing right here would
+          // race it and re-render shelves that don't know about this play yet.
+          // loadedmetadata fires once the first bytes are back, by which point
+          // the server has already written last_played_at.
+          activeAudio().addEventListener("loadedmetadata", refreshFragments, { once: true });
+        }
+        consecutiveAutoSkipFailures = 0;
+        consecutiveUnavailableSkips = 0;
+      },
+      (message, { permanent } = {}) => {
+        // A queued track that fails to download (pulled from YouTube, gone
+        // private, ...) used to just leave the transport stuck on "Download
+        // failed" — most noticeably when this happens while the app is
+        // backgrounded, since auto-advance into it is exactly how a
+        // background "ended" handoff (below) reaches a broken track with no
+        // one watching to hit "next". Skip past it instead, same as the
+        // queue running out normally does nothing when there's no next id.
+        //
+        // prepareAudio deliberately leaves the keep-alive running through a
+        // failure so a skip doesn't have to start from silence — which makes
+        // every path here that gives up instead responsible for stopping it,
+        // or the app would sit holding an audio session open for playback
+        // that is never coming.
+        const upcoming = peekNextId();
+        if (upcoming == null) {
+          stopKeepAlive();
+          return;
+        }
+
+        if (permanent) {
+          consecutiveUnavailableSkips += 1;
+          if (consecutiveUnavailableSkips >= MAX_CONSECUTIVE_UNAVAILABLE_SKIPS) {
+            showToast("Too many unavailable tracks in a row — stopping here");
+            stopKeepAlive();
+            return;
+          }
+          showToast(`"${data.title}" isn't available on YouTube — skipping`);
+          playFromQueue(nextId());
+          return;
+        }
+
+        consecutiveAutoSkipFailures += 1;
+        if (consecutiveAutoSkipFailures >= MAX_CONSECUTIVE_AUTO_SKIPS) {
+          // See MAX_CONSECUTIVE_AUTO_SKIPS above — leave this one showing its
+          // real error rather than trying yet another track.
+          showToast("Several tracks in a row failed — stopping instead of skipping further");
+          stopKeepAlive();
+          return;
+        }
+        showToast(`Couldn't play "${data.title}" — skipping to the next track`);
+        playFromQueue(nextId());
+      }
+    );
+  };
+
   // Waits out a prerender or a ctrl/cmd-clicked background tab (see
   // player.js's whenVisible) — resolves immediately for a real click, since
-  // the page is already visible by then.
-  whenVisible(() => {
-    prepareAudio(audio, () => {
-      // The server records the play when /stream is requested, which only
-      // happens after audio.src is assigned — refreshing right here would race
-      // it and re-render shelves that don't know about this play yet.
-      // loadedmetadata fires once the first bytes are back, by which point the
-      // server has already written last_played_at.
-      audio.addEventListener("loadedmetadata", refreshFragments, { once: true });
-    });
-  });
+  // the page is already visible by then. Skipped entirely for a queue
+  // handoff (requireVisible: false, set by playFromQueue below): a locked
+  // screen or a backgrounded tab is `document.visibilityState !== "visible"`
+  // exactly like an unopened prerender is, so without this every "ended" and
+  // every lock-screen/headset next/previous tap while the app isn't on
+  // screen would queue up behind a visibilitychange that only fires once the
+  // user looks at the phone again — audio would just stop instead of
+  // advancing. That's safe to skip here specifically because a queue handoff
+  // can only happen after some earlier track already made it through this
+  // same gate once for real (there is no queue, no "ended" event, and no
+  // media-session next/previous handler until real playback has begun).
+  if (requireVisible) whenVisible(start);
+  else start();
+}
+
+/**
+ * Pulls the next track down and keeps watching until it's actually playable,
+ * caching what the handoff will need: its metadata in `upcomingTrack`, and —
+ * the moment the server says the file is on disk — its audio in the standby
+ * deck (player.js's preloadNext).
+ *
+ * The download POST is the older half of this and the reason it exists at
+ * all: without it every track change in a queue costs the same "Preparing
+ * audio…" wait as the first one. The metadata fetch beside it, the follow-up
+ * polling, and the preload are what let the handoff itself be synchronous and
+ * network-free — see `upcomingTrack` and player.js's deck helpers.
+ *
+ * Runs while the current track is still playing, which is what makes the
+ * polling affordable and reliable: the page is awake by definition, each
+ * check is one indexed read on localhost, and it stops as soon as there's a
+ * settled answer. Everything here is best-effort — a failure just means the
+ * handoff prepares the track the ordinary way instead.
+ */
+async function cacheUpcoming(contentId) {
+  const id = String(contentId);
+  const [download, meta] = await Promise.all([
+    api(`/content/${id}/download`, { method: "POST" }),
+    api(`/content/${id}`),
+  ]);
+  if (!meta.ok) return;
+
+  // The POST's answer is the more recent of the two, and the only one that
+  // can say "already on disk" for a track that needed no download at all.
+  const data = { ...meta.data };
+  if (download.ok && download.data) {
+    data.status = download.data.status;
+    data.is_unavailable = download.data.is_unavailable === true;
+  }
+  upcomingTrack = { id, data };
+  if (data.status === "ready") preloadNext(id);
+  if (data.is_unavailable || data.status === "ready" || data.status === "error") return;
+
+  for (let attempt = 0; attempt < UPCOMING_POLL_LIMIT; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, UPCOMING_POLL_MS));
+    // Superseded (the queue moved on, or the handoff already took this) —
+    // whatever comes back now belongs to nothing.
+    if (upcomingTrack?.id !== id) return;
+    const { ok, data: status } = await api(`/content/${id}/status`);
+    if (!ok) continue;
+    upcomingTrack.data.status = status.status;
+    upcomingTrack.data.is_unavailable = status.is_unavailable === true;
+    if (status.status === "ready") {
+      // The file exists now, so this is the earliest the audio can be pulled
+      // into the standby deck — and it has to happen while the current track
+      // is still playing, which is the only window in which a backgrounded
+      // app is awake enough to fetch anything at all.
+      preloadNext(id);
+      return;
+    }
+    if (status.status === "error") return;
+  }
 }
 
 /**
@@ -163,7 +388,10 @@ export async function openPlayer(contentId, { expanded = true } = {}) {
  */
 function playFromQueue(contentId) {
   if (contentId == null) return;
-  openPlayer(contentId, { expanded: !document.getElementById("player-overlay").hidden });
+  openPlayer(contentId, {
+    expanded: !document.getElementById("player-overlay").hidden,
+    requireVisible: false,
+  });
 }
 
 /**
@@ -203,15 +431,21 @@ function syncQueueControls() {
 }
 
 export function closePlayer() {
-  const audio = document.getElementById("audio");
+  const audio = activeAudio();
   audio.pause();
   audio.removeAttribute("src");
   audio.load();
+  stopKeepAlive();
+  // Dismissing the player also calls off the read-ahead it had running, and
+  // the download behind it — nothing is going to play that track now.
+  clearPreload();
 
   const root = document.getElementById("player-root");
   root.dataset.contentId = "";
   root.dataset.status = "";
+  root.dataset.unavailable = "";
   root.dataset.stream = "";
+  upcomingTrack = null;
 
   document.getElementById("player-overlay").hidden = true;
   document.getElementById("mini-player").hidden = true;
@@ -232,15 +466,15 @@ export function setupPlayerOverlay() {
   const overlay = document.getElementById("player-overlay");
   if (!overlay) return;
 
-  const audio = document.getElementById("audio");
   const miniPlayBtn = document.getElementById("mini-player-playpause");
   const miniIconPlay = document.getElementById("mini-icon-play");
   const miniIconPause = document.getElementById("mini-icon-pause");
 
   const syncMiniIcon = () => {
-    miniIconPlay.toggleAttribute("hidden", !audio.paused);
-    miniIconPause.toggleAttribute("hidden", audio.paused);
-    miniPlayBtn.setAttribute("aria-label", audio.paused ? "Play" : "Pause");
+    const paused = activeAudio().paused;
+    miniIconPlay.toggleAttribute("hidden", !paused);
+    miniIconPause.toggleAttribute("hidden", paused);
+    miniPlayBtn.setAttribute("aria-label", paused ? "Play" : "Pause");
   };
 
   // Thin passive progress line along the mini-bar's top edge — not
@@ -248,23 +482,41 @@ export function setupPlayerOverlay() {
   // without expanding the overlay.
   const miniProgressFill = document.getElementById("mini-player-progress-fill");
   const syncMiniProgress = () => {
+    const audio = activeAudio();
     const pct = audio.duration ? (audio.currentTime / audio.duration) * 100 : 0;
     miniProgressFill.style.width = `${pct}%`;
   };
 
   miniPlayBtn.addEventListener("click", () => {
+    const audio = activeAudio();
     if (audio.paused) audio.play().catch(() => {});
     else audio.pause();
   });
-  audio.addEventListener("play", syncMiniIcon);
-  audio.addEventListener("pause", syncMiniIcon);
-  audio.addEventListener("ended", syncMiniIcon);
-  audio.addEventListener("timeupdate", syncMiniProgress);
-  audio.addEventListener("loadedmetadata", syncMiniProgress);
+  // onPlayerEvent rather than a direct bind, and activeAudio() rather than a
+  // captured element, throughout: the two decks trade places on every queue
+  // handoff — see player.js.
+  onPlayerEvent("play", syncMiniIcon);
+  onPlayerEvent("pause", syncMiniIcon);
+  onPlayerEvent("ended", syncMiniIcon);
+  onPlayerEvent("timeupdate", syncMiniProgress);
+  onPlayerEvent("loadedmetadata", syncMiniProgress);
 
   // A track running out is the whole point of having a queue; with none
   // loaded nextId() is null and playback simply stops, as it always did.
-  audio.addEventListener("ended", () => playFromQueue(nextId()));
+  //
+  // Registered after the two syncs above so it stays the last "ended"
+  // listener on each deck: this is the one that swaps them, and anything
+  // registered behind it would find itself running against the standby deck
+  // and be filtered out.
+  onPlayerEvent("ended", () => {
+    const finished = document.getElementById("player-root").dataset.contentId;
+    const next = nextId();
+    // The first breadcrumb of a handoff, and the one that makes the rest
+    // legible: everything after it in the log either happened in this same
+    // event or didn't happen at all. See player.js's reportPlayback.
+    reportPlayback("track-ended", { contentId: finished, next, prepared: upcomingTrack?.id ?? null });
+    playFromQueue(next);
+  });
 
   // Downloads are triggered by playing something, so without this every
   // track change in a queue costs the same 2-4s "Preparing audio…" wait as
@@ -279,14 +531,37 @@ export function setupPlayerOverlay() {
   // while a track anyone is actually hearing still leaves minutes of lead
   // time. Server-side the request is a no-op for anything already on disk
   // (see routers/content.py's start_download).
+  // The other half of a background handoff, and the half the download
+  // prefetch can't provide: having the bytes is not enough, the next deck has
+  // to already be *playing* before the current track runs out. Started here,
+  // a few seconds out, while playback is still under way and therefore still
+  // allowed to begin — see player.js's pre-roll notes.
+  onPlayerEvent("timeupdate", prerollStandby);
+
+  // A pre-roll only makes sense as a handover from playback that's actually
+  // running. Once the listener pauses, the deck waiting behind would
+  // otherwise keep going quietly on its own, through the rest of the track it
+  // was meant to follow and out the other side.
+  //
+  // The `ended` guard is not a detail: a track running out fires `pause`
+  // immediately *before* `ended` (the spec has playback reaching the end set
+  // `paused` and fire the event, then fire `ended`), so without it every
+  // handoff tore down its own pre-roll microseconds before claiming it —
+  // which is not a state any breadcrumb could show, since by the time the
+  // handoff looked, the deck was paused back at 0:00 with nothing to say why.
+  onPlayerEvent("pause", (event) => {
+    if (event.currentTarget.ended) return;
+    stopPreroll();
+  });
+
   let prefetchedFor = null;
-  audio.addEventListener("timeupdate", () => {
+  onPlayerEvent("timeupdate", () => {
     const playing = document.getElementById("player-root").dataset.contentId;
     if (!playing || prefetchedFor === playing) return;
-    if (audio.currentTime < PREFETCH_AFTER_SECONDS) return;
+    if (activeAudio().currentTime < PREFETCH_AFTER_SECONDS) return;
     prefetchedFor = playing;
     const upcoming = peekNextId();
-    if (upcoming != null) api(`/content/${upcoming}/download`, { method: "POST" });
+    if (upcoming != null) cacheUpcoming(upcoming);
   });
 
   document.getElementById("prev-track").addEventListener("click", () => playFromQueue(previousId()));

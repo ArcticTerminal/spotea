@@ -1,7 +1,8 @@
 // The Settings tab's controls, plus the Downloads modal they open.
 
-import { api, confirmDialog, setupOverlay } from "../core.js";
+import { api, confirmDialog, escapeHtml, setupOverlay, showToast } from "../core.js";
 import { refreshFragments } from "../fragments.js";
+import { invalidateRecommendations } from "./explore.js";
 
 export function setupDownloadsOverlay() {
   setupOverlay("downloads-overlay", "downloads-close", ["open-downloads"]);
@@ -53,6 +54,117 @@ export function setupStorage() {
         { method: "DELETE", errorMessage: "Could not remove this download" }
       );
     }
+  });
+}
+
+// The interest tags Explore's recommendations are searched from. Kept here
+// as one array and PUT whole on every change (see schemas.SettingsUpdate) —
+// the server normalizes what it stores (trimming, deduping, capping), so the
+// response, not this array, is what the chips are re-rendered from.
+let interests = [];
+
+function renderInterests() {
+  const list = document.getElementById("interests-list");
+  const empty = document.getElementById("interests-empty");
+  if (!list) return;
+
+  list.innerHTML = interests
+    .map(
+      (interest) => `
+        <li class="interest-chip">
+          <span>${escapeHtml(interest)}</span>
+          <button type="button" class="interest-chip-remove" data-interest="${escapeHtml(interest)}" aria-label="Remove ${escapeHtml(interest)}">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-close" /></svg>
+          </button>
+        </li>
+      `
+    )
+    .join("");
+  if (empty) empty.hidden = interests.length > 0;
+}
+
+// Saves run one after another rather than overlapping. Every PUT carries the
+// whole list, so two in flight at once can land in either order — adding two
+// chips in quick succession left the server holding the shorter list, and the
+// second response then re-rendered the chips to match it, silently undoing
+// the add.
+let pendingSave = Promise.resolve();
+
+function saveInterests(next, errorMessage) {
+  const previous = interests;
+  // Rendered before the request is even sent so adding a chip feels instant;
+  // reverted below if the save doesn't land.
+  interests = next;
+  renderInterests();
+
+  pendingSave = pendingSave.then(async () => {
+    const { ok, data } = await api("/settings", {
+      method: "PUT",
+      body: { interests: next },
+      errorMessage,
+    });
+
+    // Both branches below only act while this edit is still the current
+    // state (each edit assigns a fresh array, so identity is the test). If
+    // something has been added or removed since, that edit's own queued save
+    // owns what the chips should say — adopting this response's list, or
+    // rolling back to this edit's predecessor, would undo it.
+    if (next !== interests) return;
+
+    // On success: the server's normalized list, which can differ from what
+    // was sent — an over-long or duplicate tag comes back cleaned up rather
+    // than rejected.
+    interests = ok ? data.interests : previous;
+    renderInterests();
+    // Explore's shelves were searched from the old list, and so was the
+    // batch the server has cached — both are now answers to a question
+    // nobody asked.
+    if (ok) invalidateRecommendations();
+  });
+}
+
+export function setupInterests() {
+  const list = document.getElementById("interests-list");
+  const form = document.getElementById("interests-form");
+  const input = document.getElementById("interests-input");
+  if (!list || !form || !input) return;
+
+  // A modal rather than an inline editor: a wrapping chip list plus its own
+  // add form doesn't fit the label-left/control-right shape every other
+  // Settings row has, and this way the row looks like its neighbours.
+  setupOverlay("interests-overlay", "interests-close", ["open-interests"]);
+  document.getElementById("open-interests")?.addEventListener("click", () => input.focus());
+
+  // Server-rendered into the element's dataset rather than fetched on boot,
+  // so the chips are already right on first paint (see index.html).
+  try {
+    interests = JSON.parse(list.dataset.interests || "[]");
+  } catch {
+    interests = [];
+  }
+  renderInterests();
+
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const value = input.value.trim();
+    if (!value) return;
+    if (interests.some((interest) => interest.toLowerCase() === value.toLowerCase())) {
+      showToast("That's already in your interests");
+      input.value = "";
+      return;
+    }
+    input.value = "";
+    saveInterests([...interests, value], "Could not save your interests");
+  });
+
+  list.addEventListener("click", (event) => {
+    const button = event.target.closest(".interest-chip-remove");
+    if (!button) return;
+    const removed = button.dataset.interest;
+    saveInterests(
+      interests.filter((interest) => interest !== removed),
+      "Could not remove that interest"
+    );
   });
 }
 

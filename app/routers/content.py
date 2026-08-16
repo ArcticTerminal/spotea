@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.content_query import query_content_ids, query_content_page
 from app.database import SessionLocal
 from app.deps import get_current_profile, get_db, require_login
-from app.downloader import DownloadError, download_audio
+from app.downloader import DownloadError, VideoUnavailableError, download_audio
 from app.feed_sync import cache_thumbnail
 from app.formatting import safe_filename
 from app.models import Content, Feed, User
@@ -74,6 +74,13 @@ def _run_download(content_id: int, video_id: str, quality: str) -> None:
 
     try:
         file_path = download_audio(video_id, quality=quality, on_progress=on_progress)
+    except VideoUnavailableError as exc:
+        # Settled, not provisional — start_download won't attempt it again
+        # and the player skips it without waiting. See Content.is_unavailable.
+        _set_download_outcome(
+            content_id, status="error", error_message=str(exc)[:1000], is_unavailable=True
+        )
+        return
     except DownloadError as exc:
         _set_download_outcome(content_id, status="error", error_message=str(exc)[:1000])
         return
@@ -96,6 +103,10 @@ def _run_download(content_id: int, video_id: str, quality: str) -> None:
         file_path=str(file_path),
         file_size_bytes=size_bytes,
         downloaded_at=utcnow(),
+        # A row can only reach here after being playable, so whatever made it
+        # unavailable before (a licence that has since landed in this
+        # country, a re-upload) no longer holds.
+        is_unavailable=False,
     )
 
 
@@ -218,6 +229,21 @@ def start_download(
     if content.status == "ready" and content.file_path and Path(content.file_path).exists():
         return StatusOut(id=content.id, status=content.status, error_message=None)
 
+    # YouTube has already told us, on every client, that it won't serve this
+    # one (see Content.is_unavailable). Answering from the row costs nothing
+    # and keeps the queue's prefetch — which fires for whatever is next
+    # without knowing anything about it — from re-running the whole ladder
+    # against YouTube on every pass over a track that can't work. DELETE
+    # /content/{id} clears the flag, which is the way back if this ever
+    # becomes wrong.
+    if content.is_unavailable:
+        return StatusOut(
+            id=content.id,
+            status=content.status,
+            error_message=content.error_message,
+            is_unavailable=True,
+        )
+
     if not VIDEO_ID_RE.match(content.video_id):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid video id")
 
@@ -242,6 +268,7 @@ def get_status(
         error_message=content.error_message,
         progress_percent=percent,
         phase=phase,
+        is_unavailable=content.is_unavailable,
     )
 
 
@@ -290,10 +317,29 @@ def remove_saved(
     return SavedOut(id=content.id, is_saved=content.is_saved)
 
 
+@router.post("/{content_id}/played", status_code=status.HTTP_204_NO_CONTENT)
+def mark_played(
+    content_id: int, profile: User = Depends(get_current_profile), db: Session = Depends(get_db)
+) -> None:
+    """Record a play that the stream request itself deliberately didn't.
+
+    The player reads the next queued track ahead of time, while the current
+    one is still playing, so that the handoff needs no network (see
+    player.js's deck helpers). That read-ahead asks for ?preload=1 precisely
+    so it doesn't count as listening — the listener may well skip past it, and
+    it has no business in Recently Played until it actually starts. This is
+    what the player calls when one does.
+    """
+    content = _get_content_or_404(db, content_id, profile.id)
+    content.last_played_at = utcnow()
+    db.commit()
+
+
 @router.get("/{content_id}/stream")
 def stream_content(
     content_id: int,
     download: bool = False,
+    preload: bool = False,
     profile: User = Depends(get_current_profile),
     db: Session = Depends(get_db),
 ) -> FileResponse:
@@ -306,9 +352,11 @@ def stream_content(
     if not file_path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File missing on disk")
 
-    # Skipped for a plain file export (?download=1) — that's not the user
-    # actually listening, so it shouldn't count toward "recently played".
-    if not download:
+    # Skipped for a plain file export (?download=1) and for the player's
+    # read-ahead of the next queued track (?preload=1) — neither is anyone
+    # actually listening. A preloaded track that does go on to play reports
+    # itself through mark_played above.
+    if not download and not preload:
         content.last_played_at = utcnow()
         db.commit()
 
@@ -332,6 +380,12 @@ def delete_content(
     content.file_size_bytes = None
     content.error_message = None
     content.downloaded_at = None
+    # Removing a download is the app's only "start over on this track"
+    # action, so it doubles as the way to re-attempt one that was written off
+    # as unavailable — YouTube licensing does change, and a flag with no way
+    # back would make that permanent on our side even after it stopped being
+    # true on theirs.
+    content.is_unavailable = False
     db.commit()
 
     return StatusOut(id=content.id, status=content.status, error_message=content.error_message)

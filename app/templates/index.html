@@ -12,7 +12,9 @@
     //
     // A channel/playlist hash resolves to the "detail" panel instead — kept
     // out of VALID_TABS itself so those routes can't get treated as a
-    // remembered tab. home/detail.js re-parses the hash after module load to
+    // remembered tab. That includes the two yt-* routes, which are the same
+    // panel showing a YouTube playlist or an unfollowed channel (see
+    // services/remote_detail.py). home/detail.js re-parses the hash after module load to
     // actually fetch and fill the panel; this only has to get first paint
     // right. A player/<id> hash is deliberately not handled here at all — it
     // opens the overlay on top of whatever tab/detail this same logic
@@ -20,8 +22,13 @@
     (function () {
       var VALID_TABS = ["home", "library", "explore", "settings"];
       var PLAYLIST_KINDS = ["favorites", "saved", "new-uploads", "recently-played"];
+      var DETAIL_PREFIXES = ["channel/", "yt-channel/", "yt-playlist/"];
       var hash = location.hash.slice(1).split("?")[0];
-      var isDetail = hash.indexOf("channel/") === 0 || PLAYLIST_KINDS.indexOf(hash) !== -1;
+      var isDetail =
+        PLAYLIST_KINDS.indexOf(hash) !== -1 ||
+        DETAIL_PREFIXES.some(function (prefix) {
+          return hash.indexOf(prefix) === 0;
+        });
       var fromStorage = localStorage.getItem("spotea-active-tab");
       var tab = isDetail
         ? "detail"
@@ -31,6 +38,14 @@
             ? fromStorage
             : "home";
       document.documentElement.dataset.activeTab = tab;
+      // Which tab button stays selected under the detail panel — the yt-*
+      // routes belong to Explore, everything else to Library. Set here as
+      // well as in home/detail.js so a deep link doesn't paint with no tab
+      // selected for a frame.
+      if (isDetail) {
+        document.documentElement.dataset.detailHome =
+          hash.indexOf("yt-") === 0 ? "explore" : "library";
+      }
     })();
   </script>
 {% endblock %}
@@ -138,10 +153,26 @@
         </div>
 
         <div id="explore-browse-panel">
+          {# "For you": channels/songs/playlists searched from the interests
+             this profile listed in Settings. Filled entirely by
+             home/explore.js — unlike the interest chips, this content can
+             cost a live YouTube round trip, so it's a deliberate fetch the
+             first time Explore is opened rather than part of the page render.
+
+             No refresh control of its own: these shelves go stale on the same
+             interval Settings sets for feed refreshes, when the interest list
+             is edited, and when the app-wide Refresh button is pressed. #}
+          <div class="shelf-header recommendations-header">
+            <h2 class="shelf-title">For you</h2>
+            <span id="recommendations-meta" class="muted"></span>
+          </div>
+          <div id="recommendations-body"></div>
+
           <!-- Smart playlist shelf (On Repeat / Recently Added / Forgotten
                Favorites / Saved Mix, computed from existing play/favorite/
                saved data) goes here once that feature ships. -->
         </div>
+
       </div>
     </section>
 
@@ -154,6 +185,15 @@
             <span class="settings-row-desc">Switch, rename, or remove a profile. Deleting one also removes its channels and downloads.</span>
           </div>
           <button type="button" id="open-profiles-settings" class="btn-quiet">Manage profiles</button>
+        </div>
+
+        <h2>Interests</h2>
+        <div class="settings-row">
+          <div class="settings-row-info">
+            <span class="settings-row-label">What you're into</span>
+            <span class="settings-row-desc">Genres, artists, moods — Explore's "For you" shelves are searched from these.</span>
+          </div>
+          <button type="button" id="open-interests" class="btn-quiet">Manage interests</button>
         </div>
 
         <h2>History</h2>
@@ -247,6 +287,48 @@
           <button type="button" id="bulk-import-reload" class="btn-primary" hidden>Refresh page</button>
         </div>
       </div>
+    </div>
+  </div>
+
+  <div id="interests-overlay" class="modal-overlay" hidden>
+    <div class="modal modal-interests">
+      <div class="modal-header">
+        <h2>Your interests</h2>
+        <button type="button" id="interests-close" class="modal-close" aria-label="Close">×</button>
+      </div>
+
+      <p class="muted">
+        Genres, artists, moods — one per entry. Explore's <strong>For you</strong> shelves are
+        searched from these, and update on the same schedule as your feeds.
+      </p>
+
+      {# The chips are rendered by home/settings.js from the data-interests
+         JSON below rather than by a Jinja loop here. That renderer has to run
+         again after every add and remove anyway, and one renderer reading its
+         initial state off the page beats a Jinja copy and a JS copy that have
+         to be kept looking identical. Handing it the data inline (rather than
+         having it fetch /settings when the modal opens) is what keeps the
+         chips there the instant it does.
+
+         Single-quoted attribute deliberately: Jinja's tojson escapes <, >, &
+         and ' but not ", so a double-quoted one would break on any interest
+         containing a quote. #}
+      <ul id="interests-list" class="interests-list" data-interests='{{ interests | tojson }}'></ul>
+      <p id="interests-empty" class="muted" hidden>Nothing yet — try a genre, an artist, or a mood.</p>
+
+      <form id="interests-form" class="interests-add-form">
+        <input
+          type="text"
+          id="interests-input"
+          placeholder="Add an interest…"
+          maxlength="60"
+          autocomplete="off"
+          autocapitalize="off"
+          autocorrect="off"
+          aria-label="Add an interest"
+        />
+        <button type="submit" class="btn-primary">Add</button>
+      </form>
     </div>
   </div>
 

@@ -8,6 +8,17 @@ import { classifyHash } from "../core.js";
 
 const TAB_STORAGE_KEY = "spotea-active-tab";
 
+// Panels that only fill themselves in once they're actually looked at —
+// currently just Explore's recommendations, which can cost a live YouTube
+// round trip and so shouldn't be paid for by someone who never opens the
+// tab. Registered callbacks fire on every activation, including the boot
+// one, so a listener has to decide for itself whether it's already loaded.
+const activationListeners = [];
+
+export function onTabActivated(callback) {
+  activationListeners.push(callback);
+}
+
 // Exported so home/detail.js can switch to the "detail" panel the same way a
 // tab click does — but it never carries "detail" itself into the URL or
 // localStorage (there's no #detail button to reselect, and the URL for a
@@ -28,6 +39,7 @@ export function activate(tabName, { updateHistory = true } = {}) {
   // replaceState (not pushState) so cycling through tabs doesn't spam the
   // back-button history — the URL just needs to be right for a refresh.
   if (updateHistory && tabName !== "detail") history.replaceState(null, "", `#${tabName}`);
+  for (const callback of activationListeners) callback(tabName);
 }
 
 export function setupTabs() {

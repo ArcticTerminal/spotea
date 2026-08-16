@@ -17,6 +17,14 @@ personal, free alternative to following musicians/creators on Spotify.
   "listen to it" library
 - **Explore** also searches for individual songs directly — add and play one
   without following the whole channel
+- Tell it what you're into — list genres, artists or moods under **Interests**
+  in Settings, and Explore's **For you** shelves fill up with channels,
+  contents and ready-made playlists searched from them. They refresh on the
+  same schedule as your feeds, with no separate control to keep track of
+- Open a recommended playlist, or any channel you don't follow yet, and browse
+  its tracks on the same page a followed channel gets — Play all and shuffle
+  included. Nothing is stored until you press play, and following is one
+  button away if you like what you hear
 - Library search by title/channel, filter by a channel or by the pinned
   **Favorites** / **Saved for later** / **New Uploads** / **Recently
   Played** virtual playlists, with pagination

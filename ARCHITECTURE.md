@@ -45,6 +45,10 @@ spotea/
                               # legacy-account backfill for pre-account installs
     content_query.py           # shared query building blocks: pagination,
                                 # new_upload_filter(), followed_feeds()
+    interests.py                # a profile's interest tags: the newline-
+                                 # separated storage format, normalization,
+                                 # and the signature the recommendation cache
+                                 # is keyed by
     app_settings.py             # the singleton AppSettings row, created on
                                  # first access
     templating.py                # the one Jinja environment (filters included)
@@ -68,7 +72,8 @@ spotea/
                                         # bulk imports (single-process only)
     storage.py                       # disk usage, cache clearing, orphan
                                       # sweep, zip export, content purge
-    models.py                         # Account, User, AppSettings, Feed, Content
+    models.py                         # Account, User, AppSettings, Feed,
+                                       # Content, RecommendationCache
     schemas.py                         # Pydantic request/response models
     auth.py                             # password hashing (bcrypt), session-key
                                         # constants
@@ -83,7 +88,9 @@ spotea/
                                               # the cheap path routine refreshes use
       extract.py                             # yt-dlp: channel resolution,
                                               # durations, avatars, full-history scan
-      search.py                              # yt-dlp: Explore's channel/video search
+      search.py                              # yt-dlp: Explore's channel/video/
+                                              # playlist search, plus reading one
+                                              # playlist's tracks
     services/
       feed_add.py                            # create (or re-follow) a Feed from a
                                               # channel URL — shared by the single
@@ -92,20 +99,33 @@ spotea/
                                               # progress registry
       bulk_import.py                         # parallel resolve, then sequential
                                               # create, for a pasted channel list
+      recommendations.py                     # Explore's "For you" batch: sampling
+                                              # interests, running the searches,
+                                              # and the DB-backed cache that keeps
+                                              # the YouTube request count down
+      remote_detail.py                       # detail-panel context for a YouTube
+                                              # playlist / an unfollowed channel —
+                                              # the same panel, rows read live
+                                              # instead of from the database
     routers/
       auth.py                                # login/register/logout
       profiles.py                            # profile CRUD + switch,
                                               # account-scoped
       feeds.py                               # follow/unfollow/refresh, backfill
                                               # status, bulk import endpoints
-      explore.py                             # channel/video search + single-video
-                                              # add/remove (still under /feeds)
+      explore.py                             # channel/video search, single-video
+                                              # add/remove, and the batch add that
+                                              # makes a remote listing playable
+                                              # (all still under /feeds)
+      recommendations.py                     # read/refresh the interest-based
+                                              # "For you" shelves
       content.py                             # list/get/download/status/stream/
                                               # favorite/save/delete, plus the
                                               # play-queue id lists (see §4)
       storage.py                             # clear-all + zip export endpoints
-      settings.py                            # per-profile audio quality +
-                                              # deployment-wide refresh interval
+      settings.py                            # per-profile audio quality and
+                                              # interests + deployment-wide
+                                              # refresh interval
       pages.py                               # home (shelves) rendering; the
                                               # rest are one-line redirects to
                                               # their hash route (see §5)
@@ -153,6 +173,8 @@ spotea/
                                                      # virtual-playlist tiles)
       _content_row.html                             # list-row partial (the
                                                      # detail panel's track list)
+      _remote_track_row.html                        # the same row for a video with
+                                                     # no Content row yet (see §5)
       _pagination.html
     static/
       js/                                    # ES modules; each page loads one
@@ -184,9 +206,15 @@ spotea/
         home/queue.js                        # the play queue behind "Play all"
                                               # — order, shuffle, position;
                                               # state only, no player access
-        home/explore.js                      # search, add channel, backfill
-                                              # progress overlay
-        home/settings.js                     # settings controls + downloads modal
+        home/explore.js                      # the search box and the "For you"
+                                              # shelves — what to render, not what
+                                              # a result does
+        home/remote.js                       # acting on content the library
+                                              # doesn't have yet: play one, play a
+                                              # whole remote listing, follow a
+                                              # channel (+ its backfill overlay)
+        home/settings.js                     # settings controls, the interests
+                                              # modal, downloads modal
         home/bulk-import.js                  # paste-a-list import modal
         home/profiles.js                     # profile switcher + manage UI
         pages/index.js                       # index.html's one entry point
@@ -234,8 +262,28 @@ layer in `get_current_profile` instead.
 **users** — `id PK`, `account_id FK`, `name`, `audio_quality` (`high`/`low`,
 default `high` — see Settings below; the CHECK constraint on a *pre-existing*
 database can still say `high`/`medium`/`low`, since SQLite can't alter a
-CHECK constraint in place — see Schema evolution). A profile: owns its own
-feeds/content, but authenticates through its owning account, not on its own.
+CHECK constraint in place — see Schema evolution), `interests` (nullable
+text). A profile: owns its own feeds/content, but authenticates through its
+owning account, not on its own.
+
+`interests` holds the free-text tags Explore's recommendations are searched
+from, newline-separated, written and read only through `app/interests.py`
+(which trims, collapses inner whitespace — that's what guarantees no tag can
+contain the separator — dedupes case-insensitively, and caps both tag length
+and count). Not its own table on purpose: nothing ever queries a single
+interest in SQL. The recommendation builder reads the whole list and hands
+each entry to YouTube search verbatim, so a join table would buy ordering and
+nothing else.
+
+**recommendation_cache** — `user_id PK/FK`, `interests_signature`, `payload`
+(JSON), `generated_at`. One profile's last batch of "For you" results, stored
+whole rather than as rows because it's only ever read and replaced whole.
+`interests_signature` is what the profile's interests hashed to when the
+batch was built (order- and case-insensitive, see
+`interests.interests_signature`) — comparing it on read is what makes editing
+the interest list invalidate the batch without anything having to delete this
+row. See §5's *Interest-based recommendations* for why a cache is load-bearing
+here rather than an optimization.
 
 **app_settings** — `id PK` (fixed singleton row, `id=1`),
 `feed_refresh_interval_minutes` (default 30). Deployment-wide, not per-
@@ -347,7 +395,15 @@ Two data backfills run alongside the column patcher:
 | POST | `/feeds/import` | Start a bulk import job (many channels at once) |
 | GET | `/feeds/import/{job_id}/status` | Poll bulk import progress |
 | POST | `/feeds/videos` | Add one video without following its channel (Explore song search) |
+| POST | `/feeds/videos/batch` | Turn a whole remote listing into playable rows at once, in order — no network calls (see §5) |
 | DELETE | `/feeds/videos/{content_id}` | Remove a video added this way |
+
+**Recommendations** — Explore's "For you" shelves (see §5)
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/recommendations` | This profile's current batch; only searches YouTube when the cached one is missing, expired, or built from different interests |
+| POST | `/recommendations/refresh` | Force a rebuild, resampling which interests get searched. No control of its own in the UI — the app-wide Refresh button calls it alongside `/feeds/refresh` |
 
 **Partials** — server-rendered fragments of index.html
 
@@ -367,6 +423,8 @@ anywhere, so they're the *only* render of that markup, not a refresh of one
 | GET | `/partials/downloads` | Downloads modal body + the Settings storage line |
 | GET | `/partials/detail/channel/{feed_id}` | One channel's track list (paginated) |
 | GET | `/partials/detail/playlist/{kind}` | One pinned playlist's track list (paginated); `kind` is `favorites`/`saved`/`new-uploads`/`recently-played` |
+| GET | `/partials/detail/yt-playlist/{playlist_id}` | The same panel for a YouTube playlist — rows read live, nothing stored |
+| GET | `/partials/detail/yt-channel/{channel_id}` | The same panel for a channel nobody follows yet, with Follow instead of Unfollow |
 
 **Content**
 
@@ -379,7 +437,8 @@ anywhere, so they're the *only* render of that markup, not a refresh of one
 | DELETE | `/content/recently-played` | Clear the "Recently played" shelf (doesn't delete downloads) |
 | POST | `/content/{id}/download` | Start yt-dlp download in the background; a no-op for a track already on disk |
 | GET | `/content/{id}/status` | Current status (+ download/convert progress) |
-| GET | `/content/{id}/stream?download=` | Serve the audio file (Range-request support); `download=1` skips the `last_played_at` update |
+| GET | `/content/{id}/stream?download=&preload=` | Serve the audio file (Range-request support); `download=1` (a file export) and `preload=1` (the player's read-ahead of the next queued track) both skip the `last_played_at` update |
+| POST | `/content/{id}/played` | Record a play the stream request didn't — how a `?preload=1` track reports itself once it actually starts |
 | POST/DELETE | `/content/{id}/favorite` | Mark/unmark as favorite |
 | POST/DELETE | `/content/{id}/save` | Save/un-save for later |
 | DELETE | `/content/{id}` | Delete file, reset status to `not_downloaded` |
@@ -390,8 +449,8 @@ anywhere, so they're the *only* render of that markup, not a refresh of one
 |---|---|---|
 | DELETE | `/storage` | Delete every downloaded file for this profile |
 | GET | `/storage/export` | Download every ready file as one uncompressed zip |
-| GET | `/settings` | Current profile's audio quality + the deployment's refresh interval |
-| PUT | `/settings` | Update either |
+| GET | `/settings` | Current profile's audio quality and interests + the deployment's refresh interval |
+| PUT | `/settings` | Update any of them; `interests` is always the complete list, and comes back normalized rather than rejected |
 | GET | `/avatars/{filename}` | Serve a cached channel avatar from our own origin |
 | GET | `/thumbnails/{filename}` | Serve a cached video thumbnail from our own origin |
 | GET | `/sw.js` | Service worker (no login required — installability checks may fetch it pre-session) |
@@ -455,7 +514,8 @@ full page reload (see the Refresh section below for why *unconditionally*).
 
 **Tabs** — The SPA is split into **Home** (shelves), **Library** (a grid of
 followed channels plus four pinned virtual-playlist tiles), **Explore**
-(channel/song search + add, merged from an earlier standalone "Manage" tab),
+(channel/song search + add, merged from an earlier standalone "Manage" tab,
+plus the interest-based "For you" shelves below it),
 and **Settings** — `<section>` panels toggled via the `hidden` attribute
 driven by `html[data-active-tab]` (see style.css), not separate routes. An
 inline `<head>` script resolves the active tab (URL hash, falling back to
@@ -566,6 +626,148 @@ look identical to "deliberately added this." If the video already has a
 followed channel), this is a no-op that just hands back that row's id and
 plays it.
 
+**Interests** — A per-profile list of free-text tags (genres, artists,
+moods) stored newline-separated on `users.interests` (see §3). Managed in a
+modal off a Settings row ("Manage interests"), not inline: a wrapping chip
+list plus its own add form doesn't fit the label-left/control-right shape
+every other settings row has, and the row's button now looks like its
+neighbours. Each add or remove `PUT`s the **whole** list, so add, remove and
+reorder are one code path, and the server answers with its normalized version
+rather than rejecting anything — an interest is free text, so there is nothing
+to 400 on.
+
+Two details in `home/settings.js` are not incidental:
+- The chips are rendered from a `data-interests` JSON attribute the page
+  renders inline, not from a fetch when the modal opens — so they're there the
+  instant it does. That also keeps a single renderer (the JS one) instead of a
+  Jinja copy and a JS copy that have to be kept looking identical.
+- Saves are **chained**, not fired in parallel. Every `PUT` carries the whole
+  list, so two overlapping ones can land in either order: adding two chips in
+  quick succession left the server holding the shorter list, and the later
+  response then re-rendered the chips to match it — the second add silently
+  vanished. Each save also only applies its response while its own edit is
+  still the current state, so a queued later edit can't be undone by an
+  earlier response arriving after it.
+
+**Interest-based recommendations** — Explore's "For you" shelves
+(`services/recommendations.py`, `GET /recommendations`). There is no
+recommender model and no behavioural signal here: an interest is a phrase,
+and a recommendation is what YouTube search returns for it — three searches
+(contents, channels, playlists) per interest. Spotea knows what a profile
+follows and plays, but nothing in that turns into *new* discovery on its own,
+whereas "tell me what you like" turns straight into a query.
+
+What the design is actually about is the **request budget**. A batch is
+several live yt-dlp searches, each seconds long, against a service that
+rate-limits an unauthenticated residential IP (see §8). So:
+
+- **The batch is cached in the database** (`recommendation_cache`), keyed by
+  the interests' signature. Opening the Explore tab costs nothing; only a
+  missing, expired or superseded batch reaches YouTube. Editing the interest
+  list invalidates it implicitly — the signature no longer matches — so
+  nothing has to remember to delete the row, and editing back to a previous
+  list still hits its cached batch.
+- **It expires on the interval Settings already has**
+  (`AppSettings.feed_refresh_interval_minutes`), not a cadence of its own.
+  There is deliberately **no refresh button** on the shelves: recommendations
+  go stale on that interval, when the interest list is edited, and when the
+  app-wide Refresh control is pressed — which calls
+  `POST /recommendations/refresh` alongside `POST /feeds/refresh` so one
+  button means "go and look at everything again". A second refresh control
+  next to the first one would only raise the question of which is which.
+- **A run samples `INTERESTS_PER_RUN` (3) interests**, not all of them. That
+  bounds a run's cost no matter how long the list is, and makes each rebuild
+  surface different corners of it. The response reports both `interests` (the
+  whole list) and `interests_used` (this batch's sample), so the UI can say
+  what it actually searched.
+- **Only one build runs at a time process-wide** (a module-level lock), and a
+  build that finds a batch another request just committed reuses it. A
+  forced refresh only accepts such a batch if it was built *after* the
+  refresh started — otherwise "refresh" would return the very thing it was
+  asked to replace.
+
+Results are merged round-robin across the sampled interests and deduplicated
+by id, so the front of each shelf represents every sampled interest instead
+of exhausting the first, and a channel two interests both return isn't listed
+twice.
+
+The shelves reuse Home's `.shelf`/`.shelf-row`/`.card` geometry, but the cards
+carry no content id — nothing here exists locally yet. A recommended song
+plays through the same `POST /feeds/videos` path a search result does. A
+recommended **channel** card, and a channel row in the search results, are
+each clickable two ways: the card/row opens the channel's preview page below,
+and the **Add** button on it follows outright for when you already know what
+you're adding.
+
+**Previewing a playlist or a channel you don't follow** — Explore does *not*
+have a track list of its own. Clicking a recommended playlist or channel
+opens the ordinary detail panel on two extra kinds, `#yt-playlist/{id}` and
+`#yt-channel/{id}` (`services/remote_detail.py`,
+`GET /partials/detail/yt-*/{id}`), rendered by the same
+`_detail_panel.html` a followed channel and a pinned playlist use. Building a
+second, parallel "list of tracks" page under Explore was the alternative, and
+it would have had to re-earn the hero, the track rows, the play controls and
+the routing that one already has.
+
+What actually differs is only what a row without a `Content` row can offer:
+`_remote_track_row.html` instead of `_content_row.html` (no save toggle, no
+downloaded badge, no `/#player/{id}` href), Follow instead of Unfollow in the
+hero — or, if the channel turns out to be followed already, a jump to the
+library's own copy — and no pagination, since a flat fetch is capped
+(`PLAYLIST_ITEM_LIMIT`, 50) and there is no cheap way to ask YouTube for
+"page 3". The panel says "First 50 of 320 tracks" rather than implying it has
+the lot. Which tab stays selected underneath, and where "Back" goes, follow
+`data-detail-home` (Explore for these two, Library for the rest).
+
+**Play all, on something not in the library** — works exactly as it does
+anywhere else, because by the time the queue sees it, it *is* in the library.
+Pressing Play all (or any row) posts every row on screen to
+`POST /feeds/videos/batch`, which creates one preview `Content` row per track
+and answers with their ids in the same order; `queue.js`'s `setQueue()` takes
+those directly instead of fetching `/content/queue/...`. Everything downstream
+— the one-track-ahead download prefetch, auto-advance, previous/next, shuffle
+— is then an ordinary queue with nothing special about it.
+
+The batch makes **no YouTube requests at all**, which is what lets it be one
+synchronous call over fifty tracks: every field a row needs (title, thumbnail,
+duration, and crucially `channel_id`) already came back with the listing that
+rendered the page. That last one is the whole trick — `add_single_video` has
+to resolve a video's channel over the network because a flat *search* result's
+attribution is unreliable, but a playlist or channel page's per-entry
+`channel_id` is the real uploader. Rows the profile already has (an earlier
+preview, or a real upload from a followed channel) are reused rather than
+duplicated, and the rows are read from the DOM rather than re-fetched — a
+remote listing has no second page, so what's on screen is by definition the
+whole list.
+
+**Where the per-entry channel actually comes from** is subtler than "YouTube
+sends it", and getting it wrong broke a whole class of playlist. YouTube
+repeats the uploader on every entry of a *mixed* playlist, but omits it
+entirely on a *single-uploader* one — every entry of a course playlist comes
+back with `channel_id` and `channel` both `None`. Those rows then carried no
+channel id, `add_video_batch` refused all of them, and the playlist reported
+"Nothing to play here" while its track rows showed no channel name either.
+`_flat_video_results()` fills the gap from the playlist's own owner, which in
+exactly that case *is* the uploader — so it's a derivation, not a guess, and
+a per-entry value always wins over it. A playlist that carries neither is left
+unset and its rows are dropped, rather than being attached to the wrong
+channel. The alternative, resolving each video individually, is the one yt-dlp
+call per track this whole design exists to avoid.
+
+The cost is that pressing Play all on a fifty-track playlist leaves fifty
+`is_preview` rows and up to fifty `followed=False` feeds behind, with no
+automatic cleanup (same as any Explore preview — see §3). They are invisible
+everywhere except Recently Played, and only once actually played, and they
+occupy no disk; at household scale that's a few kilobytes per playlist tried.
+
+One non-obvious detail in `youtube/search.py`: YouTube serves an
+auto-generated mix's artwork from `i9.ytimg.com/s_p/…` behind a signed `sqp`
+query, and yt-dlp appends an **unsigned** `maxresdefault.jpg` guess as the
+largest candidate — which 404s. Taking `thumbnails[-1]` therefore left every
+YouTube Music playlist card with a broken image, so `_best_thumbnail_url()`
+drops unsigned candidates whenever any candidate is signed (channel avatars,
+where none are, are unaffected).
+
 **Add feed** — `POST /feeds {channel_url}` → the user pastes any regular
 YouTube channel URL (`/@handle`, `/channel/UC..`, `/c/..`, `/user/..`), not a
 raw RSS link. `resolve_feed_url()` (in `youtube/extract.py`) resolves that to a
@@ -671,6 +873,10 @@ oldest order without claiming a real date. Progress
 (`scanning` → `saving` → `done`) is tracked in-memory per feed and polled
 via `GET /feeds/{id}/backfill-status`, shown behind a full-screen overlay.
 
+**Interests** — Also a per-profile setting on the same `GET`/`PUT /settings`
+pair; see *Interests* and *Interest-based recommendations* above for the
+editor and what reads it.
+
 **Audio quality** — A per-profile setting (`GET`/`PUT /settings`), applied
 at download time, not retroactively. Only two tiers now: `high` and `low`,
 both downloading YouTube's native `mp4a`/AAC stream (remux only, no local
@@ -684,7 +890,10 @@ the two remaining tiers). A pre-existing database's CHECK constraint still
 technically allows `medium` (SQLite can't alter it in place), but nothing
 ever sets it again.
 
-**Feed refresh interval** — A deployment-wide setting (not per-profile —
+**Feed refresh interval** — Also what Explore's recommendations expire on
+(see *Interest-based recommendations* above), so "how often does this app go
+and look at YouTube again" stays one control rather than two. A
+deployment-wide setting (not per-profile —
 see `AppSettings` in §3), same `GET`/`PUT /settings` endpoint. Presets only
 (`FEED_REFRESH_INTERVALS = (15, 30, 60, 120)` minutes) rather than a
 free-form number, ruling out a value aggressive enough to risk YouTube
@@ -725,6 +934,130 @@ detail panel — is one document, opening a channel or a track never tears
 down the `<audio>` element; that's what fixed the mini-player silently
 stopping whenever you left Home/Library/Explore before this (see the
 Library section above and §11).
+
+**Two decks, so a queue can advance in the background** — Playback runs on
+*two* interchangeable `<audio>` elements (`#audio` and `#audio-standby` in
+`_player_controls.html`), not on one whose `src` is reassigned per track.
+This is half the fix for "it doesn't move to the next song until I open the
+app again" on iOS. The other half is the pre-roll below, and the two are
+worth reading together, because the first diagnosis was wrong and the
+breadcrumbs in `routers/debug.py` are what corrected it.
+
+The symptom: `play-requested` at 20:30:22 while hidden, `playing` at
+20:34:31 on the way back in, nothing in between. The first reading was that
+iOS had suspended the app and frozen the media load a track change depends
+on. Preloading the audio ahead of time fixed nothing, and the next capture
+said why:
+
+```
+play-requested    hidden   43958  preloaded=true readyState=4
+playback-stalled  hidden   43958  readyState=4      (+3.0s)
+playing           visible  43958                    (+7.7s)
+```
+
+`readyState 4` means the whole track was already in memory, so nothing was
+waiting on the network. And `playback-stalled` is an ordinary `setTimeout` —
+it *fired*, three seconds in, still hidden, so the page was not frozen and
+neither were its timers. The app was awake, the audio was in hand, and
+`play()` still did nothing: it neither threw nor started, and the element
+stayed `paused` until the app came back on screen.
+
+That is WebKit refusing a playback-state change, not anything being slow or
+suspended. **A backgrounded iOS app may keep playing what is already
+playing** — the previous track ran to its end off screen, as it always did —
+**but it may not start a paused element, and the refusal is silent.**
+
+So there are two requirements, and both have to hold: the next track's bytes
+have to be here already (the decks), *and* the next element has to already be
+playing before it is needed (the pre-roll).
+
+The two decks remove the load from the critical moment:
+
+- `home/overlay.js`'s `cacheUpcoming()` already runs ~8s into the current
+  track and follows the next one's download to completion. The moment the
+  server says `ready`, it calls `player.js`'s `preloadNext()`, which points
+  the *standby* deck at `/content/{id}/stream?preload=1`. This happens while
+  the current track is still playing, which is the only window in which a
+  backgrounded app is reliably awake enough to fetch anything.
+- On `ended`, `prepareAudio`'s `startPlayback()` calls `adoptStandby()`:
+  if that deck is holding this exact track, the two elements **exchange
+  ids** and it becomes the live one.
+- Ids rather than a module variable, because every other module in the app
+  (`resume.js`, `home/overlay.js`) finds the player as `#audio` — swapping
+  the attributes moves all of them at once. Listeners go through
+  `onPlayerEvent()`, which registers on both elements and drops events from
+  whichever is standby, so a preloading deck's `loadedmetadata` can't paint
+  the *next* track's duration over the one that's playing.
+- `?preload=1` exists so the read-ahead isn't recorded as a play — a track
+  the listener skips past has no business in Recently Played. When a
+  preloaded deck does go live, the player reports it with
+  `POST /content/{id}/played` instead.
+
+**Pre-roll and crossfade** — The standby deck is *started*, inaudibly, four
+seconds before the current track runs out (`prerollStandby()`, driven off
+`timeupdate`; `PREROLL_SECONDS`). Playback is still under way then, so
+beginning it is still permitted. Across that same four seconds, `.volume` on
+both decks is ramped linearly — the outgoing deck down to `0`, the incoming
+one up to the listener's real volume — so the handoff has no audible seam.
+The handoff itself then asks the OS for nothing at all: no seek, and the
+volume is already where it needs to be, neither of which any policy refuses.
+
+The handoff used to also seek the incoming deck back to `0`, on the theory
+that pre-roll only exists to warm up the audio session and the listener
+should hear the track from its start. In practice that meant up to four
+seconds of the crossfade played audibly and then the track visibly jumped
+backwards at the handoff instant — indistinguishable from a real rewind,
+because it was one. Removed: the position pre-roll has reached by then **is**
+the track's actual start, just a few seconds further into it, exactly as if
+it had been playing the whole time.
+
+Three details are load-bearing:
+
+- The pre-roll starts at `volume 0.0001`, **not muted and not `volume 0`**.
+  WebKit decides whether an element gets a real audio session by measuring
+  its output, and a silent element can be written off — which would leave
+  the deck holding no session to take over with, putting the handoff right
+  back to acquiring one in the background. It's also the crossfade's floor,
+  for the same reason.
+- The crossfade ramps against a volume captured once, at the moment pre-roll
+  arms (`crossfadeBaseVolume`) — not against the live deck's own `.volume`
+  read fresh each tick, since this same code is what's changing it. On
+  handoff, `swapDecks()` hands the incoming deck that captured volume
+  explicitly rather than copying from the outgoing deck (its ordinary
+  behaviour), which by then has been faded down to near `0`.
+- `stopPreroll()` is bound to `pause` **with an `event.currentTarget.ended`
+  guard**. A track running out fires `pause` immediately *before* `ended`
+  (the spec has reaching the end set `paused` and fire the event, then fire
+  `ended`), so without that guard every handoff tore down its own pre-roll
+  microseconds before claiming it — and left no trace, since by the time the
+  handoff looked, the deck was paused back at 0:00. `stopPreroll()` also
+  restores the live deck's volume to `crossfadeBaseVolume`, in case it fires
+  mid-fade (a manual pause or skip).
+- A running-preroll handoff sets `navigator.mediaSession.playbackState =
+  "playing"` **by hand**. No native `play` DOM event fires there for
+  `setupMediaSession`'s listener to catch — the incoming deck's real `play`
+  already fired earlier, while it was still `#audio-standby`, and
+  `onPlayerEvent` dropped it. Left unset, `playbackState` sits at `"paused"`
+  (set moments earlier by the outgoing track's own pre-`ended` `pause`) for
+  the whole next track. `mediaSession.metadata` is updated separately
+  (`home/overlay.js`'s `openPlayer`) and is unaffected, so the lock-screen
+  widget looks correct throughout — only the **Dynamic Island**, which
+  requires `playbackState: "playing"` and not just correct metadata, drops
+  out. Lock screen fine + Dynamic Island gone is the signature of this bug.
+
+`handoff-adopt` reports `running`/`prerolled`/`paused`/`position` on every
+track change; it is the breadcrumb that caught the `pause`-before-`ended`
+bug and the first thing to read if this ever regresses.
+
+The keep-alive (`startKeepAlive`, a looping inaudible clip on its own
+`#keepalive` element) is the fallback for the gaps two decks can't cover:
+the *first* track of a session, and any handoff into a track that still has
+to be downloaded. It holds the audio session — and with it the app — open
+across those. Note that it is stopped on the live deck's `playing` event,
+never before the swap: pausing it first left the page silent for exactly the
+window a media load has to happen in, which is the window iOS suspends in,
+and that ordering bug is what made background advance fail *completely*
+rather than just sometimes.
 
 That leaves one real seam: the audio element still doesn't survive a genuine
 full document reload (an actual F5, reopening the tab, or landing via one of

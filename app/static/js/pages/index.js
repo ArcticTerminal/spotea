@@ -4,7 +4,11 @@
 import { setupSaveButtons } from "../content-actions.js";
 import { setupBulkImport, setupBulkImportOverlay } from "../home/bulk-import.js";
 import { handleInitialRoute, setupDetailPanel } from "../home/detail.js";
-import { setupExploreSearch } from "../home/explore.js";
+import {
+  refreshRecommendations,
+  setupExploreSearch,
+  setupRecommendations,
+} from "../home/explore.js";
 import {
   setupHomeChannels,
   setupHorizontalScrollers,
@@ -15,7 +19,12 @@ import {
 } from "../home/library.js";
 import { resumeOverlayIfNeeded, setupPlayerOverlay } from "../home/overlay.js";
 import { openProfileSwitcher, setupProfiles } from "../home/profiles.js";
-import { setupDownloadsOverlay, setupSettings, setupStorage } from "../home/settings.js";
+import {
+  setupDownloadsOverlay,
+  setupInterests,
+  setupSettings,
+  setupStorage,
+} from "../home/settings.js";
 import { setupTabs } from "../home/tabs.js";
 import { setupFavorite, setupPlayer } from "../player.js";
 import { installBfcacheReload, registerServiceWorker } from "../resume.js";
@@ -35,15 +44,20 @@ resumeOverlayIfNeeded();
 handleInitialRoute();
 setupSaveButtons();
 setupExploreSearch();
+setupRecommendations();
 setupDownloadsOverlay();
 setupBulkImportOverlay();
 setupBulkImport();
 setupStorage();
 setupSettings();
+setupInterests();
 setupHomeChannels();
 setupLibraryChannelGrid();
 setupLibrarySearch();
 setupHorizontalScrollers();
-setupRefreshButton();
-setupMobileMenu(openProfileSwitcher);
+// The one Refresh control covers Explore's recommendations too — passed in
+// rather than imported inside library.js, which explore.js already imports
+// from (see setupRefreshButton).
+setupRefreshButton(refreshRecommendations);
+setupMobileMenu(openProfileSwitcher, refreshRecommendations);
 setupProfiles();

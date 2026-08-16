@@ -1,17 +1,35 @@
-// The "detail" panel: a channel or one of the four pinned playlists
-// (Favorites/Saved/New Uploads/Recently Played), drilled into from Library
-// in place — a panel swap, not a navigation. Replaces the old standalone
+// The "detail" panel: a track list with a hero above it, drilled into in
+// place — a panel swap, not a navigation. Replaces the old standalone
 // channel.html/content_list.html pages; folding them in here (rather than
 // leaving them as separate documents) is what keeps the player overlay and
 // mini-bar alive while browsing one, since there's no longer a document
 // boundary for that DOM to fall off of.
+//
+// Four things open it, and they differ only in where the rows come from:
+//   channel/{feed_id}     a followed channel        (from Library)
+//   {playlist kind}       one of the four pinned    (from Library)
+//   yt-playlist/{id}      a YouTube playlist        (from Explore)
+//   yt-channel/{id}       an unfollowed channel     (from Explore)
+// The last two are "remote": their rows have no Content row yet, so playing
+// from them goes through home/remote.js, which materializes the list first.
 
 import { unfollowChannel } from "../content-actions.js";
 import { classifyHash, showToast } from "../core.js";
 import { refreshFragments, swapFragmentHtml } from "../fragments.js";
 import { openPlayer } from "./overlay.js";
 import { QUEUE_CHANGED, isShuffled, loadQueue, queueSource, toggleShuffle } from "./queue.js";
+import { CHANNEL_FOLLOWED, followChannel, playRemoteList } from "./remote.js";
 import { activate } from "./tabs.js";
+
+// Detail kinds whose rows come from YouTube rather than the database.
+const REMOTE_KINDS = ["yt-channel", "yt-playlist"];
+const isRemoteKind = (kind) => REMOTE_KINDS.includes(kind);
+
+// Which tab this view belongs to. Drives both the no-history fallback in
+// closeDetail and, via a data attribute on <html>, which tab button stays
+// visually selected while the panel is open (see style.css) — the detail
+// panel has no .tab-btn of its own.
+const detailHome = (kind) => (isRemoteKind(kind) ? "explore" : "library");
 
 // What's currently open, so a pagination click knows what to re-fetch
 // without re-parsing the URL, and so "Back to Library" knows whether there's
@@ -21,13 +39,17 @@ import { activate } from "./tabs.js";
 // than showing Library. { kind, id, page, pushed } | null.
 let current = null;
 
+// Kinds that carry an id put it in the path; the four pinned playlists are
+// the kind itself, and take the /playlist/{kind} route.
+const hasId = (kind) => kind === "channel" || isRemoteKind(kind);
+
 function detailUrl(kind, id, page) {
-  const base = kind === "channel" ? `/partials/detail/channel/${id}` : `/partials/detail/playlist/${kind}`;
+  const base = hasId(kind) ? `/partials/detail/${kind}/${id}` : `/partials/detail/playlist/${kind}`;
   return page > 1 ? `${base}?page=${page}` : base;
 }
 
 function hashFor(kind, id, page) {
-  const path = kind === "channel" ? `channel/${id}` : kind;
+  const path = hasId(kind) ? `${kind}/${id}` : kind;
   return page > 1 ? `#${path}?page=${page}` : `#${path}`;
 }
 
@@ -39,12 +61,14 @@ function showLoading() {
 }
 
 /**
- * Opens a channel (kind: "channel", id: feed id) or a pinned playlist
- * (kind: one of favorites/saved/new-uploads/recently-played, id: null).
+ * Opens one of the four sources listed at the top of this file. `id` is a
+ * feed id for "channel", a YouTube id for the two remote kinds, and null for
+ * a pinned playlist (whose kind is its whole identity).
+ *
  * `replace` is for callers syncing to a URL that's already current (initial
  * boot, popstate, a pagination click within the same detail view) — a fresh
  * "the user just clicked into this" open pushes a new history entry instead,
- * so the back button can return to Library.
+ * so the back button can return where it came from.
  */
 export async function openDetail(kind, id, { page = 1, replace = false } = {}) {
   // A pagination click within the view that's already open keeps whatever
@@ -54,6 +78,7 @@ export async function openDetail(kind, id, { page = 1, replace = false } = {}) {
   const isSameTarget = current && current.kind === kind && String(current.id) === String(id);
   const pushed = isSameTarget ? current.pushed : !replace;
   current = { kind, id, page, pushed };
+  document.documentElement.dataset.detailHome = detailHome(kind);
   activate("detail", { updateHistory: false });
   const hash = hashFor(kind, id, page);
   if (replace) history.replaceState(null, "", hash);
@@ -99,10 +124,18 @@ function syncShuffleButton() {
  * "Play all": fills the queue from the whole channel/playlist — every page of
  * it, not the twenty rows on screen — and starts on whichever track that
  * order puts first, which is a random one while shuffle is on.
+ *
+ * A remote list has no server-side queue to fetch and no second page, so
+ * home/remote.js builds it from the rows on screen instead; either way the
+ * queue that comes out is the same thing.
  */
 async function playAll(button) {
   const source = currentSource();
   if (!source) return;
+  if (isRemoteKind(source.kind)) {
+    playRemoteList(source, { button });
+    return;
+  }
   // The fetch is a round trip and the button is the kind people press twice;
   // without this the second press would build a second queue and jump
   // playback back to its start.
@@ -127,9 +160,10 @@ async function playAll(button) {
 // past the app entirely.
 function closeDetail() {
   const pushed = current?.pushed;
+  const home = detailHome(current?.kind);
   current = null;
   if (pushed) history.back();
-  else activate("library");
+  else activate(home);
 }
 
 async function handleUnfollow(feedId, button) {
@@ -169,6 +203,21 @@ export function setupDetailPanel() {
       return;
     }
 
+    const followBtn = event.target.closest("#follow-channel-btn");
+    if (followBtn) {
+      // Doesn't navigate here — the CHANNEL_FOLLOWED listener below opens the
+      // real (library) channel page once the history backfill has finished,
+      // which is the same place adding from a search result lands.
+      followChannel(followBtn.dataset.channelUrl, followBtn);
+      return;
+    }
+
+    const openFollowedBtn = event.target.closest("#open-followed-channel-btn");
+    if (openFollowedBtn) {
+      openDetail("channel", openFollowedBtn.dataset.feedId);
+      return;
+    }
+
     const playAllBtn = event.target.closest("#detail-play-all");
     if (playAllBtn) {
       playAll(playAllBtn);
@@ -197,8 +246,18 @@ export function setupDetailPanel() {
     const trackLink = event.target.closest(".track-row .track-link");
     if (trackLink) {
       event.preventDefault();
-      const contentId = trackLink.closest(".track-row").dataset.contentId;
+      const row = trackLink.closest(".track-row");
       const source = currentSource();
+
+      // A remote row has no content id yet — clicking it means the same
+      // thing ("start here and keep going"), it just has to materialize the
+      // list before there's a queue to do it with.
+      if (row.dataset.videoId) {
+        if (source) playRemoteList(source, { startVideoId: row.dataset.videoId });
+        return;
+      }
+
+      const contentId = row.dataset.contentId;
       // Clicking a row means "start here and keep going", the same as it does
       // in any music app — so the rest of this channel/playlist becomes the
       // queue, not just this one track. Checked before openPlayer, which
@@ -216,6 +275,14 @@ export function setupDetailPanel() {
   // The player has its own shuffle toggle, and both drive the same
   // preference — whichever one is pressed, this panel's button has to follow.
   document.addEventListener(QUEUE_CHANGED, syncShuffleButton);
+
+  // A channel just finished being followed — from an Explore search result, a
+  // recommendation card, or the Follow button on its own preview page. All
+  // three land on the real channel page, which is this module's to open (see
+  // home/remote.js for why it announces rather than calls).
+  document.addEventListener(CHANNEL_FOLLOWED, (event) => {
+    openDetail("channel", event.detail.feedId);
+  });
 
   window.addEventListener("popstate", () => {
     const info = classifyHash(location.hash.slice(1));

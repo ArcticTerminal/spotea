@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.app_settings import get_app_settings
 from app.deps import get_current_profile, get_db, require_login
+from app.interests import parse_interests
 from app.models import User
 from app.page_context import (
     downloads_context,
@@ -41,6 +42,12 @@ def home(
         {
             "audio_quality": profile.audio_quality,
             "feed_refresh_interval_minutes": get_app_settings(db).feed_refresh_interval_minutes,
+            # Server-rendered rather than fetched by home/settings.js on boot:
+            # the interest chips are part of the Settings panel's first paint,
+            # and filling them in afterwards flashes an empty editor on every
+            # load. Explore's recommendations are the opposite case — they can
+            # cost a YouTube round trip, so they stay a deliberate fetch.
+            "interests": parse_interests(profile.interests),
             **home,
             **library_context(db, profile.id),
             **downloads_context(db, profile.id),

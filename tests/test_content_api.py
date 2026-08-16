@@ -60,6 +60,7 @@ def test_get_content_default_page_shape(client, db_session):
         "is_favorite",
         "is_saved",
         "is_played",
+        "is_unavailable",
     }
     assert first["channel_title"] == "Test Channel"
     assert first["title"] == "Title 025"
@@ -121,6 +122,7 @@ def test_get_single_content_returns_full_shape(client, db_session):
         "is_favorite",
         "is_saved",
         "is_played",
+        "is_unavailable",
     }
     assert body["id"] == items[0].id
     assert body["channel_title"] == "Test Channel"
@@ -290,6 +292,79 @@ def test_start_download_refetches_when_the_file_is_gone(client, db_session, monk
     assert item.file_path == str(replacement)
 
 
+def test_a_video_youtube_wont_serve_is_recorded_as_settled(client, db_session, monkeypatch):
+    """Distinguishing this from an ordinary failure is what stops the app
+    re-attempting it forever — see Content.is_unavailable."""
+    from app.routers import content as content_router
+
+    item = _seed_one(db_session)
+
+    def unavailable(*args, **kwargs):
+        raise content_router.VideoUnavailableError("ERROR: [youtube] x: Video unavailable")
+
+    monkeypatch.setattr(content_router, "download_audio", unavailable)
+    client.post(f"/content/{item.id}/download")
+
+    db_session.refresh(item)
+    assert item.status == "error"
+    assert item.is_unavailable is True
+    assert client.get(f"/content/{item.id}/status").json()["is_unavailable"] is True
+
+
+def test_an_ordinary_failure_stays_worth_retrying(client, db_session, monkeypatch):
+    from app.routers import content as content_router
+
+    item = _seed_one(db_session)
+
+    def refused(*args, **kwargs):
+        raise content_router.DownloadError("ERROR: HTTP Error 403: Forbidden")
+
+    monkeypatch.setattr(content_router, "download_audio", refused)
+    client.post(f"/content/{item.id}/download")
+
+    db_session.refresh(item)
+    assert item.status == "error"
+    assert item.is_unavailable is False
+
+
+def test_an_unavailable_track_is_never_attempted_again(client, db_session, monkeypatch):
+    """The queue's prefetch fires for whatever is next without knowing
+    anything about it, so without this every pass over a broken track pays
+    for a full extraction against YouTube to be told what the row already
+    says."""
+    from app.routers import content as content_router
+
+    item = _seed_one(db_session, status="error")
+    item.is_unavailable = True
+    db_session.commit()
+
+    def fail(*args, **kwargs):
+        raise AssertionError("re-attempted a track YouTube has already refused")
+
+    monkeypatch.setattr(content_router, "download_audio", fail)
+
+    res = client.post(f"/content/{item.id}/download")
+    assert res.status_code == 200
+    assert res.json()["is_unavailable"] is True
+
+    db_session.refresh(item)
+    assert item.status == "error"
+
+
+def test_removing_a_download_reopens_an_unavailable_track(client, db_session):
+    """YouTube licensing changes, so writing a track off has to be
+    reversible — this is the only "start over" action the app has."""
+    item = _seed_one(db_session, status="error")
+    item.is_unavailable = True
+    db_session.commit()
+
+    client.delete(f"/content/{item.id}")
+
+    db_session.refresh(item)
+    assert item.is_unavailable is False
+    assert item.status == "not_downloaded"
+
+
 def test_there_is_no_restart_endpoint(client, db_session):
     """The client used to POST this every 3s while a download showed no byte
     progress, which restarted attempts that were working and left the
@@ -335,3 +410,68 @@ def test_download_routes_require_login():
         res = anonymous.post("/content/1/download", follow_redirects=False)
         assert res.status_code == 303
         assert res.headers["location"] == "/login"
+
+
+def _seed_ready(db_session, tmp_path):
+    audio = tmp_path / "track.m4a"
+    audio.write_bytes(b"audio")
+    return _seed_one(db_session, status="ready", file_path=str(audio))
+
+
+def test_streaming_a_track_records_it_as_played(client, db_session, tmp_path):
+    item = _seed_ready(db_session, tmp_path)
+    assert item.last_played_at is None
+
+    assert client.get(f"/content/{item.id}/stream").status_code == 200
+
+    db_session.refresh(item)
+    assert item.last_played_at is not None
+
+
+def test_preloading_the_next_track_is_not_a_play(client, db_session, tmp_path):
+    """The player reads the next queued track ahead of time, while the current
+    one is still playing, so that the handoff needs no network (player.js's
+    deck helpers). Counting that as listening would put a track the user may
+    well skip past into Recently Played a minute before it ever starts."""
+    item = _seed_ready(db_session, tmp_path)
+
+    assert client.get(f"/content/{item.id}/stream?preload=1").status_code == 200
+
+    db_session.refresh(item)
+    assert item.last_played_at is None
+
+
+def test_a_preloaded_track_is_recorded_once_it_really_starts(client, db_session, tmp_path):
+    item = _seed_ready(db_session, tmp_path)
+    client.get(f"/content/{item.id}/stream?preload=1")
+
+    assert client.post(f"/content/{item.id}/played").status_code == 204
+
+    db_session.refresh(item)
+    assert item.last_played_at is not None
+
+
+def test_marking_another_profiles_track_as_played_404s(client, db_session, tmp_path):
+    other = User(name="Someone Else", account_id=DEFAULT_ACCOUNT_ID)
+    db_session.add(other)
+    db_session.commit()
+    db_session.refresh(other)
+
+    audio = tmp_path / "theirs.m4a"
+    audio.write_bytes(b"audio")
+    feed = Feed(user_id=other.id, rss_url="https://example.com/theirs", channel_title="Theirs")
+    db_session.add(feed)
+    db_session.commit()
+    db_session.refresh(feed)
+    theirs = Content(
+        feed_id=feed.id,
+        user_id=other.id,
+        video_id="theirsvid1",
+        title="Theirs",
+        status="ready",
+        file_path=str(audio),
+    )
+    db_session.add(theirs)
+    db_session.commit()
+
+    assert client.post(f"/content/{theirs.id}/played").status_code == 404

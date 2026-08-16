@@ -1,8 +1,9 @@
-from sqlalchemy import inspect, text
+from sqlalchemy import bindparam, inspect, text
 from sqlalchemy.engine import Engine
 
 from app.auth import hash_password
 from app.config import settings
+from app.downloader import is_permanent_failure
 
 # Base.metadata.create_all() only creates tables that don't exist yet — it never
 # alters existing ones. Each entry here patches an existing SQLite database (from
@@ -32,6 +33,13 @@ _COLUMN_MIGRATIONS = [
     # which get_current_profile already treats the same as any other
     # unresolved session.
     ("accounts", "last_active_profile_id", "INTEGER"),
+    # NULL and "" both mean "no interests set yet" — interests.parse_interests
+    # treats them the same, so no backfill is needed here.
+    ("users", "interests", "TEXT"),
+    # Defaults to "not settled yet", which is the right answer for every
+    # pre-existing row except the already-errored ones — those are classified
+    # from their stored error_message below.
+    ("content", "is_unavailable", "BOOLEAN NOT NULL DEFAULT 0"),
 ]
 
 
@@ -61,6 +69,31 @@ def run_migrations(engine: Engine) -> None:
                         "WHERE last_played_at IS NULL AND status = 'ready' AND downloaded_at IS NOT NULL"
                     )
                 )
+
+        # Rows that already failed permanently were recorded before anything
+        # distinguished that from a transient failure — they'd otherwise sit
+        # there being re-attempted (three extractions apiece) every time
+        # someone opened them. Their stored error_message is exactly what
+        # download_audio classifies on, so re-run the same test over it.
+        # Bounded by "status = 'error'", which is a handful of rows even on a
+        # large library, and idempotent: a row it marks is no longer selected.
+        if "content" in existing_tables:
+            columns = {col["name"] for col in inspect(engine).get_columns("content")}
+            if "is_unavailable" in columns:
+                rows = conn.execute(
+                    text(
+                        "SELECT id, error_message FROM content "
+                        "WHERE status = 'error' AND is_unavailable = 0 AND error_message IS NOT NULL"
+                    )
+                ).all()
+                permanent_ids = [row.id for row in rows if is_permanent_failure(row.error_message)]
+                if permanent_ids:
+                    conn.execute(
+                        text(
+                            "UPDATE content SET is_unavailable = 1 WHERE id IN :ids"
+                        ).bindparams(bindparam("ids", expanding=True)),
+                        {"ids": permanent_ids},
+                    )
 
         # "medium" quality (locally re-encoded, the only tier that paid a
         # transcode cost — see downloader.py) has been dropped in favor of

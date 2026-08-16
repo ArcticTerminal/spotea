@@ -383,6 +383,14 @@ select {
   display: none;
 }
 
+/* And the button itself: `display: inline-flex` above is an author rule, so
+   it beats the UA stylesheet's [hidden] { display: none } and a .btn-icon
+   marked hidden stayed on screen. Explore's recommendations-refresh button is
+   hidden until there are interests to refresh, which is where this surfaced. */
+.btn-icon[hidden] {
+  display: none;
+}
+
 .btn-icon:hover {
   background: var(--bg-hover-strong);
   color: var(--white);
@@ -519,10 +527,12 @@ html[data-active-tab="settings"] .tab-btn[data-tab="settings"] {
   border-bottom-color: var(--accent);
 }
 
-/* data-active-tab="detail" (a channel or pinned playlist) has no .tab-btn of
-   its own — Library stays visually selected underneath it, since that's
-   where "Back" returns to. */
-html[data-active-tab="detail"] .tab-btn[data-tab="library"] {
+/* data-active-tab="detail" has no .tab-btn of its own, so the tab it was
+   opened from stays visually selected underneath it — which is also where
+   "Back" returns to. home/detail.js sets data-detail-home: Library for a
+   followed channel or pinned playlist, Explore for the two remote kinds. */
+html[data-active-tab="detail"][data-detail-home="library"] .tab-btn[data-tab="library"],
+html[data-active-tab="detail"][data-detail-home="explore"] .tab-btn[data-tab="explore"] {
   color: var(--white);
   border-bottom-color: var(--accent);
 }
@@ -688,6 +698,80 @@ html[data-active-tab="detail"] .tab-panel[data-tab-panel="detail"] {
   border-color: var(--border-strong);
 }
 
+/* The interests editor lives in its own modal rather than inline in a
+   settings row: a wrapping chip list plus its own add form doesn't fit the
+   label-left/control-right shape every other row has. */
+.modal-interests {
+  max-width: 440px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+/* :not(:empty) so an interests list with nothing in it doesn't leave a gap
+   above the "nothing yet" line that replaces it. */
+.modal-interests .interests-list:not(:empty) {
+  margin-bottom: 1rem;
+}
+
+.interests-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+/* Deliberately not .channel-chip: that one is a button (a whole chip you
+   click to filter by), whereas this is a label with its own small remove
+   control, so only the pill shape is shared. */
+.interest-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.35rem 0.3rem 0.7rem;
+  background: var(--bg-base);
+  border: 1px solid var(--border-default);
+  border-radius: 999px;
+  font-size: 0.85rem;
+}
+
+.interest-chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.interest-chip-remove:hover {
+  background: var(--bg-hover-strong);
+  color: var(--text-primary);
+}
+
+.interest-chip-remove svg {
+  width: 12px;
+  height: 12px;
+}
+
+.interests-add-form {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.interests-add-form input {
+  flex: 1;
+  min-width: 0;
+}
+
 /* A description sentence next to a dropdown is tight on a phone screen —
    stack them instead of forcing a side-by-side row. */
 @media (max-width: 480px) {
@@ -729,6 +813,7 @@ html[data-active-tab="detail"] .tab-panel[data-tab-panel="detail"] {
    behavior, margin, flex). */
 .channel-search input,
 .profiles-add-form input,
+.interests-add-form input,
 .library-search-input {
   padding: 0.5rem 0.6rem;
   border-radius: 6px;
@@ -743,6 +828,7 @@ html[data-active-tab="detail"] .tab-panel[data-tab-panel="detail"] {
 
 .channel-search input::placeholder,
 .profiles-add-form input::placeholder,
+.interests-add-form input::placeholder,
 .library-search-input::placeholder,
 .login-card input::placeholder,
 .bulk-import-input::placeholder {
@@ -753,6 +839,7 @@ html[data-active-tab="detail"] .tab-panel[data-tab-panel="detail"] {
    input above — no exceptions, so focus always reads the same way. */
 .channel-search input:focus,
 .profiles-add-form input:focus,
+.interests-add-form input:focus,
 .library-search-input:focus {
   outline: none;
   border-color: var(--accent);
@@ -872,6 +959,121 @@ html[data-active-tab="detail"] .tab-panel[data-tab-panel="detail"] {
 .btn-add-channel:disabled {
   opacity: 0.6;
   cursor: default;
+}
+
+/* --- Explore's "For you" recommendations ------------------------------- */
+
+/* Same header shape as a Home shelf, plus a right-hand cluster: what the
+   batch was based on, and the button that rebuilds it. */
+.recommendations-header {
+  align-items: center;
+}
+
+.recommendations-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+/* The "based on … · updated …" line. Truncates rather than wraps: it sits on
+   the shelf heading's own line, and a second line there pushes the whole
+   shelf down for a caption. */
+#recommendations-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 480px) {
+  /* Not enough width for a heading and a caption side by side — the caption
+     is the part that gives way. */
+  #recommendations-meta {
+    display: none;
+  }
+}
+
+/* Recommendation shelves nest inside the "For you" block, so their own
+   headings are a level down from it. */
+#recommendations-body .shelf-title {
+  font-size: 0.95rem;
+  color: var(--text-secondary);
+}
+
+/* A recommended song/playlist card carries no content id, so there's no save
+   button and no second meta line — the body is shorter than a Home card's
+   and shouldn't reserve the space for them. */
+.rec-card .card-title {
+  min-height: 0;
+}
+
+/* Channel cards aren't 16:9 — an avatar reads as a channel, a letterboxed
+   thumbnail doesn't. Centered so the row stays even whatever the name
+   length. */
+.rec-channel-card {
+  align-items: center;
+  text-align: center;
+  padding-top: 1rem;
+}
+
+.rec-channel-card .card-title {
+  min-height: 0;
+}
+
+.rec-channel-card .card-body {
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  /* Grow, so the Add buttons below line up across the row instead of each
+     one sitting wherever its card's name happened to stop wrapping. */
+  flex: 1;
+}
+
+.rec-channel-card .btn-add-channel {
+  margin-top: auto;
+}
+
+.rec-channel-avatar {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--bg-input);
+  display: block;
+  flex: 0 0 auto;
+}
+
+/* Song and playlist cards are clickable as a whole, and a channel search
+   result previews the channel — the pointer has to say so, since neither is
+   a link. */
+.rec-card,
+.search-result-channel {
+  cursor: pointer;
+}
+
+/* --- The detail panel showing something remote ------------------------- */
+
+/* A playlist's artwork is a video thumbnail, not an avatar — square-cropping
+   it into a circle the way a channel hero does cuts the middle out of it. */
+.channel-hero-avatar.is-artwork {
+  border-radius: 10px;
+}
+
+.channel-hero-follow {
+  align-self: flex-start;
+  margin-top: 0.5rem;
+}
+
+/* A remote row's whole left side is a button rather than a link (there's no
+   /#player/{id} to point at until the row exists) — strip the button chrome
+   so it reads exactly like .track-link does everywhere else. */
+button.track-link {
+  border: none;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: inherit;
+  padding: 0;
 }
 
 /* Storage tab */
@@ -1904,7 +2106,14 @@ html[data-active-tab="detail"] .tab-panel[data-tab-panel="detail"] {
 
 .modal-overlay {
   position: fixed;
-  inset: 0;
+  top: var(--vvt, 0px);
+  left: 0;
+  width: 100%;
+  /* Not inset: 0 — height tracks the visual viewport (see core.js's
+     --vvh/--vvt sync) so the keyboard shrinking it re-centers the modal
+     instead of leaving it flush against a layout viewport that's now
+     partly hidden behind the keyboard. */
+  height: var(--vvh, 100vh);
   background: rgba(0, 0, 0, 0.65);
   display: flex;
   align-items: center;

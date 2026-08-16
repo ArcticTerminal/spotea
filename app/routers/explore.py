@@ -1,10 +1,11 @@
-"""Explore: searching YouTube and grabbing a single video from it.
+"""Explore: searching YouTube, and turning what comes back into something
+playable without following anything.
 
 Kept under the /feeds prefix rather than its own, because that's the URL
 shape the client already speaks — this is a code-organisation split, not an
 API change. What makes these routes a group is that none of them involve
 following a channel: search returns things the user doesn't have yet, and
-"listen" adds exactly one video behind a placeholder feed.
+both "listen" endpoints attach their rows to placeholder feeds.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -17,13 +18,15 @@ from app.schemas import (
     ChannelSearchResultOut,
     VideoAddCreate,
     VideoAddResult,
+    VideoBatchCreate,
+    VideoBatchResult,
     VideoSearchResultOut,
 )
 from app.storage import purge_content
 from app.timeutil import utcnow
 from app.youtube.extract import resolve_video_channel
 from app.youtube.search import search_channels, search_videos
-from app.youtube.urls import channel_feed_url
+from app.youtube.urls import CHANNEL_ID_RE, channel_feed_url
 
 router = APIRouter(prefix="/feeds", tags=["explore"], dependencies=[Depends(require_login)])
 
@@ -125,6 +128,96 @@ def add_single_video(
     db.refresh(content)
 
     return VideoAddResult(content_id=content.id)
+
+
+def _preview_content(feed_id: int, user_id: int, item) -> Content:
+    """A preview row from something Explore already has full metadata for.
+    Same shape add_single_video builds — see its comments for why the
+    thumbnail is stored as-is and why published_at is "now"."""
+    return Content(
+        feed_id=feed_id,
+        user_id=user_id,
+        video_id=item.video_id,
+        title=item.title,
+        thumbnail_url=item.thumbnail_url,
+        duration_seconds=item.duration_seconds,
+        published_at=utcnow(),
+        is_preview=True,
+    )
+
+
+@router.post("/videos/batch", response_model=VideoBatchResult, status_code=status.HTTP_201_CREATED)
+def add_video_batch(
+    payload: VideoBatchCreate,
+    profile: User = Depends(get_current_profile),
+    db: Session = Depends(get_db),
+) -> VideoBatchResult:
+    """Turns a whole remote playlist or channel listing into playable rows in
+    one go — what "Play all" (and clicking any row) on those pages calls
+    before handing the queue its ids.
+
+    Makes **no network calls at all**, which is the reason it can be a single
+    synchronous request over fifty tracks: unlike add_single_video, every
+    field is already known. The client got them from the same fetch that
+    rendered the list, `channel_id` included — and a playlist/channel page's
+    per-entry channel attribution is the real uploader, so there's nothing to
+    resolve.
+
+    Rows that already exist for this profile (an earlier preview, or a real
+    upload from a followed channel) are reused rather than duplicated, the
+    same way add_single_video treats them. Order in equals order out: the
+    caller uses it directly as the play queue.
+    """
+    items = [item for item in payload.items if CHANNEL_ID_RE.match(item.channel_id)]
+    if not items:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No playable videos given")
+
+    # Three bulk lookups instead of two queries per track — this runs over a
+    # whole playlist, and the per-item version of it was the only thing that
+    # made a fifty-track "Play all" slow.
+    existing_content = {
+        content.video_id: content
+        for content in db.query(Content).filter(
+            Content.user_id == profile.id,
+            Content.video_id.in_([item.video_id for item in items]),
+        )
+    }
+    wanted_rss_urls = {channel_feed_url(item.channel_id) for item in items}
+    feeds_by_rss_url = {
+        feed.rss_url: feed
+        for feed in db.query(Feed).filter(
+            Feed.user_id == profile.id, Feed.rss_url.in_(wanted_rss_urls)
+        )
+    }
+
+    for item in items:
+        rss_url = channel_feed_url(item.channel_id)
+        if rss_url not in feeds_by_rss_url:
+            # Same placeholder-feed contract as _get_or_create_placeholder_feed
+            # above; built inline here so the whole batch is one flush.
+            feed = Feed(
+                user_id=profile.id,
+                rss_url=rss_url,
+                channel_title=item.channel_title,
+                followed=False,
+            )
+            db.add(feed)
+            feeds_by_rss_url[rss_url] = feed
+    db.flush()
+
+    created: dict[str, Content] = {}
+    for item in items:
+        if item.video_id in existing_content or item.video_id in created:
+            continue
+        feed = feeds_by_rss_url[channel_feed_url(item.channel_id)]
+        content = _preview_content(feed.id, profile.id, item)
+        db.add(content)
+        created[item.video_id] = content
+
+    db.commit()
+
+    resolved = {**{k: v.id for k, v in existing_content.items()}, **{k: v.id for k, v in created.items()}}
+    return VideoBatchResult(content_ids=[resolved[item.video_id] for item in items])
 
 
 @router.delete("/videos/{content_id}", status_code=status.HTTP_204_NO_CONTENT)

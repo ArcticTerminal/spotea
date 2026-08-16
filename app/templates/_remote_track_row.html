@@ -1,0 +1,41 @@
+{# One track of a remote playlist/channel — same row as _content_row.html and
+   the same CSS, but for a video with no Content row behind it yet.
+
+   Everything that needs one is therefore absent: no save toggle (there's
+   nothing to save), no downloaded badge (nothing is on disk), and no
+   /#player/{id} href, since that id doesn't exist until the row is
+   materialized. The dataset below carries exactly the fields
+   POST /feeds/videos/batch needs to create it — which is why playing from
+   one of these pages costs no YouTube request at all (see
+   services/remote_detail.py).
+
+   `data-video-id` is also what tells home/detail.js's shared track-row
+   handler that this is a remote row rather than a local one.
+#}
+<div
+  class="track-row track-row-remote"
+  data-video-id="{{ item.video_id }}"
+  data-channel-id="{{ item.channel_id or '' }}"
+  data-title="{{ item.title }}"
+  data-thumbnail-url="{{ item.thumbnail_url or '' }}"
+  data-duration-seconds="{{ item.duration_seconds or '' }}"
+  data-channel-title="{{ item.channel_title or '' }}"
+>
+  <button type="button" class="track-link" aria-label="Play {{ item.title }}">
+    <span class="track-index">{{ index }}</span>
+    <span class="track-thumb">
+      {% if item.thumbnail_url %}
+      <img src="{{ item.thumbnail_url }}" alt="" loading="lazy" />
+      {% endif %}
+    </span>
+    <span class="track-info">
+      <span class="track-title" title="{{ item.title }}">{{ item.title }}</span>
+      {% if item.channel_title %}
+      <span class="track-date">{{ item.channel_title }}</span>
+      {% endif %}
+    </span>
+  </button>
+  <span class="track-duration">
+    {{ item.duration_seconds | duration if item.duration_seconds else '' }}
+  </span>
+</div>

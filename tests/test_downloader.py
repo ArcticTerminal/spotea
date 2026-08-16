@@ -165,6 +165,63 @@ def test_no_extraction_level_sleep_is_configured(fake_ydl, tmp_path):
     assert "sleep_interval_requests" not in fake_ydl.calls[0]
 
 
+def test_an_unavailable_video_stops_the_ladder_on_the_first_attempt(fake_ydl):
+    """Every rung is a different client, and this class of refusal is the
+    same on all of them — so the remaining two attempts can only re-confirm
+    it, at the cost of two more extractions against a YouTube that rate-limits
+    on request volume."""
+    fake_ydl.outcomes = ["ERROR: [youtube] abc: Video unavailable. This video is not available"]
+
+    with pytest.raises(downloader.VideoUnavailableError):
+        downloader.download_audio("vid00000001")
+
+    assert len(fake_ydl.calls) == 1
+
+
+def test_a_refusal_that_might_pass_next_time_still_uses_the_whole_ladder(fake_ydl):
+    """The counterpart to the test above: a 403 is precisely the failure a
+    different client can get past, so nothing about it should short-circuit."""
+    fake_ydl.outcomes = ["403", "403", "403"]
+
+    with pytest.raises(downloader.DownloadError) as raised:
+        downloader.download_audio("vid00000001")
+
+    assert not isinstance(raised.value, downloader.VideoUnavailableError)
+    assert len(fake_ydl.calls) == 3
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "ERROR: [youtube] x: Video unavailable. This video is not available",
+        "ERROR: [youtube] x: The uploader has not made this video available in your country",
+        "ERROR: [youtube] x: Private video. Sign in if you've been granted access",
+        "ERROR: [youtube] x: This video is no longer available because the uploader has closed",
+        "ERROR: [youtube] x: Join this channel to get access to members-only content",
+        "ERROR: [youtube] x: Sign in to confirm your age",
+    ],
+)
+def test_settled_refusals_are_recognised(message):
+    assert downloader.is_permanent_failure(message)
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "ERROR: unable to download video data: HTTP Error 403: Forbidden",
+        "ERROR: [youtube] x: Sign in to confirm you're not a bot",
+        "ERROR: Unable to download webpage: timed out",
+        "",
+        None,
+    ],
+)
+def test_retryable_refusals_are_left_alone(message):
+    """The bot check especially: it means YouTube is refusing *us* right now,
+    not that the video is unplayable — treating it as settled would write off
+    a whole library's worth of perfectly good tracks during one bad minute."""
+    assert not downloader.is_permanent_failure(message)
+
+
 def test_quality_selects_the_capped_format(fake_ydl, tmp_path):
     fake_ydl.outcomes = [None]
     (tmp_path / "vid00000001.m4a").write_bytes(b"audio")

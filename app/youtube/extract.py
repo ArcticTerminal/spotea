@@ -218,6 +218,17 @@ def fetch_channel_all_videos(
         if not video_id or not VIDEO_ID_RE.match(video_id):
             continue
 
+        # YouTube still counts a video toward the tab's item total after it's
+        # gone private, been deleted, or lost its channel to a terminated
+        # account — but the flat listing comes back with no title for that
+        # slot, which no real video (even a live premiere with no duration
+        # yet) is ever missing. Same signal search.py's _video_result uses;
+        # skip it here rather than backfilling it as "Untitled" content that
+        # can only ever end up stuck on "Download failed".
+        title = entry.get("title")
+        if not title:
+            continue
+
         thumbnails = entry.get("thumbnails") or []
         thumbnail_url = thumbnails[-1]["url"] if thumbnails else None
         duration = entry.get("duration")
@@ -225,7 +236,7 @@ def fetch_channel_all_videos(
         entries.append(
             BackfillEntry(
                 video_id=video_id,
-                title=entry.get("title") or "Untitled",
+                title=title,
                 thumbnail_url=thumbnail_url,
                 duration_seconds=int(duration) if isinstance(duration, (int, float)) else None,
             )
