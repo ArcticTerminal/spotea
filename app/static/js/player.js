@@ -908,16 +908,20 @@ export async function prepareAudio(onStart, onFail) {
       // permission for nothing, which is the entire point: a backgrounded iOS
       // app is not allowed to start a paused element.
       reportPlayback("handoff-preroll", { contentId, readyState: audio.readyState });
-      // The audio never stopped, so no native `play` event fires here for
-      // setupMediaSession's listener to catch — it already fired once, back
-      // when this deck was still the standby one, and onPlayerEvent dropped
-      // it because it wasn't `#audio` yet. Without this, mediaSession.
-      // playbackState is left at "paused" (set by the outgoing track's own
-      // `pause`, which fires right before its `ended`) for the rest of this
-      // track's run — metadata is still correct, so the lock-screen widget
-      // looks fine, but iOS treats the session as not actively playing, which
-      // is what drops it out of the Dynamic Island.
-      if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "playing";
+      // Same reasoning as the loadedmetadata replay above, for the same
+      // reason: the audio never stopped, so no native `play` event fires here
+      // for anything bound through onPlayerEvent to catch — it already fired
+      // once, back when this deck was still the standby one, and
+      // onPlayerEvent dropped it because it wasn't `#audio` yet. Left
+      // unreplayed, the play/pause button and mini-bar icon are stuck showing
+      // "paused" (both are wired to onPlayerEvent("play"/"pause", ...), and
+      // the last real event either saw was the outgoing track's pre-`ended`
+      // `pause`) and mediaSession.playbackState is stuck at "paused" too —
+      // metadata is still correct (home/overlay.js's openPlayer sets it
+      // separately, every track), so the lock-screen widget looks fine, but
+      // iOS treats the session as not actively playing, which is what drops
+      // it out of the Dynamic Island specifically.
+      audio.dispatchEvent(new Event("play"));
       stopKeepAlive();
       watchPlaybackStarted(contentId);
     } else if (!resume || resume.wasPlaying) {

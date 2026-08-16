@@ -1033,17 +1033,23 @@ Three details are load-bearing:
   handoff looked, the deck was paused back at 0:00. `stopPreroll()` also
   restores the live deck's volume to `crossfadeBaseVolume`, in case it fires
   mid-fade (a manual pause or skip).
-- A running-preroll handoff sets `navigator.mediaSession.playbackState =
-  "playing"` **by hand**. No native `play` DOM event fires there for
-  `setupMediaSession`'s listener to catch — the incoming deck's real `play`
-  already fired earlier, while it was still `#audio-standby`, and
-  `onPlayerEvent` dropped it. Left unset, `playbackState` sits at `"paused"`
-  (set moments earlier by the outgoing track's own pre-`ended` `pause`) for
-  the whole next track. `mediaSession.metadata` is updated separately
-  (`home/overlay.js`'s `openPlayer`) and is unaffected, so the lock-screen
-  widget looks correct throughout — only the **Dynamic Island**, which
-  requires `playbackState: "playing"` and not just correct metadata, drops
-  out. Lock screen fine + Dynamic Island gone is the signature of this bug.
+- A running-preroll handoff replays a `play` event on the newly-adopted deck
+  (`audio.dispatchEvent(new Event("play"))` — same idiom as the
+  `loadedmetadata` replay just above it). No native `play` DOM event fires
+  there for anything wired through `onPlayerEvent("play", ...)` to catch —
+  the incoming deck's real `play` already fired earlier, while it was still
+  `#audio-standby`, and `onPlayerEvent` dropped it. Three consumers depend on
+  this and broke together the first time it was missed: the play/pause
+  button and the mini-bar icon (both stuck showing "paused" while audio
+  audibly played), and `navigator.mediaSession.playbackState` (stuck at
+  `"paused"`, set moments earlier by the outgoing track's own pre-`ended`
+  `pause`). `mediaSession.metadata` is updated separately
+  (`home/overlay.js`'s `openPlayer`, every track, unconditionally) and is
+  unaffected, so the lock-screen widget looks correct throughout — only the
+  **Dynamic Island**, which needs an actual `playbackState: "playing"`
+  transition and not just correct metadata, drops out. Lock screen fine +
+  Dynamic Island stuck + play button showing the wrong icon is the signature
+  of this bug.
 
 `handoff-adopt` reports `running`/`prerolled`/`paused`/`position` on every
 track change; it is the breadcrumb that caught the `pause`-before-`ended`
