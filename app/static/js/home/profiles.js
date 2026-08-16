@@ -76,19 +76,6 @@ function manageRowMarkup(profile) {
   `;
 }
 
-function renderSwitcherButton(profiles) {
-  const current = profiles.find((p) => p.is_current);
-  if (!current) return;
-
-  const nameEl = document.getElementById("profile-switcher-name");
-  if (nameEl) nameEl.textContent = current.name;
-
-  // Same current-profile name, mirrored into the collapsed hamburger menu's
-  // profile row (see the mobile-menu-btn breakpoint in style.css).
-  const mobileNameEl = document.getElementById("mobile-menu-profile-name");
-  if (mobileNameEl) mobileNameEl.textContent = current.name;
-}
-
 function renderProfileLists(profiles) {
   const switchList = document.getElementById("profiles-switch-list");
   if (switchList) switchList.innerHTML = profiles.map(switchRowMarkup).join("");
@@ -99,7 +86,6 @@ function renderProfileLists(profiles) {
 
 async function loadProfiles() {
   cachedProfiles = await fetchProfiles();
-  renderSwitcherButton(cachedProfiles);
   renderProfileLists(cachedProfiles);
 }
 

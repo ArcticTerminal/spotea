@@ -17,15 +17,6 @@ async function confirmedAction(message, confirmLabel, url, { method, errorMessag
 }
 
 export function setupStorage() {
-  document.getElementById("clear-storage")?.addEventListener("click", () =>
-    confirmedAction(
-      "Delete all downloaded audio? Your channels and saved items stay — you can download anything again by playing it.",
-      "Clear all",
-      "/storage",
-      { method: "DELETE", errorMessage: "Could not clear downloads" }
-    )
-  );
-
   document.getElementById("clear-recently-played")?.addEventListener("click", () =>
     confirmedAction(
       "Clear your recently played history? This only affects the Home shelf — nothing gets deleted.",
@@ -35,17 +26,33 @@ export function setupStorage() {
     )
   );
 
-  // Delegated: refreshStorageUsage rewrites this list wholesale, so per-button
-  // listeners wouldn't survive.
-  document.getElementById("storage-list")?.addEventListener("click", (event) => {
-    const btn = event.target.closest(".storage-remove");
-    if (!btn) return;
-    confirmedAction(
-      "Remove this download? You can get it back by playing it again.",
-      "Remove",
-      `/content/${btn.dataset.contentId}`,
-      { method: "DELETE", errorMessage: "Could not remove this download" }
-    );
+  // Delegated from #downloads-body, not #clear-storage/#storage-list directly:
+  // refreshFragments() (see fragments.js) rewrites this whole region's
+  // children — including #clear-storage and #storage-list themselves —
+  // wholesale on every refresh (e.g. after any download, from player.js), so
+  // listeners on those elements go stale as soon as one happens. #downloads-body
+  // is the fragment's swap target, not one of the swapped nodes, so it's the
+  // only element here guaranteed to still be in the DOM.
+  document.getElementById("downloads-body")?.addEventListener("click", (event) => {
+    if (event.target.closest("#clear-storage")) {
+      confirmedAction(
+        "Delete all downloaded audio? Your channels and saved items stay — you can download anything again by playing it.",
+        "Clear all",
+        "/storage",
+        { method: "DELETE", errorMessage: "Could not clear downloads" }
+      );
+      return;
+    }
+
+    const removeBtn = event.target.closest(".storage-remove");
+    if (removeBtn) {
+      confirmedAction(
+        "Remove this download? You can get it back by playing it again.",
+        "Remove",
+        `/content/${removeBtn.dataset.contentId}`,
+        { method: "DELETE", errorMessage: "Could not remove this download" }
+      );
+    }
   });
 }
 

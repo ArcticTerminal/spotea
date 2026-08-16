@@ -7,12 +7,17 @@
 
    `has_content` rather than a count: this branch only asks "does this profile
    have anything at all yet".
+
+   Every "See more" link renders `hidden` — home/library.js's wireScrollers()
+   only reveals one once it's confirmed that row actually overflows. Starting
+   visible and letting JS hide the non-scrollable ones after the fact flashes
+   a link that then vanishes on every load; starting hidden never does.
 #}
 {% if home_recent_channels %}
     <div class="shelf">
       <div class="shelf-header">
         <h2 class="shelf-title">Recently followed</h2>
-        <a class="shelf-see-more" href="/#library">See more ›</a>
+        <a class="shelf-see-more" href="/#library" hidden>See more ›</a>
       </div>
       <div class="channel-row" id="home-channel-row">
         {% for feed in home_recent_channels %}
@@ -32,7 +37,7 @@
     <div class="shelf">
       <div class="shelf-header">
         <h2 class="shelf-title">New uploads</h2>
-        <a class="shelf-see-more" href="/#new-uploads" data-detail-kind="new-uploads">See more ›</a>
+        <a class="shelf-see-more" href="/#new-uploads" data-detail-kind="new-uploads" hidden>See more ›</a>
       </div>
       {% if home_new_uploads %}
       <div class="shelf-row" id="home-new-uploads-row">
@@ -48,7 +53,7 @@
     <div class="shelf" id="home-shelf-recently-played" {% if not home_recently_played %}hidden{% endif %}>
       <div class="shelf-header">
         <h2 class="shelf-title">Recently played</h2>
-        <a class="shelf-see-more" href="/#recently-played" data-detail-kind="recently-played">See more ›</a>
+        <a class="shelf-see-more" href="/#recently-played" data-detail-kind="recently-played" hidden>See more ›</a>
       </div>
       <div class="shelf-row" id="home-recently-played-row">
         {% for item in home_recently_played %}
@@ -60,7 +65,7 @@
     <div class="shelf" id="home-shelf-favorites" {% if not home_favorites %}hidden{% endif %}>
       <div class="shelf-header">
         <h2 class="shelf-title">Favorites</h2>
-        <a class="shelf-see-more" href="/#favorites" data-detail-kind="favorites">See more ›</a>
+        <a class="shelf-see-more" href="/#favorites" data-detail-kind="favorites" hidden>See more ›</a>
       </div>
       <div class="shelf-row" id="home-favorites-row">
         {% for item in home_favorites %}
@@ -72,7 +77,7 @@
     <div class="shelf" id="home-shelf-saved" {% if not home_saved %}hidden{% endif %}>
       <div class="shelf-header">
         <h2 class="shelf-title">Saved for later</h2>
-        <a class="shelf-see-more" href="/#saved" data-detail-kind="saved">See more ›</a>
+        <a class="shelf-see-more" href="/#saved" data-detail-kind="saved" hidden>See more ›</a>
       </div>
       <div class="shelf-row" id="home-saved-row">
         {% for item in home_saved %}

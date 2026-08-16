@@ -584,10 +584,12 @@ html[data-active-tab="detail"] .tab-panel[data-tab-panel="detail"] {
   margin: 0 auto;
 }
 
-/* Settings gets more room than the shared 480px cap below — its row
-   descriptions wrap awkwardly at 480px. */
+/* Settings drops the cap entirely, same as Explore below — Home and
+   Library aren't wrapped in .channels-panel-inner at all, so they already
+   render at .layout's full 1100px, and Settings should match their width
+   instead of looking narrower than its neighbors on the tab bar. */
 #tab-settings .channels-panel-inner {
-  max-width: 680px;
+  max-width: none;
 }
 
 /* Explore drops the cap entirely rather than getting a wider one: Home and
@@ -1412,7 +1414,6 @@ html[data-active-tab="detail"] .tab-panel[data-tab-panel="detail"] {
 .channel-hero {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
   gap: 1.25rem;
   margin-bottom: 1.75rem;
 }
@@ -1437,9 +1438,77 @@ html[data-active-tab="detail"] .tab-panel[data-tab-panel="detail"] {
   flex: 0 0 auto;
 }
 
+/* min-width: 0 lets this shrink below the title's intrinsic width instead
+   of forcing the hero row to wrap — the avatar/title/Unfollow row keeps the
+   same shape whether the channel name is "Zei" or a full sentence.
+   display: flex + gap (rather than the title/paragraph's own margins)
+   controls the title-to-count spacing directly, since flex items don't
+   margin-collapse and a bare <p> would otherwise keep its own ~1em of
+   default browser margin on top of any gap we set. */
+.channel-hero-info {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.channel-hero-info .muted {
+  margin: 0;
+}
+
 .channel-hero-title {
-  margin: 0 0 0.3rem;
+  margin: 0;
   font-size: 1.4rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Narrow phones don't have room for avatar + title + Unfollow on one row
+   without truncating short titles too. Switch to a 2-column grid: the
+   avatar spans both rows on the left, title+count sit in row 1 and
+   Unfollow drops directly under the count in row 2 (instead of sharing
+   the first row or floating off on its own far-right line). */
+@media (max-width: 480px) {
+  .channel-hero {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    grid-template-rows: auto auto;
+    column-gap: 0.85rem;
+    row-gap: 0.2rem;
+  }
+
+  .channel-hero-avatar {
+    grid-row: 1 / 3;
+    align-self: center;
+    width: 84px;
+    height: 84px;
+  }
+
+  .channel-hero-avatar.channel-card-icon svg {
+    width: 34px;
+    height: 34px;
+  }
+
+  .channel-hero-info {
+    grid-row: 1;
+    grid-column: 2;
+  }
+
+  .channel-hero-title {
+    font-size: 1.15rem;
+  }
+
+  .channel-hero-unfollow {
+    grid-row: 2;
+    grid-column: 2;
+    justify-self: start;
+    /* .btn-quiet's own 1rem horizontal padding would otherwise indent the
+       "Unfollow" label past the title/count's flush-left text — pull the
+       button back by that padding so the label lines up with them. */
+    margin-left: -1rem;
+  }
 }
 
 /* A minimal, Spotify-playlist-style tracklist for the channel page — plain
@@ -1843,6 +1912,18 @@ html[data-active-tab="detail"] .tab-panel[data-tab-panel="detail"] {
   max-height: 80vh;
   display: flex;
   flex-direction: column;
+}
+
+/* Plain block wrapper around the downloads fragment (rendered separately
+   at GET /partials/downloads, then reused here) — without display: flex it
+   has no min-height: 0 to shrink into, so .storage-list's own
+   flex/overflow-y: auto below never had a bounded height to actually
+   scroll inside: the whole modal just grew past its max-height instead. */
+#downloads-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .modal-bulk-import {

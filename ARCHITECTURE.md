@@ -24,6 +24,7 @@ SQLite    yt-dlp (thread   feedparser
    ▼
 data/storage/{video_id}.{fmt} (Docker volume)
 data/avatars/{channel_id}.jpg (Docker volume)
+data/thumbnails/{video_id}.jpg (Docker volume)
 data/spotea.db                (Docker volume)
 ```
 
@@ -49,10 +50,13 @@ spotea/
     templating.py                # the one Jinja environment (filters included)
     page_context.py               # template context for index.html's
                                    # re-renderable regions, shared by the full
-                                    # page render and the fragment endpoints
+                                    # page render and the fragment endpoints;
+                                    # also queue_thumbnail_caching()
     feed_sync.py                  # network+DB feed refresh, shared by the
                                    # on-demand /feeds/refresh route and the
-                                   # background scheduler
+                                   # background scheduler; also
+                                   # cache_thumbnail() (see Channel avatars/
+                                   # Thumbnail caching in §5)
     scheduler.py                   # background feed-refresh loop, on
                                     # AppSettings.feed_refresh_interval_minutes
     formatting.py                   # Jinja filters (duration, file size),
@@ -185,6 +189,8 @@ spotea/
     storage/{video_id}.{AUDIO_FORMAT}
     avatars/{channel_id}.jpg              # cached channel avatars, re-served via
                                            # GET /avatars/{filename}
+    thumbnails/{video_id}.jpg             # lazily cached video thumbnails,
+                                           # re-served via GET /thumbnails/{filename}
     spotea.db
   Dockerfile
   docker-compose.yml
@@ -375,6 +381,7 @@ anywhere, so they're the *only* render of that markup, not a refresh of one
 | GET | `/settings` | Current profile's audio quality + the deployment's refresh interval |
 | PUT | `/settings` | Update either |
 | GET | `/avatars/{filename}` | Serve a cached channel avatar from our own origin |
+| GET | `/thumbnails/{filename}` | Serve a cached video thumbnail from our own origin |
 | GET | `/sw.js` | Service worker (no login required — installability checks may fetch it pre-session) |
 | GET | `/health` | Liveness check |
 
@@ -522,14 +529,14 @@ fetched-as-JSON and spliced into a shared grid.
 fires both `GET /feeds/search-videos?q=` and `GET /feeds/search?q=` in
 parallel (`Promise.allSettled`, so one slow/failed leg doesn't block the
 other) and renders two sections, Songs and Channels. `search_channels()`
-(`rss.py`) runs a `yt-dlp` flat extraction of YouTube's channel-filtered
+(`youtube/search.py`) runs a `yt-dlp` flat extraction of YouTube's channel-filtered
 search results and returns channel_id/title/thumbnail/subscriber count.
 Clicking "Add" on a channel result — or a URL pasted into `POST /feeds`
 directly — both hit the same add-feed path. Search-result thumbnails get
 the same same-origin avatar caching described below, so a channel seen in
 search and then followed doesn't re-fetch its avatar.
 
-**Search & play a song** — `search_videos()` (`rss.py`) is a separate,
+**Search & play a song** — `search_videos()` (`youtube/search.py`) is a separate,
 untyped YouTube search (no channel-type filter — Explore already wants mixed
 video results). Clicking a song result hits `POST /feeds/videos`
 (`add_single_video`), which resolves the video's authoritative channel via a
@@ -549,7 +556,7 @@ plays it.
 
 **Add feed** — `POST /feeds {channel_url}` → the user pastes any regular
 YouTube channel URL (`/@handle`, `/channel/UC..`, `/c/..`, `/user/..`), not a
-raw RSS link. `resolve_feed_url()` (in `rss.py`) resolves that to a
+raw RSS link. `resolve_feed_url()` (in `youtube/extract.py`) resolves that to a
 `channel_id`: a `/channel/UC..` URL is matched directly via regex (no
 network call), anything else goes through yt-dlp (`extract_flat`,
 `playlist_items=0` — fast, no video listing). An already-direct RSS feed
@@ -609,11 +616,36 @@ extraction, so `fetch_channel_avatar_url()` does a separate lightweight
 `yt-dlp` fetch of the channel page (`playlist_items=0`, no video listing).
 Hotlinking Google's CDN URL directly from the browser turned out to
 intermittently fail Chrome's Opaque Response Blocking (ORB) even for a URL
-that loaded fine moments earlier — so `downloader.download_avatar()` fetches
+that loaded fine moments earlier — so `images.download_avatar()` fetches
 the bytes once server-side and saves them to
 `data/avatars/{channel_id}.jpg`, re-served same-origin via
 `GET /avatars/{filename}` (path-traversal guarded). Channel search results
-get the same caching (`_cached_or_downloaded_avatar()` in `rss.py`).
+get the same caching (`_cached_or_downloaded_avatar()` in `youtube/search.py`).
+
+**Thumbnail caching** — The same same-origin problem exists for video
+thumbnails (`i*.ytimg.com`), but unlike avatars this cache is filled lazily,
+per render, not at fetch/refresh time. `page_context.queue_thumbnail_caching()`
+is called by every context function that renders content cards (Home shelves,
+Library's detail panel, …); for each item still pointing at a remote
+`ytimg.com` URL it queues a FastAPI `BackgroundTask` running
+`feed_sync.cache_thumbnail()`, deduped per request so the same video queued
+by two shelves in one response isn't fetched twice. That background task
+calls `images.download_thumbnail()` to save the bytes to
+`data/thumbnails/{video_id}.jpg`, then rewrites `Content.thumbnail_url` (for
+every row across every profile sharing that `video_id`) to the local
+`/thumbnails/{filename}` path — served same-origin, path-traversal guarded,
+same as avatars. Because caching only happens as a side effect of a render,
+the response that triggered it still goes out with the original remote URL;
+the local path only benefits the *next* render of that content, anywhere.
+`storage.unlink_thumbnail_if_unshared()` removes a cached thumbnail when its
+last referencing `Content` row is actually deleted (unfollow purge, Explore
+removal) — but unlike downloaded audio, cached thumbnails are **not** counted
+in `storage.collect_usage()`'s total, not swept for orphans by
+`storage.clear_all()`, and have no entry in `.env.example` — `THUMBNAILS_DIR`
+exists as a `Settings` field (default `/app/data/thumbnails`, code default
+only, same as `AVATARS_DIR`) but nothing currently surfaces this directory's
+size or offers to clear it, so it grows unboundedly for every video ever
+rendered, downloaded or not.
 
 **Backfill** — A one-time full-history scan (`_run_backfill()` in
 `routers/feeds.py`, background task), separate from routine refreshes (RSS
@@ -903,6 +935,9 @@ Environment variables (`.env`, documented in `.env.example`):
 - `STORAGE_DIR` — default `/app/data/storage`
 - `AVATARS_DIR` — default `/app/data/avatars` (not currently exposed in
   `.env.example`, code default only)
+- `THUMBNAILS_DIR` — default `/app/data/thumbnails` (same as `AVATARS_DIR`:
+  not currently exposed in `.env.example`, code default only — see
+  Thumbnail caching in §5)
 - `AUDIO_FORMAT` — default `m4a` (the `high`/`low` tiers' extraction target;
   matches YouTube's native audio stream for almost every video, so
   extraction is a fast remux rather than a re-encode — see Audio quality in

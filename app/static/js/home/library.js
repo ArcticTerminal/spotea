@@ -101,8 +101,14 @@ function wireScrollers() {
     // affordance for a gesture that does nothing. Card widths are fixed by
     // CSS, so only the row's own box size (i.e. viewport width) can change
     // whether it overflows, which is exactly what ResizeObserver reports.
+    // Same signal also decides whether this shelf's "See more" link is
+    // worth showing: if every card already fits, there's nothing more to
+    // scroll to.
+    const seeMore = row.closest(".shelf")?.querySelector(".shelf-see-more");
     const updateScrollable = () => {
-      row.classList.toggle("is-scrollable", row.scrollWidth > row.clientWidth + 1);
+      const isScrollable = row.scrollWidth > row.clientWidth + 1;
+      row.classList.toggle("is-scrollable", isScrollable);
+      if (seeMore) seeMore.hidden = !isScrollable;
     };
     updateScrollable();
     new ResizeObserver(updateScrollable).observe(row);
