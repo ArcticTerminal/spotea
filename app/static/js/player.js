@@ -116,111 +116,53 @@ export function reportPlayback(event, detail = {}) {
   }
 }
 
-// A one-second clip of 20Hz at roughly -40dBFS: a whole number of cycles, so
-// it loops without a click, and low and quiet enough to be inaudible in
-// practice. Not digital silence, deliberately — a browser deciding whether a
-// background tab is "playing audio" measures the signal, and an all-zero
-// buffer can read as nothing playing, which is the entire thing this is for.
-function buildKeepAliveClip() {
-  const sampleRate = 8000;
-  const frames = sampleRate;
-  const dataBytes = frames * 2;
-  const bytes = new Uint8Array(44 + dataBytes);
-  const view = new DataView(bytes.buffer);
-  const ascii = (offset, text) => {
-    for (let i = 0; i < text.length; i += 1) bytes[offset + i] = text.charCodeAt(i);
-  };
-  ascii(0, "RIFF");
-  view.setUint32(4, 36 + dataBytes, true);
-  ascii(8, "WAVEfmt ");
-  view.setUint32(16, 16, true); // PCM fmt chunk size
-  view.setUint16(20, 1, true); // PCM, uncompressed
-  view.setUint16(22, 1, true); // mono
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, sampleRate * 2, true); // byte rate
-  view.setUint16(32, 2, true); // block align
-  view.setUint16(34, 16, true); // bits per sample
-  ascii(36, "data");
-  view.setUint32(40, dataBytes, true);
-  for (let i = 0; i < frames; i += 1) {
-    view.setInt16(44 + i * 2, Math.round(Math.sin((2 * Math.PI * 20 * i) / sampleRate) * 300), true);
-  }
-  return URL.createObjectURL(new Blob([bytes], { type: "audio/wav" }));
-}
-
-let keepAliveUrl = null;
-
-/**
- * Keeps the page's audio session open through a gap in real playback —
- * while a track downloads, and across the handoff from one track to the next.
- *
- * A mobile browser leaves a backgrounded page alone for as long as it's
- * playing audio, and starts throttling its timers and deferring its network
- * the moment it isn't. Every gap here is therefore self-inflicted: the app
- * stops the audio, then depends on a setTimeout poll and a fetch to start it
- * again — the two things it just gave the browser permission to freeze. That
- * is why a track would sit there doing nothing until the app was brought to
- * the foreground, at which point the frozen work resumed and it started
- * playing "by itself".
- *
- * Playing something inaudible for the length of the gap costs nothing and
- * removes the whole class of failure. It runs on its own element, so the
- * transport's listeners never see it — see _player_controls.html.
- */
-export function startKeepAlive() {
-  const keepAlive = document.getElementById("keepalive");
-  if (!keepAlive) return;
-  if (!keepAliveUrl) keepAliveUrl = buildKeepAliveClip();
-  if (!keepAlive.src) keepAlive.src = keepAliveUrl;
-  // Already holding the session open — leave it alone. Seeking a playing
-  // element back to 0 makes it stop for the length of the seek, which is
-  // exactly the silence this exists to prevent.
-  if (!keepAlive.paused) return;
-  // Restarted rather than resumed: a paused element that has been sitting
-  // for a while may have had its buffer discarded, and this costs nothing.
-  keepAlive.currentTime = 0;
-  // Reported because this element is also the cleanest probe there is for the
-  // rule the pre-roll below is built around: it is asked to start at exactly
-  // the moments nothing else is playing. A `keepalive-requested` with no
-  // `keepalive-playing` after it, while hidden, is a backgrounded app being
-  // refused a start outright rather than merely being slow.
-  reportPlayback("keepalive-requested");
-  keepAlive.addEventListener("playing", () => reportPlayback("keepalive-playing"), { once: true });
-  keepAlive.play().catch((err) => {
-    // Blocked before the first user gesture, which is fine — nothing is
-    // waiting on audio at that point either.
-    reportPlayback("keepalive-rejected", { error: String(err?.name || err) });
-  });
-}
-
-export function stopKeepAlive() {
-  document.getElementById("keepalive")?.pause();
-}
 
 // ---------------------------------------------------------------------------
 // Playback element
 //
-// A single <audio> element, its src reassigned per track — the ordinary way
-// to do this, and the only way that keeps iOS's Now Playing/Dynamic Island
-// system unambiguous.
+// One <audio> element, its src reassigned per track. Single is meant
+// literally: it is the only <audio> in the document, and that is a hard
+// constraint rather than a tidiness preference — see below.
 //
-// This used to be two interchangeable decks, pre-rolling the next track on a
-// second element a few seconds before the current one ended so a background
-// handoff never had to call play() on a paused element (which iOS silently
-// refuses while backgrounded). It genuinely worked around that refusal, but
-// traded it for a worse, better-documented problem: Apple's own docs say
-// "all devices running iOS are limited to playback of a single audio or
-// video stream at any time [...] playing multiple simultaneous audio streams
-// is also not supported" — and having two elements truly playing at once
-// (which the crossfade needed) is exactly that. In practice it meant iOS's
-// Now Playing system couldn't tell which element was the "real" one:
-// Dynamic Island stopped updating on track change, the play/pause button and
-// lock-screen controls fell out of sync, and the two tracks were audibly
-// both there at once in a way that wasn't just the intended crossfade.
-// Reverted for a single element, which every one of those systems tracks
-// unambiguously — at the cost of the one thing the two-deck version bought:
-// a track that runs out while the app is backgrounded doesn't auto-advance
-// until the app is foregrounded again, same as before that work started.
+// Two rounds of work went into making a track that ends while the app is
+// backgrounded start the next one, and both were reverted. This comment is
+// the record of what was measured, so it isn't re-derived a third time.
+//
+// **A backgrounded iOS app cannot start a new media resource.** Not "is slow
+// to", not "needs a nudge" — the element loads its metadata, serves real
+// bytes (the server logs 206 Partial Content), and then simply stops at
+// readyState 1 and never reaches HAVE_FUTURE_DATA. play() neither resolves
+// nor rejects. Bring the app to the foreground and it starts, from 0:00.
+//
+// Two things were tried against that, in order:
+//
+//   - **Two interchangeable decks**, pre-rolling the next track on a second
+//     element a few seconds early so the handoff never had to start anything.
+//     It worked. It also put two elements genuinely playing at once, which
+//     Apple's own docs rule out ("all devices running iOS are limited to
+//     playback of a single audio or video stream at any time [...] playing
+//     multiple simultaneous audio streams is also not supported"), and iOS's
+//     Now Playing system stopped being able to tell which element was real:
+//     Dynamic Island frozen on the previous track, lock-screen play/pause
+//     stuck, audible overlap.
+//
+//   - **A keep-alive clip** on a second element, looping something inaudible
+//     across the gap on the theory that a page which never stops playing
+//     keeps its permission to play. It does not. The log has the clip
+//     rendering (`keepalive-playing`, hidden) 3 seconds before the real
+//     track was still sitting at readyState 1 — permission was refused with
+//     something audibly playing on the very same page. All it bought was the
+//     same Now Playing ambiguity as the decks, in a smaller package, and it
+//     was the reason the lock screen stayed wrong long after the decks were
+//     gone.
+//
+// So: one element, no second stream, and no background auto-advance. A track
+// that runs out while the app is off screen stops there and resumes when the
+// app is opened. The only architecture that could satisfy both is Media
+// Source Extensions — one element whose playback never stops between tracks,
+// so nothing ever has to be *started* in the background. That is a materially
+// bigger project (server-side segmenting, a continuous timeline across track
+// boundaries) and is not attempted here.
 // ---------------------------------------------------------------------------
 
 /** The element driving the transport. */
@@ -276,13 +218,6 @@ function unlockAudio() {
     audio.play().catch(() => {});
     audio.pause();
   }
-
-  // The keep-alive element needs the same treatment for the same reason:
-  // every one of its start() calls happens on a download poll or a track
-  // handoff, never inside a gesture. Its own clip is the throwaway source
-  // here, so unlike the decks there's nothing to swap back out afterwards.
-  startKeepAlive();
-  stopKeepAlive();
 }
 
 // Range inputs can't style their "already played" portion natively, so paint it
@@ -425,21 +360,44 @@ export function setupPlayer() {
   setupMediaSession();
 }
 
+/**
+ * Publishes whatever the player is currently showing to the OS's Now Playing
+ * surface — iOS's lock screen and Dynamic Island, Android's notification
+ * shade.
+ *
+ * Read out of the DOM rather than taking the track as an argument so that the
+ * two callers that matter can't disagree: home/overlay.js publishes on a
+ * track change (setupMediaSession only ever runs once, at page load, when
+ * there is no track yet), and setupMediaSession re-publishes the moment
+ * playback actually starts.
+ *
+ * That second call is not redundant. iOS only reliably accepts a Now Playing
+ * update while the page genuinely holds the audio session, and a track change
+ * publishes its metadata during the silent gap before playback — the one
+ * moment the page holds nothing. Publishing again on `playing` is the same
+ * information sent at a moment the OS is guaranteed to take it, which is what
+ * makes the Dynamic Island pick up a new track instead of sitting on the
+ * previous one.
+ */
+export function applyNowPlayingMetadata() {
+  if (!("mediaSession" in navigator)) return;
+  navigator.mediaSession.metadata = new MediaMetadata({
+    title: document.querySelector(".player-title")?.textContent || "",
+    artist: document.querySelector(".player-channel")?.textContent || "",
+    artwork: (() => {
+      const src = document.getElementById("player-art-img")?.src;
+      return src ? [{ src }] : [];
+    })(),
+  });
+}
+
 // Lock-screen/notification-shade transport controls and Bluetooth/headset
 // buttons all route through this — without it, playback is only
 // controllable while this tab is in the foreground.
 function setupMediaSession() {
   if (!("mediaSession" in navigator)) return;
 
-  const title = document.querySelector(".player-title")?.textContent || "";
-  const artist = document.querySelector(".player-channel")?.textContent || "";
-  const artworkSrc = document.querySelector(".player-art img")?.src;
-
-  navigator.mediaSession.metadata = new MediaMetadata({
-    title,
-    artist,
-    artwork: artworkSrc ? [{ src: artworkSrc }] : [],
-  });
+  applyNowPlayingMetadata();
 
   navigator.mediaSession.setActionHandler("play", () => activeAudio().play().catch(() => {}));
   navigator.mediaSession.setActionHandler("pause", () => activeAudio().pause());
@@ -455,31 +413,42 @@ function setupMediaSession() {
     if (details.seekTime != null) activeAudio().currentTime = details.seekTime;
   });
 
-  onPlayerEvent("play", () => {
-    navigator.mediaSession.playbackState = "playing";
-  });
-  onPlayerEvent("pause", () => {
-    navigator.mediaSession.playbackState = "paused";
-  });
+  // Whether audio is genuinely coming out of the element, as opposed to
+  // having been asked for.
+  //
+  // `audio.paused` answers the wrong question. play() flips it to false the
+  // instant it is called, and a backgrounded iOS app is free to accept that
+  // call and then never render a thing — the refusal is silent, the promise
+  // neither resolves nor rejects. Driving the lock screen off `paused` is
+  // therefore how it ends up showing a Pause button, and an elapsed-time
+  // clock ticking forward, over total silence. Only `playing` means sound.
+  //
+  // Deliberately not cleared on `waiting`: an ordinary buffering hitch would
+  // otherwise flap the lock screen between states mid-track.
+  let rendering = false;
+  const setRendering = (on) => {
+    rendering = on;
+    navigator.mediaSession.playbackState = on ? "playing" : "paused";
+  };
 
   const syncPositionState = () => {
     const audio = activeAudio();
     if (!audio.duration || Number.isNaN(audio.duration)) return;
     try {
       // playbackRate has to be explicit, not left to its default of 1: the OS
-      // extrapolates the lock-screen's displayed elapsed time locally from
-      // this rate, on its own clock, independent of playbackState. loadedmetadata
-      // (one of this function's two callers) fires as soon as the resource's
-      // metadata is available, which — unlike actually rendering audio — iOS
-      // permits even while backgrounded and even though play() itself is being
-      // silently refused (see the single-element notes above). Without this, a
-      // background handoff into a track iOS won't yet start reports metadata,
+      // extrapolates the lock screen's displayed elapsed time locally from
+      // this rate, on its own clock, independent of playbackState.
+      // loadedmetadata (one of this function's two callers) fires as soon as
+      // the resource's metadata is available, which — unlike actually
+      // rendering audio — iOS permits even while backgrounded and even
+      // though play() itself is being silently refused. Without this, a
+      // background handoff into a track iOS won't start reports metadata,
       // that call defaults playbackRate to 1, and the lock screen's clock
-      // visibly ticks forward for a track that is, in fact, still paused.
+      // visibly ticks forward for a track nobody can hear.
       navigator.mediaSession.setPositionState({
         duration: audio.duration,
         position: audio.currentTime,
-        playbackRate: audio.paused ? 0 : 1,
+        playbackRate: rendering ? 1 : 0,
       });
     } catch (err) {
       /* Throws if position momentarily exceeds duration mid-seek; harmless to skip. */
@@ -487,6 +456,29 @@ function setupMediaSession() {
   };
   onPlayerEvent("loadedmetadata", syncPositionState);
   onPlayerEvent("timeupdate", syncPositionState);
+
+  onPlayerEvent("pause", () => setRendering(false));
+  onPlayerEvent("ended", () => setRendering(false));
+
+  // `play` fires when playback is *asked for*; `playing` fires when audio is
+  // actually coming out. Only the second one is a moment iOS is holding the
+  // audio session, so it's the only moment a Now Playing update is certain to
+  // be accepted — see applyNowPlayingMetadata. Everything the OS shows gets
+  // re-asserted here together, because a track change publishes all of it
+  // during the silent gap beforehand, where any of it may have been dropped.
+  onPlayerEvent("playing", () => {
+    setRendering(true);
+    applyNowPlayingMetadata();
+    syncPositionState();
+    // The one thing the log couldn't previously settle: whether a lock screen
+    // showing the wrong control is this side getting the state wrong, or iOS
+    // ignoring a state this side had right all along.
+    reportPlayback("now-playing", {
+      contentId: document.getElementById("player-root")?.dataset.contentId,
+      playbackState: navigator.mediaSession.playbackState,
+      paused: activeAudio().paused,
+    });
+  });
 }
 
 // Browsers speculatively load links (prerender runs the page's JS) and a
@@ -561,19 +553,6 @@ export async function prepareAudio(onStart, onFail) {
     const audio = activeAudio();
     audio.src = streamUrl;
 
-    // Deliberately NOT stopped here, which is where it used to be. The
-    // keep-alive is what holds the audio session — and with it, on iOS, the
-    // whole app — open across the gap, and the gap does not end when
-    // playback is *asked for*, it ends when playback actually starts.
-    // Pausing first left the page silent for exactly the window a media load
-    // has to happen in, which is the window a backgrounded iOS app gets
-    // suspended in.
-    //
-    // Bound straight to the element rather than through onPlayerEvent: this
-    // is a one-shot belonging to this one prepare, on the deck that is live
-    // right now, and it must not survive to fire again on some later track.
-    audio.addEventListener("playing", stopKeepAlive, { once: true });
-
     if (onStart) onStart();
 
     const resume = consumeResumeState(contentId);
@@ -591,10 +570,7 @@ export async function prepareAudio(onStart, onFail) {
       );
       watchPlaybackStarted(contentId);
     } else {
-      // Restored deliberately paused: nothing is going to start, so nothing
-      // should be holding the session open waiting for it.
       audio.pause();
-      stopKeepAlive();
     }
   };
 
@@ -605,12 +581,6 @@ export async function prepareAudio(onStart, onFail) {
     prepareText.textContent = message;
     transport.classList.add("is-disabled");
     reportPlayback("prepare-failed", { contentId, message, permanent });
-    // The keep-alive is deliberately left running. onFail's usual answer is
-    // to skip straight on to the next track, and silencing the app here
-    // would put a gap in exactly the handoff that most needs to not have one
-    // — this is reached with nobody watching, which is the whole reason the
-    // skip exists. Whoever decides *not* to skip stops it instead; see
-    // home/overlay.js.
     if (onFail) onFail(message, { permanent });
   };
 
@@ -632,10 +602,6 @@ export async function prepareAudio(onStart, onFail) {
   prepare.hidden = false;
   transport.classList.add("is-disabled");
   prepareText.textContent = "Preparing audio…";
-  // Everything from here to startPlayback runs on a poll and a fetch, both
-  // of which a backgrounded browser is free to freeze while nothing is
-  // playing — see startKeepAlive.
-  startKeepAlive();
 
   if (root.dataset.status !== "downloading") {
     // 409 just means another tab already started it; keep polling either way.

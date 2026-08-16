@@ -977,16 +977,60 @@ via Media Source Extensions, appending each track's bytes into one continuous
 buffer rather than swapping `src`. That's a materially bigger project, not
 attempted here.
 
-The keep-alive (`startKeepAlive`, a looping inaudible clip on its own
-`#keepalive` element) covers the gap while a track is still downloading —
-without it, the page's only excuse to stay awake in the background
-disappears the moment the previous track's audio stops, and a backgrounded
-iOS app is suspended the instant it stops emitting audio: no timers, no
-fetches, and the download-status poll driving `prepareAudio` would simply
-never run again until the app is reopened. It's stopped on the live
-element's `playing` event, never before playback actually starts: pausing
-it first left the page silent for exactly the window a media load has to
-happen in, which is the window iOS suspends in.
+**A backgrounded iOS app cannot start a new media resource.** Not "is slow
+to", not "needs a nudge". The element loads its metadata, the server serves
+real bytes (`GET /content/{id}/stream` logs `206 Partial Content`), and then
+it simply stops at `readyState 1` and never reaches `HAVE_FUTURE_DATA`.
+`play()` neither resolves nor rejects. Foreground the app and it starts, from
+0:00. Two things were tried against this and both were reverted:
+
+- **Two interchangeable decks** (`#audio` / `#audio-standby`), pre-rolling the
+  next track a few seconds early so the handoff never had to start anything.
+  It worked — and put two elements genuinely playing at once, which Apple's
+  docs rule out outright, with the Now Playing consequences described above.
+- **A keep-alive clip** on a second `#keepalive` element, looping something
+  inaudible across the gap, on the theory that a page which never stops
+  playing keeps its permission to play. **It does not.** The breadcrumb log
+  has the clip rendering (`keepalive-playing`, hidden) three seconds before
+  the real track was still sitting at `readyState 1` — permission refused
+  with something audibly playing on the very same page:
+
+  ```
+  track-ended         hidden   44194  next=44195
+  keepalive-requested hidden                        (+0.005s)
+  play-requested      hidden   44195  readyState=0  (+0.17s)
+  keepalive-playing   hidden                        (+0.18s)  <- clip renders
+  playback-stalled    hidden   44195  readyState=1  (+3.2s)   <- track never does
+  ```
+
+  All it bought was the same Now Playing ambiguity as the decks, in a smaller
+  package, and it was why the lock screen stayed wrong long after the decks
+  were gone. Removed entirely.
+
+So: one element, no second stream, and **no background auto-advance** — a
+track that runs out while the app is off screen stops there and resumes when
+the app is opened. The only architecture that satisfies both is Media Source
+Extensions (one element whose playback never stops between tracks, so nothing
+ever has to be *started* in the background), which is a materially bigger
+project and is not attempted here.
+
+**Now Playing is published twice per track, on purpose.** iOS only reliably
+accepts an update while the page genuinely holds the audio session, and a
+track change publishes its metadata during the silent gap *before* playback —
+the one moment the page holds nothing, and the reason a new track could leave
+the Dynamic Island sitting on the previous one. So `openPlayer` publishes
+(`applyNowPlayingMetadata`) as the track loads, and `setupMediaSession`
+re-publishes on `playing` as above — not `play`, which only means playback
+was *asked* for.
+
+**`playbackState` and `playbackRate` track whether sound is actually coming
+out**, not `audio.paused`. `play()` flips `paused` to false the instant it is
+called, so driving the lock screen off it reports a playing track through the
+entire ~600ms load, and through a refusal that never ends — a Pause button
+and a clock ticking forward over silence. `setupMediaSession` keeps a
+`rendering` flag set on `playing` and cleared on `pause`/`ended` (not on
+`waiting`, so a buffering hitch doesn't flap the lock screen mid-track), and
+both the state and `setPositionState`'s rate come from that.
 
 That leaves one real seam: the audio element still doesn't survive a genuine
 full document reload (an actual F5, reopening the tab, or landing via one of

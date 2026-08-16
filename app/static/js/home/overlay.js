@@ -14,12 +14,11 @@ import { api, formatDuration, showToast } from "../core.js";
 import { refreshFragments } from "../fragments.js";
 import {
   activeAudio,
+  applyNowPlayingMetadata,
   onPlayerEvent,
   paintRange,
   prepareAudio,
   reportPlayback,
-  startKeepAlive,
-  stopKeepAlive,
   whenVisible,
 } from "../player.js";
 import { clearResumeState, readResumeState } from "../resume.js";
@@ -123,14 +122,6 @@ export async function openPlayer(contentId, { expanded = true, requireVisible = 
     return;
   }
 
-  // A queue handoff (auto-advance, or a lock-screen/headset next) can happen
-  // with the app off screen, where the page's only protection from having
-  // its timers throttled and its fetches deferred is that it's playing
-  // audio — which, at this exact moment, it has just stopped doing. Hold the
-  // session open across the switch. First and synchronously: the gap starts
-  // the instant the previous track ended, not once we get around to it.
-  if (!requireVisible) startKeepAlive();
-
   // Switching tracks (or starting fresh): stop whatever's currently loaded
   // immediately, rather than leaving it playing underneath the new track's
   // own "Downloading audio…" state until that one's ready.
@@ -157,8 +148,7 @@ export async function openPlayer(contentId, { expanded = true, requireVisible = 
   upcomingTrack = null;
 
   // Only when there was nothing prepared — this is the await the cache
-  // exists to avoid, and reaching it is fine (the keep-alive above covers
-  // it), just slower.
+  // exists to avoid, and reaching it is fine, just slower.
   if (!data) {
     const res = await api(`/content/${contentId}`);
     if (!res.ok) {
@@ -170,9 +160,6 @@ export async function openPlayer(contentId, { expanded = true, requireVisible = 
       // a permanently invalid record would re-trigger this same failure on
       // every page load.
       clearResumeState();
-      // Nothing is going to start playing after this, so nothing should be
-      // holding the audio session open waiting for it.
-      stopKeepAlive();
       return;
     }
     data = res.data;
@@ -209,14 +196,14 @@ export async function openPlayer(contentId, { expanded = true, requireVisible = 
   // setupMediaSession (player.js) only reads the DOM once, at page-load time
   // — on index.html that's before any track has ever been opened, so it can't
   // be what keeps lock-screen/notification metadata current across repeated
-  // openPlayer() calls. This has to do it explicitly, every time.
-  if ("mediaSession" in navigator) {
-    navigator.mediaSession.metadata = new MediaMetadata({
-      title: data.title,
-      artist: data.channel_title || "",
-      artwork: data.thumbnail_url ? [{ src: data.thumbnail_url }] : [],
-    });
-  }
+  // openPlayer() calls. This has to do it explicitly, every time. It runs
+  // after the writes above because it reads the same DOM they just filled in.
+  //
+  // This publish happens in the silent gap before playback, which iOS may
+  // simply drop; player.js re-publishes on `playing` for that reason. Both
+  // are needed — the OS has to be told before the track starts (so the lock
+  // screen isn't briefly showing the previous one) and again once it has.
+  applyNowPlayingMetadata();
 
   // The mini bar always surfaces — only whether the full "now playing" view
   // is what's on top depends on the caller (resumeOverlayIfNeeded passes
@@ -246,22 +233,13 @@ export async function openPlayer(contentId, { expanded = true, requireVisible = 
         // one watching to hit "next". Skip past it instead, same as the
         // queue running out normally does nothing when there's no next id.
         //
-        // prepareAudio deliberately leaves the keep-alive running through a
-        // failure so a skip doesn't have to start from silence — which makes
-        // every path here that gives up instead responsible for stopping it,
-        // or the app would sit holding an audio session open for playback
-        // that is never coming.
         const upcoming = peekNextId();
-        if (upcoming == null) {
-          stopKeepAlive();
-          return;
-        }
+        if (upcoming == null) return;
 
         if (permanent) {
           consecutiveUnavailableSkips += 1;
           if (consecutiveUnavailableSkips >= MAX_CONSECUTIVE_UNAVAILABLE_SKIPS) {
             showToast("Too many unavailable tracks in a row — stopping here");
-            stopKeepAlive();
             return;
           }
           showToast(`"${data.title}" isn't available on YouTube — skipping`);
@@ -274,7 +252,6 @@ export async function openPlayer(contentId, { expanded = true, requireVisible = 
           // See MAX_CONSECUTIVE_AUTO_SKIPS above — leave this one showing its
           // real error rather than trying yet another track.
           showToast("Several tracks in a row failed — stopping instead of skipping further");
-          stopKeepAlive();
           return;
         }
         showToast(`Couldn't play "${data.title}" — skipping to the next track`);
@@ -403,7 +380,6 @@ export function closePlayer() {
   audio.pause();
   audio.removeAttribute("src");
   audio.load();
-  stopKeepAlive();
 
   const root = document.getElementById("player-root");
   root.dataset.contentId = "";

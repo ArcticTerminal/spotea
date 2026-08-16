@@ -16,17 +16,13 @@
    stays in the two callers: the page renders them from `content`
    server-side, the overlay starts them empty and home/overlay.js fills them in.
 #}
+    {# The only <audio> in the document, and it has to stay that way — two of
+       them are two media sessions competing to be the one iOS shows in Now
+       Playing, and it picks wrong: lock screen stuck on Play, no waveform in
+       the Dynamic Island, on a track you can hear. A pre-roll deck and an
+       inaudible keep-alive clip have each been tried here and each caused
+       exactly that. See player.js's "Playback element" note. #}
     <audio id="audio" preload="auto"></audio>
-
-    {# Plays a looping, effectively-inaudible clip while a track is
-       downloading and nothing is otherwise playing — see player.js's
-       keep-alive. A backgrounded iOS app is suspended the moment it stops
-       emitting audio, and a suspended process runs nothing at all: no
-       timers, no fetches. This is its own element rather than reusing
-       #audio so none of the transport's listeners (seek bar, play icon,
-       mini-player progress, media session) have to learn to ignore a source
-       that isn't the track. #}
-    <audio id="keepalive" loop preload="auto"></audio>
 
     <div id="prepare-state" class="prepare-state" hidden>
       <span class="spinner" role="status"></span>
