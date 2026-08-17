@@ -8,6 +8,7 @@ import {
   refreshRecommendations,
   setupExploreSearch,
   setupRecommendations,
+  setupSmartPlaylistsShelf,
 } from "../home/explore.js";
 import {
   setupHomeChannels,
@@ -45,6 +46,7 @@ handleInitialRoute();
 setupSaveButtons();
 setupExploreSearch();
 setupRecommendations();
+setupSmartPlaylistsShelf();
 setupDownloadsOverlay();
 setupBulkImportOverlay();
 setupBulkImport();

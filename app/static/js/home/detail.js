@@ -25,11 +25,20 @@ import { activate } from "./tabs.js";
 const REMOTE_KINDS = ["yt-channel", "yt-playlist"];
 const isRemoteKind = (kind) => REMOTE_KINDS.includes(kind);
 
+// Local (non-remote) kinds whose entry point still lives on Explore rather
+// than Library — the smart-playlist shelf (see page_context.py's
+// PLAYLIST_KINDS). "saved" isn't here even though Explore's "Saved Mix"
+// card also opens it: that card reuses Library's own "Saved for later"
+// list verbatim rather than a distinct smart playlist, so it stays
+// Library-owned.
+const EXPLORE_OWNED_LOCAL_KINDS = ["on-repeat", "recently-added", "forgotten-favorites"];
+
 // Which tab this view belongs to. Drives both the no-history fallback in
 // closeDetail and, via a data attribute on <html>, which tab button stays
 // visually selected while the panel is open (see style.css) — the detail
 // panel has no .tab-btn of its own.
-const detailHome = (kind) => (isRemoteKind(kind) ? "explore" : "library");
+const detailHome = (kind) =>
+  isRemoteKind(kind) || EXPLORE_OWNED_LOCAL_KINDS.includes(kind) ? "explore" : "library";
 
 // What's currently open, so a pagination click knows what to re-fetch
 // without re-parsing the URL, and so "Back to Library" knows whether there's

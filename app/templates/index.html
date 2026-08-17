@@ -26,7 +26,19 @@
     // resolves to, not a tab switch of its own.
     (function () {
       var VALID_TABS = ["home", "library", "explore", "settings"];
-      var PLAYLIST_KINDS = ["favorites", "saved", "new-uploads", "recently-played"];
+      var PLAYLIST_KINDS = [
+        "favorites",
+        "saved",
+        "new-uploads",
+        "recently-played",
+        "on-repeat",
+        "recently-added",
+        "forgotten-favorites",
+      ];
+      // Explore-owned even though they're not remote (yt-*) — see
+      // home/detail.js's EXPLORE_OWNED_LOCAL_KINDS for why "saved" (Explore's
+      // "Saved Mix" card) isn't included here: it reuses Library's own list.
+      var EXPLORE_OWNED_LOCAL_KINDS = ["on-repeat", "recently-added", "forgotten-favorites"];
       var DETAIL_PREFIXES = ["channel/", "yt-channel/", "yt-playlist/"];
       var hash = location.hash.slice(1).split("?")[0];
       var isDetail =
@@ -49,7 +61,9 @@
       // selected for a frame.
       if (isDetail) {
         document.documentElement.dataset.detailHome =
-          hash.indexOf("yt-") === 0 ? "explore" : "library";
+          hash.indexOf("yt-") === 0 || EXPLORE_OWNED_LOCAL_KINDS.indexOf(hash) !== -1
+            ? "explore"
+            : "library";
       }
     })();
   </script>
@@ -173,9 +187,7 @@
           </div>
           <div id="recommendations-body"></div>
 
-          <!-- Smart playlist shelf (On Repeat / Recently Added / Forgotten
-               Favorites / Saved Mix, computed from existing play/favorite/
-               saved data) goes here once that feature ships. -->
+          {% include "_smart_playlists_shelf.html" %}
         </div>
 
       </div>

@@ -373,3 +373,33 @@ def test_downloading_a_track_does_not_record_it_as_played(client, db_session, tm
 
     db_session.refresh(item)
     assert item.last_played_at is None
+    assert item.play_count == 0
+
+
+def test_streaming_a_track_increments_its_play_count(client, db_session, tmp_path):
+    """What the "On Repeat" smart playlist orders by — last_played_at alone
+    only says *when*, not how often."""
+    item = _seed_ready(db_session, tmp_path)
+    assert item.play_count == 0
+
+    client.get(f"/content/{item.id}/stream")
+    client.get(f"/content/{item.id}/stream")
+
+    db_session.refresh(item)
+    assert item.play_count == 2
+
+
+def test_clearing_recently_played_does_not_reset_play_count(client, db_session, tmp_path):
+    """Deliberate: clearing the *history* shelf shouldn't also erase the
+    play-frequency signal On Repeat depends on."""
+    item = _seed_ready(db_session, tmp_path)
+    client.get(f"/content/{item.id}/stream")
+    db_session.refresh(item)
+    assert item.play_count == 1
+
+    res = client.delete("/content/recently-played")
+    assert res.status_code == 200
+
+    db_session.refresh(item)
+    assert item.last_played_at is None
+    assert item.play_count == 1

@@ -155,6 +155,19 @@ def test_report_playback_only_sends_the_unexpected_events() -> None:
     )
 
 
+def test_explore_recommendations_split_by_duration_at_ten_minutes() -> None:
+    """Measured live: Music profile 11/11 recommended videos ran over 10
+    minutes; Podcast 10/12, median 2:18:19. Splitting onto a "Long form"
+    shelf instead of filtering it out matters specifically for the Podcast
+    profile — its own interests (linux, devops) make hour-long content the
+    *correct* result, not noise."""
+    source = (JS_DIR / "home" / "explore.js").read_text()
+
+    assert "const LONG_FORM_THRESHOLD_SECONDS = 10 * 60;" in source
+    assert 'recShelfHtml("Contents", contents, recVideoCardHtml)' in source
+    assert 'recShelfHtml("Long form", longForm, recVideoCardHtml)' in source
+
+
 def test_wire_scrollers_does_not_leak_a_listener_or_observer_per_row() -> None:
     """wireScrollers() runs again after every fragment swap (Home/Library
     rows get replaced wholesale), and it used to create a brand new
@@ -221,3 +234,57 @@ def test_refresh_fragments_default_sweep_does_not_include_the_downloads_body() -
         "the on-demand downloads-body refresh (called on #open-downloads and "
         "from settings.js's in-modal actions) is gone"
     )
+
+
+SMART_PLAYLIST_KINDS = ["on-repeat", "recently-added", "forgotten-favorites"]
+
+
+def test_new_playlist_kinds_are_wired_into_all_three_routing_locations() -> None:
+    """core.js's classifyHash, index.html's pre-paint script, and
+    home/detail.js's detailHome each hand-roll their own view of which hash
+    values are a "virtual playlist" — core.js's own comment on PLAYLIST_KINDS
+    calls out index.html as "the one place everything after that first paint
+    agrees with it". A kind added to one and not the others routes fine after
+    module load but mis-paints (or 404s) on the very first frame, or leaves
+    the wrong tab button selected under the detail panel."""
+    core_source = CORE_JS.read_text()
+    index_source = (Path("app/templates") / "index.html").read_text()
+    detail_source = (JS_DIR / "home" / "detail.js").read_text()
+
+    core_kinds_start = core_source.index("const PLAYLIST_KINDS")
+    core_kinds_block = core_source[core_kinds_start : core_source.index("];", core_kinds_start) + 2]
+    index_kinds_block = index_source[
+        index_source.index("var PLAYLIST_KINDS") : index_source.index("];", index_source.index("var PLAYLIST_KINDS"))
+        + 2
+    ]
+
+    for kind in SMART_PLAYLIST_KINDS:
+        assert f'"{kind}"' in core_kinds_block, f"{kind!r} missing from core.js's PLAYLIST_KINDS"
+        assert f'"{kind}"' in index_kinds_block, f"{kind!r} missing from index.html's pre-paint PLAYLIST_KINDS"
+        assert f'"{kind}"' in detail_source, f"{kind!r} missing from home/detail.js (EXPLORE_OWNED_LOCAL_KINDS)"
+
+    assert "EXPLORE_OWNED_LOCAL_KINDS" in detail_source
+    assert "EXPLORE_OWNED_LOCAL_KINDS" in index_source, (
+        "index.html's pre-paint script no longer has its own "
+        "EXPLORE_OWNED_LOCAL_KINDS copy — the detail panel's tab-button "
+        "selection will flash 'Library' for on-repeat/recently-added/"
+        "forgotten-favorites before home/detail.js corrects it after load"
+    )
+
+
+def test_smart_playlist_shelf_clicks_open_the_detail_panel() -> None:
+    """The "Made for you" cards (_smart_playlists_shelf.html) are plain <a
+    href="/#kind"> tags with a data-detail-kind attribute rather than
+    yt-video-card's usual click handling, so they need their own delegated
+    listener — without it, a click falls through to a real navigation
+    (full-page reload) instead of the SPA detail panel."""
+    source = (JS_DIR / "home" / "explore.js").read_text()
+    body = _function_body(source, "setupSmartPlaylistsShelf")
+
+    assert 'closest(".smart-playlist-card")' in body
+    assert "event.preventDefault()" in body, (
+        "setupSmartPlaylistsShelf no longer prevents the default navigation "
+        "— clicking a smart-playlist card will hard-reload instead of "
+        "opening the SPA detail panel"
+    )
+    assert "openDetail(card.dataset.detailKind, null)" in body

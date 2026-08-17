@@ -12,7 +12,15 @@
 // necessarily duplicates the same prefix rules in plain JS — this is the one
 // place everything after that first paint agrees with it.
 const VALID_TABS = ["home", "library", "explore", "settings"];
-const PLAYLIST_KINDS = ["favorites", "saved", "new-uploads", "recently-played"];
+const PLAYLIST_KINDS = [
+  "favorites",
+  "saved",
+  "new-uploads",
+  "recently-played",
+  "on-repeat",
+  "recently-added",
+  "forgotten-favorites",
+];
 // Detail routes that carry an id. "yt-channel"/"yt-playlist" are the same
 // panel showing something the library doesn't have yet — a recommended
 // YouTube playlist, or a channel nobody follows (see

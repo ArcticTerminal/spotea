@@ -1,0 +1,30 @@
+{# Explore's smart-playlist shelf: On Repeat / Recently Added / Forgotten
+   Favorites / Saved Mix — see page_context.smart_playlists_context and
+   home/explore.js's setupSmartPlaylistsShelf for the click wiring. Reuses
+   Home's .shelf/.shelf-row/.card pattern (not Library's .channel-card grid
+   tile) per the approved design direction. An empty smart playlist's card
+   is simply absent from `smart_playlists` — no "0 videos" cards. #}
+{% if smart_playlists %}
+<div class="shelf">
+  <div class="shelf-header"><h2 class="shelf-title">Made for you</h2></div>
+  <div class="shelf-row">
+    {% for playlist in smart_playlists %}
+    <a
+      class="card smart-playlist-card"
+      href="/#{{ playlist.kind }}"
+      data-detail-kind="{{ playlist.kind }}"
+    >
+      <span class="thumb">
+        {% if playlist.thumbnail_url %}
+        <img src="{{ playlist.thumbnail_url }}" alt="" loading="lazy" />
+        {% endif %}
+      </span>
+      <div class="card-body">
+        <h3 class="card-title">{{ playlist.title }}</h3>
+        <p class="card-date">{{ playlist.count }} video{{ '' if playlist.count == 1 else 's' }}</p>
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}

@@ -165,6 +165,29 @@ function recPlaylistCardHtml(playlist) {
   `;
 }
 
+// Above this, a video goes on the "Long form" shelf instead of "Contents" —
+// matches the ≤10-minute line the audit measured against (Music profile:
+// 11/11 recommended videos ran over this; Podcast: 10/12, median 2:18:19).
+// Naming is deliberately content-type-neutral rather than "Songs"/"Mixes":
+// the Podcast profile's own interests (linux, devops) mean hour-long content
+// there is the *correct* result, not noise to filter out — this only sorts
+// it onto its own shelf instead of hiding it.
+const LONG_FORM_THRESHOLD_SECONDS = 10 * 60;
+
+/** Splits a video list into { contents, longForm } by LONG_FORM_THRESHOLD_
+ *  SECONDS. A video with no known duration goes to "Contents" — most
+ *  recommended content is short-form, and an unknown duration is rare
+ *  (search results carry it from yt-dlp's flat extraction almost always). */
+function splitByDuration(videos) {
+  const contents = [];
+  const longForm = [];
+  for (const video of videos) {
+    const isLongForm = video.duration_seconds != null && video.duration_seconds > LONG_FORM_THRESHOLD_SECONDS;
+    (isLongForm ? longForm : contents).push(video);
+  }
+  return { contents, longForm };
+}
+
 /** A whole shelf, or nothing at all when that kind came back empty — an
  *  empty "Playlists" heading is worse than no heading. */
 function recShelfHtml(title, items, cardHtml) {
@@ -220,8 +243,10 @@ function renderRecommendations(data) {
       : basedOn;
   }
 
+  const { contents, longForm } = splitByDuration(data.videos);
   const shelves = [
-    recShelfHtml("Contents", data.videos, recVideoCardHtml),
+    recShelfHtml("Contents", contents, recVideoCardHtml),
+    recShelfHtml("Long form", longForm, recVideoCardHtml),
     recShelfHtml("Channels", data.channels, recChannelCardHtml),
     recShelfHtml("Playlists", data.playlists, recPlaylistCardHtml),
   ].join("");
@@ -328,6 +353,25 @@ export function setupRecommendations() {
     if (!card) return;
     if (card.dataset.videoId) playRemoteVideo(card.dataset, card.querySelector(".rec-play"));
     else if (card.dataset.playlistId) openDetail("yt-playlist", card.dataset.playlistId);
+  });
+}
+
+/** The smart-playlist shelf (On Repeat / Recently Added / Forgotten
+ *  Favorites / Saved Mix — see page_context.smart_playlists_context).
+ *  Server-rendered directly into index.html, unlike the "For you" shelves
+ *  above, so this only needs the delegated open-on-click wiring Library's
+ *  own pinned-playlist tiles use (see library.js's setupLibraryChannelGrid)
+ *  — no fetch, no render step. Delegated from the panel because it's inside
+ *  index.html's server render, which never gets replaced wholesale the way
+ *  a fragment swap would, but matching the established pattern here anyway
+ *  keeps this file's click-handling uniform. */
+export function setupSmartPlaylistsShelf() {
+  document.getElementById("explore-browse-panel")?.addEventListener("click", (event) => {
+    if (event.ctrlKey || event.metaKey || event.shiftKey || event.button !== 0) return;
+    const card = event.target.closest(".smart-playlist-card");
+    if (!card) return;
+    event.preventDefault();
+    openDetail(card.dataset.detailKind, null);
   });
 }
 

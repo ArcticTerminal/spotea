@@ -11,7 +11,7 @@ from datetime import timedelta
 
 import pytest
 
-from app.models import RecommendationCache, User
+from app.models import Content, Feed, RecommendationCache, User
 from app.services import recommendations as rec
 from app.timeutil import utcnow
 from app.youtube.search import ChannelSearchResult, PlaylistSearchResult, VideoSearchResult
@@ -96,6 +96,88 @@ def test_no_interests_means_an_empty_batch_and_no_searches(client, db_session, f
         "playlists": [],
     }
     assert fake_search == []
+
+
+def test_a_video_already_in_the_library_is_dropped_from_the_batch(client, db_session, fake_search):
+    _set_interests(db_session, "jazz")
+    feed = Feed(user_id=USER_ID, rss_url="https://example.com/already-owned-feed", channel_title="Owner")
+    db_session.add(feed)
+    db_session.commit()
+    db_session.refresh(feed)
+    db_session.add(
+        Content(feed_id=feed.id, user_id=USER_ID, video_id="jazz-1", title="Already have this")
+    )
+    db_session.commit()
+
+    body = client.get("/recommendations").json()
+
+    assert [v["video_id"] for v in body["videos"]] == ["jazz-0", "jazz-2"]
+
+
+def test_a_followed_channel_is_dropped_from_the_batch(client, db_session, fake_search):
+    """Observed live before this: a profile was recommended a channel it
+    already followed."""
+    _set_interests(db_session, "jazz")
+    db_session.add(
+        Feed(
+            user_id=USER_ID,
+            rss_url="https://www.youtube.com/feeds/videos.xml?channel_id=jazz-0",
+            channel_title="Already Followed",
+            followed=True,
+        )
+    )
+    db_session.commit()
+
+    body = client.get("/recommendations").json()
+
+    assert [c["channel_id"] for c in body["channels"]] == ["jazz-1", "jazz-2"]
+
+
+def test_an_unfollowed_placeholder_feed_does_not_hide_a_channel(client, db_session, fake_search):
+    """followed=False is an Explore placeholder (see routers/explore.py), not
+    a real subscription — it must not suppress the recommendation the way an
+    actually-followed channel does."""
+    _set_interests(db_session, "jazz")
+    db_session.add(
+        Feed(
+            user_id=USER_ID,
+            rss_url="https://www.youtube.com/feeds/videos.xml?channel_id=jazz-0",
+            channel_title="Just A Preview",
+            followed=False,
+        )
+    )
+    db_session.commit()
+
+    body = client.get("/recommendations").json()
+
+    assert [c["channel_id"] for c in body["channels"]] == ["jazz-0", "jazz-1", "jazz-2"]
+
+
+def test_the_library_filter_is_reapplied_on_every_read_even_from_cache(client, db_session, fake_search):
+    """The filter can't be baked into the cached payload — build_batch's
+    result is cached and reused across requests, but the library it's
+    filtered against keeps changing (someone follows a recommended channel
+    right after seeing it). Re-checking on every read is what makes that
+    channel disappear on the very next load instead of waiting for the
+    batch to expire and rebuild."""
+    _set_interests(db_session, "jazz")
+    client.get("/recommendations")  # builds and caches the batch
+    fake_search.clear()
+
+    db_session.add(
+        Feed(
+            user_id=USER_ID,
+            rss_url="https://www.youtube.com/feeds/videos.xml?channel_id=jazz-0",
+            channel_title="Followed After The Batch Was Built",
+            followed=True,
+        )
+    )
+    db_session.commit()
+
+    body = client.get("/recommendations").json()
+
+    assert fake_search == []  # still served from cache, not rebuilt
+    assert "jazz-0" not in [c["channel_id"] for c in body["channels"]]
 
 
 def test_a_first_request_builds_a_batch_from_the_interests(client, db_session, fake_search):

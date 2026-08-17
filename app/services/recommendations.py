@@ -39,9 +39,10 @@ from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 
 from app.interests import interests_signature, parse_interests
-from app.models import RecommendationCache, User
+from app.models import Content, Feed, RecommendationCache, User
 from app.timeutil import utcnow
 from app.youtube.search import search_channels, search_playlists, search_videos
+from app.youtube.urls import extract_channel_id
 
 logger = logging.getLogger(__name__)
 
@@ -173,16 +174,64 @@ def _cached_batch(
         return None
 
 
+def _drop_already_in_library(db: Session, profile: User, batch: dict) -> dict:
+    """Recommending something already in the library adds nothing — a
+    followed channel or an added video isn't new. Applied here, at read
+    time, against every batch (freshly built or cached) rather than inside
+    build_batch: a cached batch can outlive what's added to the library
+    after it was built, and re-checking on every read is what makes
+    following a recommended channel make it disappear from the shelf on the
+    very next load, rather than waiting for the batch to expire and rebuild.
+    Playlists aren't filtered — YouTube's search results don't expose enough
+    to match one against the library reliably.
+
+    Observed live before this: a profile whose interests included "devops"
+    was recommended a channel it already followed.
+    """
+    owned_video_ids = {
+        video_id for (video_id,) in db.query(Content.video_id).filter(Content.user_id == profile.id)
+    }
+    followed_channel_ids = {
+        channel_id
+        for (channel_id,) in (
+            db.query(Feed.rss_url).filter(Feed.user_id == profile.id, Feed.followed.is_(True))
+        )
+        for channel_id in [extract_channel_id(channel_id)]
+        if channel_id is not None
+    }
+
+    return {
+        **batch,
+        "videos": [v for v in batch["videos"] if v["video_id"] not in owned_video_ids],
+        "channels": [c for c in batch["channels"] if c["channel_id"] not in followed_channel_ids],
+    }
+
+
 def get_recommendations(
     db: Session, profile: User, *, ttl: timedelta = DEFAULT_TTL, force: bool = False
 ) -> tuple[dict, datetime | None]:
     """One profile's current batch plus when it was built, rebuilding only if
     it's missing, older than `ttl`, built from different interests, or
-    `force`d.
+    `force`d — then filtered against the current library (see
+    _drop_already_in_library), always fresh regardless of whether the batch
+    itself came from cache.
 
     Returns generated_at=None only for a profile with no interests, which
     never has a batch to date.
     """
+    batch, generated_at = _get_or_build_batch(db, profile, ttl=ttl, force=force)
+    if generated_at is not None:
+        batch = _drop_already_in_library(db, profile, batch)
+    return batch, generated_at
+
+
+def _get_or_build_batch(
+    db: Session, profile: User, *, ttl: timedelta, force: bool
+) -> tuple[dict, datetime | None]:
+    """The caching/locking half of get_recommendations, unfiltered — split
+    out so the library filter above wraps every return path (three of them,
+    below) from a single point instead of needing to be threaded through
+    each one."""
     interests = parse_interests(profile.interests)
     if not interests:
         return empty_batch(), None

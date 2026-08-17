@@ -213,6 +213,17 @@ class Content(Base):
     is_favorite: Mapped[bool] = mapped_column(default=False)
     is_saved: Mapped[bool] = mapped_column(default=False)
     last_played_at: Mapped[datetime | None] = mapped_column(default=None)
+    # Incremented alongside last_played_at (see routers/content.py's
+    # stream_content) — what the "On Repeat" smart playlist orders by,
+    # since last_played_at alone only says *when* something was last
+    # played, not how often. Approximate by design, not a precise listen
+    # counter: a single play can issue more than one range request as the
+    # browser buffers/seeks, and each one increments this — acceptable for
+    # ranking "played a lot" vs. "played once", not meant for exact counts.
+    # Deliberately untouched by Settings' "Clear recently played" (which
+    # only resets last_played_at) — clearing the history someone sees
+    # shouldn't also erase the signal a playlist like this depends on.
+    play_count: Mapped[int] = mapped_column(default=0)
     # True for a just-added Explore row that hasn't been favorited or saved
     # yet (see routers/content.py's add_favorite/add_saved, which clear this
     # as a side effect) — plays normally but stays out of Library and New

@@ -53,6 +53,11 @@ _COLUMN_MIGRATIONS = [
     # right below, in _migrate_refresh_interval_off_app_settings.
     ("accounts", "feed_refresh_interval_minutes", "INTEGER NOT NULL DEFAULT 30"),
     ("accounts", "feeds_refreshed_at", "DATETIME"),
+    # No backfill: a pre-existing row's real play count is unknowable after
+    # the fact (last_played_at only ever recorded the most recent play, not
+    # how many), so 0 is the honest answer for every row that predates this
+    # column, not an approximation of one.
+    ("content", "play_count", "INTEGER NOT NULL DEFAULT 0"),
 ]
 
 

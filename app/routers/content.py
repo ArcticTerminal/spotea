@@ -182,6 +182,10 @@ def get_content(
 def clear_recently_played(
     profile: User = Depends(get_current_profile), db: Session = Depends(get_db)
 ) -> dict[str, int]:
+    # Deliberately leaves play_count alone — this clears the *history* shown
+    # on the Recently Played shelf, not the play-frequency signal the "On
+    # Repeat" smart playlist depends on. Resetting both would make clearing
+    # your history also erase what you actually listen to a lot.
     cleared = (
         db.query(Content)
         .filter(Content.user_id == profile.id, Content.last_played_at.isnot(None))
@@ -322,6 +326,7 @@ def stream_content(
     # listening to that.
     if not download:
         content.last_played_at = utcnow()
+        content.play_count += 1
         db.commit()
 
     media_type = AUDIO_MEDIA_TYPES.get(file_path.suffix, "application/octet-stream")

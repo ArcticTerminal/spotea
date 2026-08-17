@@ -11,6 +11,7 @@ from app.page_context import (
     home_shelf_items,
     library_context,
     queue_thumbnail_caching,
+    smart_playlists_context,
 )
 from app.templating import templates
 
@@ -58,6 +59,7 @@ def home(
             **home,
             **library_context(db, profile.id),
             **downloads_context(db, profile.id),
+            **smart_playlists_context(db, profile.id),
         },
     )
 
