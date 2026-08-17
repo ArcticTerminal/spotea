@@ -23,7 +23,8 @@ Example: `fix/avatar-cache-eviction`
    pytest
    ruff check .
    ```
-4. Push the branch and open a pull request against `main`.
+4. Push the branch and open a pull request against `main` (GitHub fills in
+   the description from `.github/pull_request_template.md` — fill it out).
 5. CI (GitHub Actions) runs `pytest` and `ruff check .` on the PR — both
    must pass before merging.
 
