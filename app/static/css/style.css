@@ -1944,6 +1944,15 @@ button.track-link {
   display: none;
 }
 
+/* The smart-playlist card is the only .card that's itself an <a> (every
+   other card wraps its clickable text in a .card-link with color:inherit
+   instead) — without this, its title/count fall back to the browser's
+   default link color instead of matching the rest of the shelf. */
+.smart-playlist-card {
+  color: inherit;
+  text-decoration: none;
+}
+
 .card .thumb {
   position: relative;
   display: block;
