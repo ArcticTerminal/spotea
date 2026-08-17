@@ -2822,18 +2822,6 @@ audio {
   display: none;
 }
 
-/* At the app's one "wide viewport" breakpoint (see .channel-grid/.grid
-   above), .player-card's 380px cap leaves huge dead margins on either side
-   of the centred overlay. Widened, not uncapped — .transport/.player-footer
-   below space their buttons with justify-content: space-between, which
-   would stretch grotesquely far apart at anything close to .layout's own
-   1100px, so this stays a deliberately more modest column. */
-@media (min-width: 700px) {
-  .player-card {
-    max-width: 640px;
-  }
-}
-
 /* Unlike .back-link elsewhere (the detail panel, sitting under the sticky
    topbar, which already clears the notch/Dynamic Island itself), this one is
    the first element in a position: fixed; inset: 0 overlay with nothing
