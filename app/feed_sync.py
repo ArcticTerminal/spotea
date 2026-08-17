@@ -135,9 +135,21 @@ def apply_feed_data(db: Session, feed: Feed, result: FeedFetchResult) -> int:
         )
         new_count += 1
 
+    # A row can be inserted with no duration at all — fetch_channel_video_durations
+    # only covers the channel's first 50 videos, so anything in the RSS window
+    # past that arrives unmeasured. When the duration does turn up later, it has
+    # to face the same Shorts test a new insert does; without this, a Short that
+    # slipped in undated stayed in the library for good (the loop below only
+    # keeps it out of New Uploads).
     for video_id in missing_duration_ids:
-        if video_id in result.durations:
-            existing_rows[video_id].duration_seconds = result.durations[video_id]
+        if video_id not in result.durations:
+            continue
+        duration = result.durations[video_id]
+        row = existing_rows[video_id]
+        row.duration_seconds = duration
+        if duration <= SHORT_MAX_DURATION_SECONDS:
+            db.delete(row)
+            del existing_rows[video_id]
 
     # A video already in the DB (however it originally got there) that's
     # still part of the channel's current RSS window is, in the sense that

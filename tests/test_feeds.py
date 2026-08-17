@@ -330,3 +330,51 @@ def test_unfollowing_keeps_favorited_and_saved_content(client, db_session):
     assert res.status_code == 204
     assert db_session.query(Feed).filter(Feed.id == feed.id).first() is not None
     assert db_session.query(Content).filter(Content.id == content.id).first() is not None
+
+
+def test_a_short_is_removed_when_its_duration_arrives_later(db_session):
+    """The Shorts guard has to apply to a backfilled duration, not just a new
+    insert.
+
+    fetch_channel_video_durations only covers a channel's first 50 videos, so
+    anything further down the RSS window is inserted with no duration at all
+    and passes the guard by default. When the duration does turn up on a later
+    refresh, nothing re-checked it: the row kept its place in the library for
+    good, and only the is_new_upload loop below it noticed the length.
+    """
+    feed = Feed(user_id=1, rss_url="https://example.com/late-duration", channel_title="C")
+    db_session.add(feed)
+    db_session.commit()
+    db_session.refresh(feed)
+
+    # Already present, still unmeasured — exactly what the capped duration
+    # lookup leaves behind.
+    db_session.add_all(
+        [
+            Content(feed_id=feed.id, user_id=1, video_id="latedur0001", title="Actually a Short",
+                    duration_seconds=None),
+            Content(feed_id=feed.id, user_id=1, video_id="latedur0002", title="Actually a video",
+                    duration_seconds=None),
+        ]
+    )
+    db_session.commit()
+
+    parsed = ParsedFeed(
+        channel_title="C",
+        entries=[
+            ParsedEntry(video_id="latedur0001", title="Actually a Short", thumbnail_url=None, published_at=None),
+            ParsedEntry(video_id="latedur0002", title="Actually a video", thumbnail_url=None, published_at=None),
+        ],
+    )
+    result = FeedFetchResult(
+        parsed=parsed,
+        durations={"latedur0001": 30, "latedur0002": 420},
+        channel_id=None,
+        avatar_url=None,
+    )
+
+    apply_feed_data(db_session, feed, result)
+
+    remaining = {row.video_id: row for row in db_session.query(Content).filter(Content.feed_id == feed.id)}
+    assert set(remaining) == {"latedur0002"}
+    assert remaining["latedur0002"].duration_seconds == 420

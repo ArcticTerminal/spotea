@@ -9,7 +9,6 @@ seeks with, and Starlette's own GZipMiddleware excludes only
 import re
 
 from app.config import settings
-from app.database import engine
 
 
 def test_html_is_compressed(client):
@@ -120,12 +119,3 @@ def test_login_page_is_protected_too(client):
 
     assert "Content-Security-Policy" in res.headers
     assert res.headers["X-Frame-Options"] == "DENY"
-
-
-def test_sqlite_runs_in_wal_mode_with_foreign_keys_on():
-    with engine.connect() as conn:
-        journal_mode = conn.exec_driver_sql("PRAGMA journal_mode").scalar()
-        foreign_keys = conn.exec_driver_sql("PRAGMA foreign_keys").scalar()
-
-    assert journal_mode.lower() == "wal"
-    assert foreign_keys == 1

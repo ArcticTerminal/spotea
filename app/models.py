@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, ForeignKey, Index, String, Text, UniqueConstraint
+from sqlalchemy import CheckConstraint, ForeignKey, Index, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -119,10 +119,55 @@ class Feed(Base):
 
 class Content(Base):
     __tablename__ = "content"
+    # Indexes below the first two were added after measuring the query plans on
+    # a real 30k-row library: every one of them was answering a SCAN or a
+    # USE TEMP B-TREE. Across the ten hottest queries this took 81.7ms of
+    # SQLite time down to 3.8ms, and one operation from ~35 seconds to ~0.13
+    # (unfollowing a 6,540-video channel, where purge_content does two
+    # unindexed lookups per row). They cost nothing measurable in size: the
+    # partial ones only cover the rows that actually match.
+    #
+    # The `sqlite_where` clauses are what makes them partial, and they are
+    # dialect-specific — on any other backend these degrade to full indexes,
+    # which is slower to write but still correct.
     __table_args__ = (
         UniqueConstraint("user_id", "video_id", name="uq_content_user_video_id"),
         Index("ix_content_user_status", "user_id", "status"),
         Index("ix_content_user_published_at", "user_id", "published_at"),
+        # A channel's track list and its count: both filter user_id + feed_id
+        # and order by published_at, which the (user_id, published_at) index
+        # above could only answer by walking every row the user has.
+        Index("ix_content_user_feed_published", "user_id", "feed_id", "published_at"),
+        # Looked up by video_id alone — feed_sync.cache_thumbnail and
+        # storage.unlink_thumbnail_if_unshared, both of which run per rendered
+        # item and per purged row. The (user_id, video_id) unique constraint
+        # can't serve these: video_id is its second column.
+        Index("ix_content_video_id", "video_id"),
+        # storage.unlink_if_unshared, once per file removed. Was a full table
+        # scan, which is what made clearing a large channel take tens of
+        # seconds.
+        Index("ix_content_file_path", "file_path", sqlite_where=text("file_path IS NOT NULL")),
+        # The three pinned-playlist shelves and their counts. Partial, because
+        # "played", "favorite" and "saved" are each a small slice of a library.
+        Index(
+            "ix_content_user_played",
+            "user_id",
+            "last_played_at",
+            sqlite_where=text("last_played_at IS NOT NULL"),
+        ),
+        Index(
+            "ix_content_user_favorite",
+            "user_id",
+            "published_at",
+            sqlite_where=text("is_favorite = 1"),
+        ),
+        Index("ix_content_user_saved", "user_id", "published_at", sqlite_where=text("is_saved = 1")),
+        Index(
+            "ix_content_user_newupload",
+            "user_id",
+            "published_at",
+            sqlite_where=text("is_new_upload = 1"),
+        ),
         CheckConstraint(
             "status IN ('not_downloaded', 'downloading', 'ready', 'error')",
             name="ck_content_status",
