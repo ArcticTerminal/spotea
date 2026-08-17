@@ -29,16 +29,18 @@
   --border-default: #333;
   --border-strong: #666; /* ghost/icon button hover */
 
-  /* Text — roughly high to low emphasis. text-muted/text-subtle/text-faint*
-     are near-duplicate grays that drifted in separately over time rather
-     than a deliberate 4-step scale; kept distinct here (not merged into one)
-     so this pass stays a pure refactor with no visual change. */
+  /* Text — roughly high to low emphasis. text-muted/text-subtle/text-faint
+     used to be near-duplicate grays that had drifted in separately over
+     time rather than forming a deliberate scale; they're merged into one
+     (#8e8e8e — 5.72:1 on --bg-page, 4.80:1 on --bg-elevated, clearing WCAG
+     AA's 4.5:1 for normal text with margin on both) since the old
+     --text-subtle (#777, 4.18:1) failed AA at the small sizes it was used
+     at. --text-faint-alt is a separate, brighter gray (#a7a7a7) not part of
+     this drift, so it's left alone. */
   --text-primary: #f5f5f5;
   --text-secondary: #b3b3b3;
   --text-hover: #ccc; /* tab label hover, between secondary and bright */
-  --text-muted: #888;
-  --text-subtle: #777;
-  --text-faint: #7a7a7a;
+  --text-muted: #8e8e8e;
   --text-faint-alt: #a7a7a7;
   --text-disabled: #444;
 
@@ -1405,7 +1407,11 @@ button.track-link {
 }
 
 .shelf-row > .card {
-  flex: 0 0 170px;
+  /* 150px, not 170px: at a 390px viewport minus page padding (358px usable),
+     two 170px cards + their 0.75rem gap ate the full width, leaving no
+     sliver of a third card to signal the row scrolls horizontally. At
+     150px, two cards + gap leave ~46px of a third card peeking in. */
+  flex: 0 0 150px;
 }
 
 @media (min-width: 480px) {
@@ -1839,6 +1845,73 @@ button.track-link {
   flex: 0 0 auto;
 }
 
+@media (max-width: 480px) {
+  /* At mobile width, duration + save button ate ~150px of the ~358px usable
+     row, leaving only ~155px for the title before it truncated. Fix: give
+     the title its own full line, and move duration down next to the date
+     on a second line.
+
+     .track-link and .track-info are only wrappers (an <a>/<button> and a
+     column layout) with no visual identity of their own here, so making
+     them `display: contents` lets their children (index/thumb/title/date)
+     become direct grid items of .track-row alongside .track-duration and
+     the save button — grid, unlike flex, can lay out items from different
+     nesting depths on a shared row/column grid. This only changes layout;
+     .track-link keeps intercepting clicks/taps normally since that's DOM-
+     based (closest() in home/detail.js), not box-based. Desktop is
+     untouched — the flex rules above still apply above this breakpoint. */
+  .track-row {
+    display: grid;
+    grid-template-columns: 1.5rem 44px 1fr auto auto;
+    grid-template-areas:
+      "index thumb title    title    save"
+      "index thumb meta duration save";
+    column-gap: 0.75rem;
+    row-gap: 0.15rem;
+  }
+
+  .track-link,
+  .track-info {
+    display: contents;
+  }
+
+  .track-index,
+  .track-thumb,
+  .track-row .btn-save {
+    align-self: center;
+  }
+
+  .track-index {
+    grid-area: index;
+  }
+
+  .track-thumb {
+    grid-area: thumb;
+  }
+
+  .track-title {
+    /* Grid items default to min-width: auto, i.e. never smaller than their
+       content — which for nowrap text is the full, untruncated string. That
+       would force the title's 1fr track to grow and blow out the row
+       instead of ellipsizing. min-width: 0 restores the truncation. */
+    grid-area: title;
+    min-width: 0;
+  }
+
+  .track-date {
+    grid-area: meta;
+    min-width: 0;
+  }
+
+  .track-duration {
+    grid-area: duration;
+  }
+
+  .track-row .btn-save {
+    grid-area: save;
+  }
+}
+
 .card {
   background: var(--bg-base);
   border-radius: 10px;
@@ -1928,7 +2001,7 @@ button.track-link {
   flex-shrink: 0;
   background: none;
   border: none;
-  color: var(--text-faint);
+  color: var(--text-muted);
   cursor: pointer;
   min-width: 44px;
   min-height: 44px;
@@ -1994,7 +2067,7 @@ button.track-link {
 .card-date {
   margin: 0;
   font-size: 0.75rem;
-  color: var(--text-subtle);
+  color: var(--text-muted);
 }
 
 .btn-delete {
