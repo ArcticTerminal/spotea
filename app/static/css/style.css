@@ -622,6 +622,29 @@ html[data-active-tab="detail"] .tab-panel[data-tab-panel="detail"] {
   margin-top: 0;
 }
 
+/* Settings only: seven of these headings each sit over exactly one
+   .settings-row, which already has its own hairline border-bottom — a full
+   1rem heading per single row reads as seven noisy section breaks for what
+   is really one flat list. Scoped to #tab-settings so Explore's "Songs"/
+   "Channels" headings (each over an actual multi-item list) keep their
+   normal weight; shrunk to a quiet, uppercase label rather than restructured,
+   since the seven groupings themselves aren't wrong, just over-announced. */
+#tab-settings .channels-panel-inner h2 {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin: 1.5rem 0 0.35rem;
+}
+
+/* Needed despite the generic :first-child rule above — this ID-scoped
+   selector outranks it, so without a matching override here the first
+   heading ("Profiles") would pick up this rule's own margin-top instead. */
+#tab-settings .channels-panel-inner h2:first-child {
+  margin-top: 0;
+}
+
 /* Spotify-style settings row: label + one-line description on the left,
    the actual control right-aligned — a plain native <select> rather than a
    custom widget, since these are still just a handful of mutually
@@ -1512,7 +1535,14 @@ button.track-link {
 
 @media (min-width: 420px) {
   .channel-grid {
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    /* auto-fit, not auto-fill: with fewer cards than fit the row (the
+       common case — four pinned tiles plus however many channels are
+       followed), auto-fill still reserves empty trailing tracks at their
+       200px minimum, which stops the populated ones from growing to fill
+       the row and leaves that reserved space visibly blank. auto-fit
+       collapses the empty tracks instead, so the real cards stretch to
+       use the full width. */
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
     gap: 0.75rem;
   }
 }
@@ -1618,6 +1648,15 @@ button.track-link {
   align-items: center;
   gap: 1.25rem;
   margin-bottom: 1.75rem;
+  /* .channel-hero-info grows to fill whatever width this row has, and
+     .detail-actions' margin-left: auto (below) always pins Play/Shuffle to
+     this row's right edge regardless — on a wide viewport that edge tracks
+     .layout's full 1100px, stranding the button far past the title. Capped
+     here rather than on .channel-hero-info, since that flex-grow alone
+     wouldn't stop the auto margin from still reaching the row's real edge.
+     Left-aligned (no auto margin of its own), so the title's position is
+     unchanged — only the dead space to its right shrinks. */
+  max-width: 640px;
 }
 
 .channel-hero-unfollow {
@@ -1770,6 +1809,13 @@ button.track-link {
   align-items: center;
   gap: 0.75rem;
   flex: 1 1 auto;
+  /* Capped, not just flexible: .track-duration/.btn-save are plain flex
+     siblings after this one (no space-between on .track-row), so they sit
+     immediately at this box's right edge. Uncapped, that edge tracks
+     .track-row's own width — up to .layout's 1100px on a wide viewport —
+     leaving a wide dead gap between a short/medium title and the duration.
+     Matches .channels-panel-inner's existing 480px content-column width. */
+  max-width: 480px;
   min-width: 0;
   color: inherit;
   text-decoration: none;
@@ -2740,6 +2786,18 @@ audio {
 
 .player-overlay[hidden] {
   display: none;
+}
+
+/* At the app's one "wide viewport" breakpoint (see .channel-grid/.grid
+   above), .player-card's 380px cap leaves huge dead margins on either side
+   of the centred overlay. Widened, not uncapped — .transport/.player-footer
+   below space their buttons with justify-content: space-between, which
+   would stretch grotesquely far apart at anything close to .layout's own
+   1100px, so this stays a deliberately more modest column. */
+@media (min-width: 700px) {
+  .player-card {
+    max-width: 640px;
+  }
 }
 
 /* Unlike .back-link elsewhere (the detail panel, sitting under the sticky
