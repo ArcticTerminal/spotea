@@ -1,14 +1,28 @@
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 if TYPE_CHECKING:  # import cycle otherwise — models has no reason to know about schemas
     from app.models import Content
 
+# SQLite doesn't enforce a column's declared VARCHAR length — these bounds are
+# the only thing standing between a request body and an unbounded write or an
+# unbounded amount of downstream work (a bulk import line becomes a yt-dlp
+# resolution; interests.py already does this at the function level, see its
+# MAX_INTEREST_LENGTH). Chosen to match the column each field ends up in
+# rather than picked arbitrarily, so a value that fits here always fits there.
+_URL_MAX_LENGTH = 2048  # generous browser-address-bar bound; no column caps it directly
+_PROFILE_NAME_MAX_LENGTH = 100  # User.name: String(100)
+_CONTENT_TITLE_MAX_LENGTH = 500  # Content.title: String(500)
+# Above any real subscriptions export (a few hundred channels); guards
+# against a pasted list turning into thousands of yt-dlp resolutions.
+_BULK_IMPORT_MAX_LINES = 500
+_BULK_IMPORT_MAX_LENGTH = _BULK_IMPORT_MAX_LINES * _URL_MAX_LENGTH
+
 
 class FeedCreate(BaseModel):
-    channel_url: str
+    channel_url: str = Field(min_length=1, max_length=_URL_MAX_LENGTH)
 
 
 class FeedOut(BaseModel):
@@ -166,7 +180,7 @@ class RecommendationsOut(BaseModel):
 
 class VideoAddCreate(BaseModel):
     video_id: str
-    title: str
+    title: str = Field(min_length=1, max_length=_CONTENT_TITLE_MAX_LENGTH)
     thumbnail_url: str | None = None
     duration_seconds: int | None = None
     channel_title: str | None = None
@@ -239,15 +253,28 @@ class ProfileOut(BaseModel):
 
 
 class ProfileCreate(BaseModel):
-    name: str
+    name: str = Field(min_length=1, max_length=_PROFILE_NAME_MAX_LENGTH)
 
 
 class ProfileUpdate(BaseModel):
-    name: str
+    name: str = Field(min_length=1, max_length=_PROFILE_NAME_MAX_LENGTH)
 
 
 class BulkImportCreate(BaseModel):
-    urls: str
+    urls: str = Field(min_length=1, max_length=_BULK_IMPORT_MAX_LENGTH)
+
+    @field_validator("urls")
+    @classmethod
+    def _cap_line_count(cls, value: str) -> str:
+        # The length cap above bounds total bytes; this bounds the thing that
+        # actually costs something — start_bulk_import splits on lines and
+        # resolves each one with its own yt-dlp lookup (see
+        # services/bulk_import.py), so 10,000 short pasted lines would pass
+        # the byte cap easily while still being 10,000 requests to YouTube.
+        line_count = value.count("\n") + 1
+        if line_count > _BULK_IMPORT_MAX_LINES:
+            raise ValueError(f"Paste at most {_BULK_IMPORT_MAX_LINES} lines at once")
+        return value
 
 
 class BulkImportStartOut(BaseModel):
