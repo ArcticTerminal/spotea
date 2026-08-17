@@ -1,0 +1,28 @@
+name: Tests
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install --no-cache-dir -r requirements-dev.txt
+          pip install --no-cache-dir yt-dlp bgutil-ytdlp-pot-provider
+
+      - name: Run tests
+        run: pytest
+
+      - name: Lint (ruff)
+        run: ruff check .
