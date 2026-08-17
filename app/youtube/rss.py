@@ -149,13 +149,24 @@ def fetch_feed(rss_url: str) -> ParsedFeed:
         if not video_id or not VIDEO_ID_RE.match(video_id):
             continue
 
+        # Same signal search.py's _video_result and extract.py's
+        # fetch_channel_all_videos skip on: a video gone private, deleted, or
+        # orphaned by a terminated account still shows up in the feed but
+        # arrives with no title. Every video actually worth showing has one —
+        # inventing "Untitled" here just inserted a row that could only ever
+        # fail to download later. 3 such rows existed on the live database;
+        # 2 were already status=error.
+        title = entry.get("title")
+        if not title:
+            continue
+
         thumbnails = entry.get("media_thumbnail") or []
         thumbnail_url = thumbnails[0]["url"] if thumbnails else None
 
         entries.append(
             ParsedEntry(
                 video_id=video_id,
-                title=entry.get("title", "Untitled"),
+                title=title,
                 thumbnail_url=thumbnail_url,
                 published_at=_parse_published(entry),
             )

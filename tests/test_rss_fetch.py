@@ -118,6 +118,39 @@ def test_a_valid_feed_is_parsed_from_the_fetched_bytes(network):
     assert entry.published_at.tzinfo is None
 
 
+def test_an_entry_with_no_title_is_skipped_not_inserted_as_untitled(network):
+    """Same signal search.py's _video_result and extract.py's
+    fetch_channel_all_videos already skip on: a video gone private, deleted,
+    or orphaned by a terminated account still shows up in the feed but
+    arrives with no title. Inventing "Untitled" here just inserted a row
+    that could only ever fail to download later — 3 such rows existed on the
+    live database, 2 already status=error."""
+    no_title_feed = f"""<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns:yt="http://www.youtube.com/xml/schemas/2015"
+      xmlns:media="http://search.yahoo.com/mrss/"
+      xmlns="http://www.w3.org/2005/Atom">
+  <yt:channelId>{CHANNEL_ID}</yt:channelId>
+  <title>Test Channel</title>
+  <entry>
+    <yt:videoId>notitleentr</yt:videoId>
+    <published>2026-08-01T10:00:00+00:00</published>
+  </entry>
+  <entry>
+    <yt:videoId>abcdefghijk</yt:videoId>
+    <title>A real upload</title>
+    <published>2026-08-01T10:00:00+00:00</published>
+  </entry>
+</feed>
+""".encode()
+    network(no_title_feed)
+
+    parsed = fetch_feed(FEED_URL)
+
+    video_ids = [entry.video_id for entry in parsed.entries]
+    assert video_ids == ["abcdefghijk"]
+    assert not any(entry.title == "Untitled" for entry in parsed.entries)
+
+
 def test_the_fetch_carries_a_timeout(network):
     """The finding this file is mostly about: feedparser has no timeout at all,
     so a host that accepts the connection and then goes quiet held the thread

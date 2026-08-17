@@ -162,9 +162,9 @@ def query_content_page(
     feed_id: int | None = None,
 ) -> tuple[list[Content], int, int]:
     """A page of a user's content, newest first, optionally filtered. Shared
-    by the Library grid's server-rendered first page (pages.py) and the AJAX
-    endpoint that serves every subsequent page/filter change
-    (routers/content.py), so the two never disagree on what "page 1, no
+    by the Library grid's server-rendered first page (pages.py) and the
+    channel/playlist detail fragments that serve every subsequent page
+    (routers/partials.py), so the two never disagree on what "page 1, no
     filter" actually contains.
 
     feed_id restricts to a single channel — used by the channel detail page,
@@ -186,6 +186,21 @@ def query_content_page(
     items = query.offset((page - 1) * page_size).limit(page_size).all()
 
     return items, page, total_pages
+
+
+def count_content(db: Session, user_id: int, filter: str = "", feed_id: int | None = None) -> int:
+    """The exact count query_content_page's own page would have, without
+    paginating it — for a tile or header count that has to agree with the
+    list it describes.
+
+    Not a second, hand-rolled `func.count` for the same reason
+    query_content_page and query_content_ids share _content_query rather than
+    each spelling the filters out again: page_context.py's channel and
+    playlist detail counts used to do exactly that, and drifted from the list
+    below them the moment is_preview needed excluding — measured live as a
+    channel tile reading 156 while its own page listed 154.
+    """
+    return _content_query(db, user_id, filter=filter, feed_id=feed_id).count()
 
 
 # How far a "Play all" reaches. A followed channel that's been backfilled can

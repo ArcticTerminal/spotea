@@ -86,11 +86,19 @@ def get_bulk_import_status(job_id: str) -> BulkImportStatusOut:
     progress = import_progress.get(job_id)
     if progress is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Import job not found")
+    # `progress` is the exact dict object run_bulk_import's background-task
+    # thread is still mutating — ProgressRegistry's lock only guards the
+    # registry's own bookkeeping (set/get/sweep), not a value handed back by
+    # get(). list(...) snapshots "results" once, up front, instead of the
+    # list comprehension below iterating the live list directly across
+    # however many BulkImportResultOut(**r) calls that takes — each one a
+    # window for the worker thread to append behind this request's back.
+    results = list(progress["results"])
     return BulkImportStatusOut(
         total=progress["total"],
         resolved=progress["resolved"],
         done=progress["done"],
-        results=[BulkImportResultOut(**r) for r in progress["results"]],
+        results=[BulkImportResultOut(**r) for r in results],
     )
 
 @router.get("/{feed_id}/backfill-status", response_model=BackfillStatusOut)

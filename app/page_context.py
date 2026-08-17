@@ -13,7 +13,13 @@ from fastapi import BackgroundTasks
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
-from app.content_query import DEFAULT_PAGE_SIZE, followed_feeds, new_upload_filter, query_content_page
+from app.content_query import (
+    DEFAULT_PAGE_SIZE,
+    count_content,
+    followed_feeds,
+    new_upload_filter,
+    query_content_page,
+)
 from app.feed_sync import cache_thumbnail
 from app.models import Content, Feed
 from app.storage import collect_usage
@@ -133,10 +139,15 @@ def library_context(db: Session, user_id: int) -> dict:
     return {
         "feeds": followed_feeds(db, user_id).all(),
         # One grouped count covers every channel's card, rather than a
-        # per-feed query each.
+        # per-feed query each — count_content can't be reused directly here
+        # for that reason (it's one feed_id at a time), but the filter has to
+        # match it anyway: is_preview excludes Explore videos not yet
+        # favorited/saved, same as content_query._content_query, or a tile
+        # can read a higher count than the channel page it opens onto lists
+        # (measured live: 156 vs 154).
         "channel_video_counts": dict(
             db.query(Content.feed_id, func.count(Content.id))
-            .filter(Content.user_id == user_id)
+            .filter(Content.user_id == user_id, Content.is_preview.is_(False))
             .group_by(Content.feed_id)
             .all()
         ),
@@ -207,9 +218,9 @@ def playlist_detail_context(db: Session, user_id: int, kind: str, page: int) -> 
     config = PLAYLIST_KINDS.get(kind)
     if config is None:
         return None
-    is_match, filter_value, title, empty_message = config
+    _is_match, filter_value, title, empty_message = config
 
-    video_count = db.query(func.count(Content.id)).filter(Content.user_id == user_id, is_match()).scalar()
+    video_count = count_content(db, user_id, filter=filter_value)
     items, page, total_pages = query_content_page(db, user_id, page=page, filter=filter_value)
 
     return {
@@ -237,9 +248,7 @@ def channel_detail_context(db: Session, user_id: int, feed_id: int, page: int) -
     if feed is None:
         return None
 
-    video_count = db.query(func.count(Content.id)).filter(
-        Content.feed_id == feed_id, Content.user_id == user_id
-    ).scalar()
+    video_count = count_content(db, user_id, feed_id=feed_id)
     items, page, total_pages = query_content_page(db, user_id, page=page, feed_id=feed_id)
 
     return {

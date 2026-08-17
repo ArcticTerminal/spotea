@@ -73,7 +73,7 @@
             <span class="profile-row-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-user" /></svg>
             </span>
-            <span id="profile-switcher-name">Profile</span>
+            <span id="profile-switcher-name">{{ profile_name }}</span>
           </button>
           <form method="post" action="/logout">
             <button type="submit" class="btn-ghost">Log out</button>
@@ -88,11 +88,11 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-refresh" /></svg>
             <span>Refresh feeds</span>
           </button>
-          <button type="button" id="mobile-menu-profile" class="mobile-menu-item" role="menuitem">
+          <button type="button" id="mobile-menu-profile" class="mobile-menu-item" role="menuitem" aria-label="Switch profile">
             <span class="profile-row-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-user" /></svg>
             </span>
-            <span id="mobile-menu-profile-name">Switch profile</span>
+            <span id="mobile-menu-profile-name">{{ profile_name }}</span>
           </button>
           <form method="post" action="/logout" class="mobile-menu-form">
             <button type="submit" class="mobile-menu-item" role="menuitem">

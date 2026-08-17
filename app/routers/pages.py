@@ -40,6 +40,14 @@ def home(
         "index.html",
         {
             "audio_quality": profile.audio_quality,
+            # Which profile is active is otherwise invisible: the topbar
+            # button and mobile menu row both shipped with static placeholder
+            # text ("Profile" / "Switch profile") that nothing ever replaced.
+            # With more than one profile there was no way to tell which one
+            # you were on without opening the switcher itself. See
+            # profiles.js's renameProfile for the one case a reload doesn't
+            # already cover (renaming the profile you're currently on).
+            "profile_name": profile.name,
             "feed_refresh_interval_minutes": profile.account.feed_refresh_interval_minutes,
             # Server-rendered rather than fetched by home/settings.js on boot:
             # the interest chips are part of the Settings panel's first paint,

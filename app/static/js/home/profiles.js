@@ -32,10 +32,28 @@ let cachedProfiles = [];
 // button becomes "Save" and submitting calls renameProfile instead of
 // createProfile) — null means it's in its normal "add a new profile" mode.
 let editingProfileId = null;
+// GET /profiles used to run unconditionally on every page load to fill two
+// overlays (profiles-overlay, profiles-manage-overlay) that start hidden and,
+// on a typical visit, are never opened at all. Loaded lazily instead, the
+// first time either one actually opens — see ensureProfilesLoaded.
+let profilesLoaded = false;
 
 async function fetchProfiles() {
   const { ok, data } = await api("/profiles");
   return ok ? data : [];
+}
+
+async function ensureProfilesLoaded() {
+  if (profilesLoaded) return;
+  profilesLoaded = true;
+  await loadProfiles();
+}
+
+function updateHeaderProfileName(name) {
+  const header = document.getElementById("profile-switcher-name");
+  if (header) header.textContent = name;
+  const mobileMenu = document.getElementById("mobile-menu-profile-name");
+  if (mobileMenu) mobileMenu.textContent = name;
 }
 
 // Current profile gets the same accent border/tint treatment as a checked
@@ -123,12 +141,20 @@ async function createProfile(name) {
 // to leave the form in "editing" mode (e.g. on failure, so the typed name
 // isn't lost) or reset it back to "add a new profile" mode.
 async function renameProfile(profileId, name) {
-  const { ok } = await api(`/profiles/${profileId}`, {
+  const { ok, data } = await api(`/profiles/${profileId}`, {
     method: "PUT",
     body: { name },
     errorMessage: "Could not rename profile",
   });
-  if (ok) await loadProfiles();
+  if (ok) {
+    await loadProfiles();
+    // Every other profile change (switch, create, delete-the-current-one)
+    // reloads the page, which re-renders the header from the server for
+    // free. This is the one path that doesn't — renaming just refreshes the
+    // overlay's own lists in place — so it's the one place the header name
+    // has to be kept in sync by hand.
+    if (data?.is_current) updateHeaderProfileName(data.name);
+  }
   return ok;
 }
 
@@ -154,7 +180,12 @@ async function deleteProfile(profileId) {
 }
 
 function setupSwitchOverlay() {
-  switchOverlay = setupOverlay("profiles-overlay", "profiles-close", ["profile-switcher-btn"]);
+  // No trigger id here — opening this overlay has to wait for
+  // ensureProfilesLoaded to resolve first (see openProfileSwitcher), so the
+  // topbar button is wired by hand below instead of through setupOverlay's
+  // own immediate-open click listener.
+  switchOverlay = setupOverlay("profiles-overlay", "profiles-close", []);
+  document.getElementById("profile-switcher-btn")?.addEventListener("click", () => openProfileSwitcher());
 
   const switchList = document.getElementById("profiles-switch-list");
   switchList?.addEventListener("click", (event) => {
@@ -165,10 +196,15 @@ function setupSwitchOverlay() {
 }
 
 function setupManageOverlay() {
-  const manageOverlay = setupOverlay("profiles-manage-overlay", "profiles-manage-close", [
-    "open-profiles-settings",
-  ]);
+  // Same reasoning as setupSwitchOverlay above: wired by hand rather than
+  // via setupOverlay's own trigger so the overlay only opens once its lists
+  // are actually populated.
+  const manageOverlay = setupOverlay("profiles-manage-overlay", "profiles-manage-close", []);
   if (!manageOverlay) return;
+  document.getElementById("open-profiles-settings")?.addEventListener("click", async () => {
+    await ensureProfilesLoaded();
+    manageOverlay.open();
+  });
 
   const manageList = document.getElementById("profiles-manage-list");
   const addForm = document.getElementById("profiles-add-form");
@@ -233,12 +269,13 @@ function setupManageOverlay() {
 
 /** Opens the switch-profile overlay — the collapsed mobile menu's profile
     row is a second entry point to the same dialog (see home/library.js). */
-export function openProfileSwitcher() {
+export async function openProfileSwitcher() {
+  await ensureProfilesLoaded();
   switchOverlay?.open();
 }
 
 export function setupProfiles() {
   setupSwitchOverlay();
   setupManageOverlay();
-  loadProfiles();
+  // Deliberately no eager fetch here — see ensureProfilesLoaded above.
 }

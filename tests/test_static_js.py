@@ -106,3 +106,19 @@ def test_service_worker_ignores_cross_origin_requests() -> None:
     assert source.index(check) < source.index(write), (
         "the origin check must short-circuit before the cache write"
     )
+
+
+def test_setup_profiles_does_not_eagerly_fetch_the_profile_list() -> None:
+    """GET /profiles used to run on every single page load to fill two
+    overlays that start hidden and, on a typical visit, are never opened —
+    see home/profiles.js's ensureProfilesLoaded. This pins the regression: a
+    call to loadProfiles() directly inside setupProfiles (rather than behind
+    ensureProfilesLoaded, deferred until an overlay actually opens) would
+    silently restore the eager fetch."""
+    source = _function_body(
+        (JS_DIR / "home" / "profiles.js").read_text(), "setupProfiles"
+    )
+
+    assert "loadProfiles()" not in source, (
+        "setupProfiles calls loadProfiles() directly — the boot-time fetch is back"
+    )
