@@ -32,6 +32,7 @@ from app.page_context import (
     library_context,
     playlist_detail_context,
     queue_thumbnail_caching,
+    storage_summary_context,
 )
 from app.services.remote_detail import remote_channel_context, remote_playlist_context
 from app.templating import templates
@@ -67,8 +68,27 @@ def downloads_fragment(
     profile: User = Depends(get_current_profile),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
+    # The Downloads modal's own full list — deliberately not part of the
+    # default refreshFragments() sweep, see fragments.js's
+    # refreshDownloadsBody. Fetched only when the modal is actually opened
+    # or an action inside it changes what it shows.
     return templates.TemplateResponse(
         request, "_fragment_downloads.html", downloads_context(db, profile.id)
+    )
+
+
+@router.get("/storage-summary", response_class=HTMLResponse)
+def storage_summary_fragment(
+    request: Request,
+    profile: User = Depends(get_current_profile),
+    db: Session = Depends(get_db),
+) -> HTMLResponse:
+    # The cheap half of what downloads_fragment above used to return in one
+    # response — just the Settings "Storage used" line, via
+    # storage.usage_summary rather than collect_usage's per-row work. This is
+    # what refreshFragments() actually calls after every save/favorite/play.
+    return templates.TemplateResponse(
+        request, "_fragment_storage_summary.html", storage_summary_context(db, profile.id)
     )
 
 

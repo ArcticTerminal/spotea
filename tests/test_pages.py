@@ -103,6 +103,26 @@ def test_home_renders_for_an_empty_library(client):
     assert "add a channel in the Explore tab" in res.text
 
 
+def test_channel_avatars_are_lazy_loaded(client, db_session):
+    """70 eager image requests were measured on a real, heavy library —
+    avatars in the Library grid and Home's "Recently followed" chips were
+    the two spots that never got the loading="lazy" every content thumbnail
+    already has."""
+    feed = Feed(
+        user_id=USER_ID,
+        rss_url="https://www.youtube.com/feeds/videos.xml?channel_id=UCavatarlazy00000000000",
+        channel_title="Avatar Lazy Channel",
+        avatar_url="/avatars/UCavatarlazy00000000000.jpg",
+    )
+    db_session.add(feed)
+    db_session.commit()
+
+    body = client.get("/").text
+
+    assert '<img class="channel-chip-avatar" src="/avatars/UCavatarlazy00000000000.jpg" alt="" loading="lazy" />' in body
+    assert '<img class="channel-card-avatar" src="/avatars/UCavatarlazy00000000000.jpg" alt="" loading="lazy" />' in body
+
+
 def test_home_applies_the_duration_and_filesize_template_filters(client, db_session):
     """Both filters are registered on pages.py's own Jinja2Templates
     instance — a second instance (routers/auth.py has one) doesn't have

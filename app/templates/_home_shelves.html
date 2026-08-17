@@ -22,7 +22,7 @@
       <div class="channel-row" id="home-channel-row">
         {% for feed in home_recent_channels %}
         <button type="button" class="channel-chip{{ ' has-avatar' if feed.avatar_url else '' }}" data-feed-id="{{ feed.id }}">
-          {% if feed.avatar_url %}<img class="channel-chip-avatar" src="{{ feed.avatar_url }}" alt="" />{% endif %}
+          {% if feed.avatar_url %}<img class="channel-chip-avatar" src="{{ feed.avatar_url }}" alt="" loading="lazy" />{% endif %}
           <span>{{ feed.channel_title or feed.rss_url }}</span>
         </button>
         {% endfor %}

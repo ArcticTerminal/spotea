@@ -84,6 +84,43 @@ export function setupHorizontalScrollers() {
   onFragmentsSwapped(wireScrollers);
 }
 
+// Every row currently under active drag-scroll wiring, so a fragment swap
+// that removes it (replaceChildren, not row.remove()) can have its
+// ResizeObserver disconnected. Nothing else ever called .disconnect(): each
+// wireScrollers() call after a swap wired the *new* rows the server sent
+// back, but the ResizeObserver watching the *old*, now-detached ones just
+// kept existing — measured live, 5 observers at boot became 105 after 20
+// refreshes, one leaked per row per swap. Keyed by row rather than pruned
+// eagerly at swap time because Explore's recommendation shelves call
+// wireScrollers() directly for rows that were never part of a fragment swap
+// at all — "is this row still in the document?" is the only check that's
+// right either way.
+const wiredRows = new Map();
+
+function pruneDetachedObservers() {
+  for (const [row, observer] of wiredRows) {
+    if (document.contains(row)) continue;
+    observer.disconnect();
+    wiredRows.delete(row);
+  }
+}
+
+// Whichever row's mousedown most recently fired, so the single window-level
+// mouseup listener below knows which row to reset — see wireScrollers' own
+// comment for why this listener exists at module scope instead of one per
+// row. `dragged` deliberately isn't reset here: it stays a private variable
+// inside each row's own closure below, exactly as it was before this leak
+// fix, only reset by that row's own next mousedown. A shared/reset-on-mouseup
+// `dragged` would go stale across rows — mouseup fires before click, so
+// resetting it here would already be false by the time a row's own click
+// handler checks it below, defeating the suppression entirely.
+let activeDragReset = null;
+
+window.addEventListener("mouseup", () => {
+  activeDragReset?.();
+  activeDragReset = null;
+});
+
 /**
  * Makes every not-yet-wired `.shelf-row`/`.channel-row` on the page
  * drag-scrollable. Idempotent (each row is marked once), so anything that
@@ -91,6 +128,8 @@ export function setupHorizontalScrollers() {
  * call this afterwards rather than repeating the behaviour.
  */
 export function wireScrollers() {
+  pruneDetachedObservers();
+
   // Shelf/channel rows are wider than their container by design. Genuine
   // horizontal gestures (trackpad two-finger swipe, shift+wheel, a tilt
   // wheel) already scroll these natively via overflow-x:auto — no JS needed.
@@ -117,7 +156,9 @@ export function wireScrollers() {
       if (seeMore) seeMore.hidden = !isScrollable;
     };
     updateScrollable();
-    new ResizeObserver(updateScrollable).observe(row);
+    const observer = new ResizeObserver(updateScrollable);
+    observer.observe(row);
+    wiredRows.set(row, observer);
 
     // Links and images are natively draggable — without this, pressing down
     // on a card's thumbnail and moving the mouse makes the browser start its
@@ -130,6 +171,11 @@ export function wireScrollers() {
     let startX = 0;
     let startScroll = 0;
 
+    function resetDrag() {
+      isDown = false;
+      row.classList.remove("dragging");
+    }
+
     row.addEventListener("mousedown", (event) => {
       if (!row.classList.contains("is-scrollable")) return;
       isDown = true;
@@ -137,16 +183,12 @@ export function wireScrollers() {
       startX = event.pageX;
       startScroll = row.scrollLeft;
       row.classList.add("dragging");
-    });
-
-    window.addEventListener("mouseup", () => {
-      isDown = false;
-      row.classList.remove("dragging");
+      activeDragReset = resetDrag;
     });
 
     row.addEventListener("mouseleave", () => {
-      isDown = false;
-      row.classList.remove("dragging");
+      resetDrag();
+      if (activeDragReset === resetDrag) activeDragReset = null;
     });
 
     row.addEventListener("mousemove", (event) => {

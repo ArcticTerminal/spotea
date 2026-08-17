@@ -48,7 +48,8 @@ def _other_profile_feed(db_session) -> Feed:
 FRAGMENTS = [
     ("/partials/home", ["home-shelves"]),
     ("/partials/library", ["library-grid"]),
-    ("/partials/downloads", ["downloads-body", "settings-storage-desc"]),
+    ("/partials/downloads", ["downloads-body"]),
+    ("/partials/storage-summary", ["settings-storage-desc"]),
 ]
 
 
@@ -158,12 +159,17 @@ def test_library_fragment_counts_follow_the_data(client, db_session):
 
 
 def test_downloads_fragment_reports_stored_sizes(client, db_session):
+    """The modal's own list (full collect_usage) and the Settings summary
+    line (the cheaper usage_summary) are two separate fragments now — see
+    page_context.storage_summary_context — but they still have to agree,
+    same as before the split."""
     _seed(db_session)
 
-    fragment = client.get("/partials/downloads").text
+    downloads_fragment = client.get("/partials/downloads").text
+    summary_fragment = client.get("/partials/storage-summary").text
 
-    assert "3.0 MB" in _fragment_body(fragment, "downloads-body")
-    assert _fragment_body(fragment, "settings-storage-desc") == "3.0 MB across 1 item"
+    assert "3.0 MB" in _fragment_body(downloads_fragment, "downloads-body")
+    assert _fragment_body(summary_fragment, "settings-storage-desc") == "3.0 MB across 1 item"
 
 
 def test_fragments_are_empty_but_valid_for_a_fresh_profile(client):

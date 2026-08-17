@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from app.config import settings
@@ -23,6 +24,18 @@ class StorageUsage:
     @property
     def count(self) -> int:
         return len(self.items)
+
+
+@dataclass
+class UsageSummary:
+    """Same two fields (`total_bytes`, `count`) a StorageUsage exposes, so
+    the one Jinja template both render through (_fragment_storage_summary.html,
+    also index.html's initial render) doesn't need to know which of the two
+    it got. See usage_summary below for why this exists separately from
+    StorageUsage."""
+
+    total_bytes: int
+    count: int
 
 
 def _size_on_disk(file_path: str | None) -> int:
@@ -76,6 +89,29 @@ def collect_usage(db: Session, user_id: int) -> StorageUsage:
         db.commit()
 
     return StorageUsage(items=items, total_bytes=sum(item.size_bytes for item in items))
+
+
+def usage_summary(db: Session, user_id: int) -> UsageSummary:
+    """Just the two numbers the Settings summary line needs — SUM and COUNT —
+    without collect_usage's per-row materialization (a StoredItem, plus a
+    joinedload(feed), built for every ready row). That row-by-row work was
+    running on every single Home page render and, before this, on every
+    save/favorite/play too (see fragments.js's refreshFragments) for a line
+    that only ever changes when a download starts or is removed.
+
+    A pre-existing row with a NULL file_size_bytes (predating the column —
+    see migrations.py's _COLUMN_MIGRATIONS) is backfilled by collect_usage's
+    own first call, not here: this never writes, so it stays correct as soon
+    as anything has run collect_usage once — the very first Home page load
+    already does — and undercounts by exactly the same NULL-until-backfilled
+    amount collect_usage itself always read before that first call.
+    """
+    total_bytes, count = (
+        db.query(func.coalesce(func.sum(Content.file_size_bytes), 0), func.count(Content.id))
+        .filter(Content.user_id == user_id, Content.status == "ready")
+        .one()
+    )
+    return UsageSummary(total_bytes=total_bytes, count=count)
 
 
 def unlink_thumbnail_if_unshared(db: Session, video_id: str, exclude_content_id: int) -> None:

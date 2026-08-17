@@ -13,11 +13,19 @@
 // small requests, on a household app, in exchange for the whole class of
 // "stale until reload" bugs — and it also picks up changes this tab never
 // made (the background feed refresh, another device).
+//
+// The Downloads modal's own item-by-item list is deliberately NOT one of
+// these three — it used to be (as "downloads", bundled with the one-line
+// Settings summary below), and refetching it on every save/favorite/play
+// meant paying for the full list — 86.5KB on a real library, 57% of the
+// whole page's initial payload — behind a modal that's closed the vast
+// majority of the time. See refreshDownloadsBody below for where it's
+// fetched instead.
 
 const FRAGMENTS = [
   { name: "home", targets: ["home-shelves"] },
   { name: "library", targets: ["library-grid"] },
-  { name: "downloads", targets: ["downloads-body", "settings-storage-desc"] },
+  { name: "storage-summary", targets: ["settings-storage-desc"] },
 ];
 
 const afterSwapCallbacks = [];
@@ -97,4 +105,18 @@ export async function refreshFragments() {
   if (results.some(Boolean)) {
     for (const callback of afterSwapCallbacks) callback();
   }
+}
+
+/** Fetches the Downloads modal's own full list — see the module-level
+    comment above for why this isn't part of refreshFragments()'s default
+    sweep. Called when the modal is opened and after an action taken inside
+    it (home/settings.js), both of which are moments the modal is either
+    about to be or already is on screen — unlike the rest of the app's
+    refreshFragments() calls, which fire whether or not it's even open. */
+export async function refreshDownloadsBody() {
+  const swapped = await refreshOne({ name: "downloads", targets: ["downloads-body"] });
+  if (swapped) {
+    for (const callback of afterSwapCallbacks) callback();
+  }
+  return swapped;
 }

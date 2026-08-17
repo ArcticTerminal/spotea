@@ -96,7 +96,20 @@ let activeVisibilityHandler = null;
 // is handed to the browser to deliver rather than depending on this page
 // still running. Failures here are swallowed entirely — diagnostics that can
 // break playback are worse than no diagnostics.
+
+// Only these event names actually reach the server — every call site below
+// (and in home/overlay.js) still fires unconditionally, on the happy path
+// too, but reportPlayback silently drops anything not in this set. Measured
+// live: 4 beacons per track played under the old blanket policy ("now-playing",
+// "play-requested" and a successful "playing" for starting one, "track-ended"
+// for finishing it) — none of those are ever useful for debugging, since
+// they're what *every* track produces whether or not anything actually went
+// wrong. The four kept here are exactly the ones that only fire when
+// something didn't happen the way it should have.
+const REPORTED_EVENTS = new Set(["play-rejected", "playback-stalled", "prepare-failed", "outgoing-ended"]);
+
 export function reportPlayback(event, detail = {}) {
+  if (!REPORTED_EVENTS.has(event)) return;
   try {
     const body = JSON.stringify([
       { event, visibility: document.visibilityState, at: new Date().toISOString(), ...detail },

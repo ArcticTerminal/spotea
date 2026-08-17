@@ -214,7 +214,7 @@
         <div class="settings-row">
           <div class="settings-row-info">
             <span class="settings-row-label">Storage used</span>
-            <span class="settings-row-desc" id="settings-storage-desc">{{ usage.total_bytes | filesize }} across {{ usage.count }} item{{ '' if usage.count == 1 else 's' }}</span>
+            <span class="settings-row-desc" id="settings-storage-desc">{% include "_storage_summary.html" %}</span>
           </div>
           <button type="button" id="open-downloads" class="btn-quiet">Manage downloads</button>
         </div>

@@ -22,7 +22,7 @@ from app.content_query import (
 )
 from app.feed_sync import cache_thumbnail
 from app.models import Content, Feed
-from app.storage import collect_usage
+from app.storage import collect_usage, usage_summary
 
 HOME_SHELF_LIMIT = 12
 HOME_CHANNEL_LIMIT = 8
@@ -175,9 +175,26 @@ def library_context(db: Session, user_id: int) -> dict:
 
 
 def downloads_context(db: Session, user_id: int) -> dict:
-    """What's on disk — shown both in the Downloads modal and as a one-line
-    summary in Settings."""
+    """What's on disk, item by item — the Downloads modal's own list, plus
+    (at initial page load only, see pages.py's home()) the Settings summary
+    line rendered from the same object. The fragment endpoints that refresh
+    these afterwards (routers/partials.py) split apart: the modal's full list
+    is fetched only when actually opened (home/settings.js's
+    setupDownloadsOverlay), the summary line on every refreshFragments()
+    sweep — see storage_summary_context below for that cheaper path.
+    """
     return {"usage": collect_usage(db, user_id)}
+
+
+def storage_summary_context(db: Session, user_id: int) -> dict:
+    """Just the Settings summary line's two numbers, via
+    storage.usage_summary rather than collect_usage — no per-row
+    materialization, no joinedload. What refreshFragments() actually needs
+    after a save/favorite/play; the full item list it used to also refetch
+    was 86.5KB and, on the household's real library, 57% of the whole page's
+    initial payload for a modal closed the vast majority of the time.
+    """
+    return {"usage": usage_summary(db, user_id)}
 
 
 # kind -> (is_match, filter_value, title, empty_message) for the four pinned

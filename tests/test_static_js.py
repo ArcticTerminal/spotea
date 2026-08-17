@@ -122,3 +122,102 @@ def test_setup_profiles_does_not_eagerly_fetch_the_profile_list() -> None:
     assert "loadProfiles()" not in source, (
         "setupProfiles calls loadProfiles() directly — the boot-time fetch is back"
     )
+
+
+def test_report_playback_only_sends_the_unexpected_events() -> None:
+    """4 beacons were measured per track played under the old blanket policy
+    — "now-playing", "play-requested" and a successful "playing" for
+    starting a track, "track-ended" for finishing it — none of which are
+    ever useful for debugging, since every track produces them whether or
+    not anything went wrong. Pinned as an exact set rather than "at least
+    these" so a future change to the allowlist is a deliberate edit here,
+    not a silent one in player.js."""
+    source = (JS_DIR / "player.js").read_text()
+
+    match = re.search(r'const REPORTED_EVENTS = new Set\(\[(.*?)\]\);', source)
+    assert match, "REPORTED_EVENTS allowlist not found in player.js"
+    kept = {name.strip().strip('"') for name in match.group(1).split(",") if name.strip()}
+
+    assert kept == {"play-rejected", "playback-stalled", "prepare-failed", "outgoing-ended"}
+
+    # The allowlist alone proves nothing if reportPlayback doesn't actually
+    # enforce it — this is the guard clause that turns "defined" into "used".
+    # Checked as one contiguous block (not via _function_body's brace
+    # matching) because reportPlayback's own `detail = {}` default parameter
+    # contains a brace pair that helper isn't parameter-list-aware enough to
+    # skip past.
+    assert (
+        "export function reportPlayback(event, detail = {}) {\n"
+        "  if (!REPORTED_EVENTS.has(event)) return;"
+    ) in source, (
+        "REPORTED_EVENTS is defined but reportPlayback no longer checks "
+        "against it — every event is being sent again"
+    )
+
+
+def test_wire_scrollers_does_not_leak_a_listener_or_observer_per_row() -> None:
+    """wireScrollers() runs again after every fragment swap (Home/Library
+    rows get replaced wholesale), and it used to create a brand new
+    ResizeObserver *and* a brand new `window` "mouseup" listener for every
+    row, every single time — neither was ever torn down. Measured live: 5 of
+    each at boot, 105 of each after 20 refreshes. The fix is structural
+    (module-scope singletons, not per-row), so this checks the structure
+    rather than actually leaking memory in a browser this suite can't run."""
+    source = (JS_DIR / "home" / "library.js").read_text()
+
+    mouseup_registrations = source.count('addEventListener("mouseup"')
+    assert mouseup_registrations == 1, (
+        f"expected exactly one window mouseup listener, found {mouseup_registrations} "
+        "— a per-row registration inside wireScrollers is back"
+    )
+    # The one registration that exists must be at module scope (outside
+    # wireScrollers' body), or "exactly one" would just mean it moved rather
+    # than stopped repeating.
+    wire_scrollers_start = source.index("export function wireScrollers")
+    assert source.index('addEventListener("mouseup"') < wire_scrollers_start, (
+        "the mouseup listener is registered inside wireScrollers — it will "
+        "run again, and leak again, on every fragment swap"
+    )
+
+    assert source.count("new ResizeObserver(") == 1, (
+        "wireScrollers should create exactly one ResizeObserver kind of call "
+        "site — if a per-swap observer is still made without being tracked "
+        "for disconnection, the leak is back"
+    )
+    assert "observer.disconnect()" in source, (
+        "no disconnect() call on the tracked observer — old rows' ResizeObservers "
+        "are never torn down (a mention of .disconnect() in a comment doesn't count)"
+    )
+
+
+def test_downloads_modal_actions_refresh_its_own_list() -> None:
+    """Clearing all downloads or removing one both run from *inside* the open
+    Downloads modal — since refreshFragments() alone no longer touches that
+    modal's list (see the sweep test above), those two actions have to opt
+    back in explicitly, or a user's own action wouldn't appear to do
+    anything until they closed and reopened the modal."""
+    source = (JS_DIR / "home" / "settings.js").read_text()
+
+    assert source.count("{ alsoDownloads: true }") == 2, (
+        "expected exactly two confirmedAction calls (clear-storage, "
+        "remove-download) to opt into refreshing the open modal's own list"
+    )
+
+
+def test_refresh_fragments_default_sweep_does_not_include_the_downloads_body() -> None:
+    """/partials/downloads was 86.5KB — the Downloads modal's full item list —
+    behind a modal that's closed the vast majority of the time, and
+    refreshFragments() (called after every save/favorite/play) used to
+    refetch it every single time regardless. See fragments.js's
+    refreshDownloadsBody for where that list is fetched instead."""
+    source = (JS_DIR / "fragments.js").read_text()
+    fragments_block = source[source.index("const FRAGMENTS") : source.index("];") + 2]
+
+    assert "downloads-body" not in fragments_block, (
+        "FRAGMENTS' default sweep includes downloads-body again — the "
+        "expensive modal list is back to being refetched on every action"
+    )
+    assert "refreshDownloadsBody" in source, (
+        "the on-demand downloads-body refresh (called on #open-downloads and "
+        "from settings.js's in-modal actions) is gone"
+    )

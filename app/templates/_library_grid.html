@@ -49,7 +49,7 @@
       {% set video_count = channel_video_counts.get(feed.id, 0) %}
       <a class="channel-card" href="/#channel/{{ feed.id }}" data-detail-kind="channel" data-detail-id="{{ feed.id }}">
         {% if feed.avatar_url %}
-        <img class="channel-card-avatar" src="{{ feed.avatar_url }}" alt="" />
+        <img class="channel-card-avatar" src="{{ feed.avatar_url }}" alt="" loading="lazy" />
         {% else %}
         <span class="channel-card-avatar"></span>
         {% endif %}

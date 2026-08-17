@@ -1,8 +1,10 @@
-{# Wrapper that GET /partials/downloads returns. Two targets from one render:
-   the same storage figures appear in the Downloads modal and as a one-line
-   summary in Settings, and re-querying for each would be the same work twice.
-   See routers/partials.py. #}
+{# Wrapper that GET /partials/downloads returns — the Downloads modal's full
+   item-by-item list, fetched only when the modal is actually opened (see
+   home/settings.js's setupDownloadsOverlay) rather than on every
+   refreshFragments() sweep. The one-line Settings summary that used to come
+   bundled with this is now its own cheap fragment
+   (_fragment_storage_summary.html) — see page_context.storage_summary_context
+   for why they were split apart. See routers/partials.py. #}
 <template data-target="downloads-body">
 {% include "_downloads.html" %}
 </template>
-<template data-target="settings-storage-desc">{{ usage.total_bytes | filesize }} across {{ usage.count }} item{{ '' if usage.count == 1 else 's' }}</template>

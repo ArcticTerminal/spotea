@@ -1,20 +1,34 @@
 // The Settings tab's controls, plus the Downloads modal they open.
 
 import { api, confirmDialog, escapeHtml, setupOverlay, showToast } from "../core.js";
-import { refreshFragments } from "../fragments.js";
+import { refreshDownloadsBody, refreshFragments } from "../fragments.js";
 import { invalidateRecommendations } from "./explore.js";
 
 export function setupDownloadsOverlay() {
   setupOverlay("downloads-overlay", "downloads-close", ["open-downloads"]);
+  // The modal already has *something* to show the instant it opens — its
+  // list was server-rendered at page load — so this doesn't block that open
+  // on a round trip, just freshens it right after in case anything changed
+  // since (another tab, the background refresh finishing a download).
+  document.getElementById("open-downloads")?.addEventListener("click", () => {
+    refreshDownloadsBody();
+  });
 }
 
-/** Confirm, then call, then re-render whatever it changed. */
-async function confirmedAction(message, confirmLabel, url, { method, errorMessage }) {
+/** Confirm, then call, then re-render whatever it changed. `alsoDownloads`
+    is for the two actions below that run *from inside* the open Downloads
+    modal (clear all, remove one) — refreshFragments() alone no longer
+    touches that modal's list (see fragments.js), so without this a user's
+    own action wouldn't appear to do anything until they closed and reopened
+    it. */
+async function confirmedAction(message, confirmLabel, url, { method, errorMessage }, { alsoDownloads = false } = {}) {
   if (!(await confirmDialog(message, confirmLabel))) return;
   const { ok } = await api(url, { method, errorMessage });
+  if (!ok) return;
   // A fragment refresh rather than a reload: these run from inside the
   // Downloads modal, and reloading closed it out from under the user.
-  if (ok) refreshFragments();
+  refreshFragments();
+  if (alsoDownloads) refreshDownloadsBody();
 }
 
 export function setupStorage() {
@@ -40,7 +54,8 @@ export function setupStorage() {
         "Delete all downloaded audio? Your channels and saved items stay — you can download anything again by playing it.",
         "Clear all",
         "/storage",
-        { method: "DELETE", errorMessage: "Could not clear downloads" }
+        { method: "DELETE", errorMessage: "Could not clear downloads" },
+        { alsoDownloads: true }
       );
       return;
     }
@@ -51,7 +66,8 @@ export function setupStorage() {
         "Remove this download? You can get it back by playing it again.",
         "Remove",
         `/content/${removeBtn.dataset.contentId}`,
-        { method: "DELETE", errorMessage: "Could not remove this download" }
+        { method: "DELETE", errorMessage: "Could not remove this download" },
+        { alsoDownloads: true }
       );
     }
   });
