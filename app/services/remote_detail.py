@@ -103,7 +103,6 @@ def remote_channel_context(db: Session, user_id: int, channel_id: str) -> dict |
         {
             "video_count": len(uploads.items),
             "count_label": f"Latest {len(uploads.items)} uploads",
-            "subscriber_count": uploads.subscriber_count,
             # Whatever the recommendation search already downloaded for this
             # channel (see youtube/search.py's _cached_or_downloaded_avatar).
             # Not fetched here if missing: a deep link to a channel never

@@ -196,10 +196,7 @@ function formatAge(iso) {
 function renderRecommendations(data) {
   const body = document.getElementById("recommendations-body");
   const meta = document.getElementById("recommendations-meta");
-  const refresh = document.getElementById("recommendations-refresh");
   if (!body) return;
-
-  if (refresh) refresh.hidden = !data.interests.length;
 
   if (!data.interests.length) {
     if (meta) meta.textContent = "";

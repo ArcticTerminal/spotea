@@ -4,7 +4,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session, joinedload
 
-from app.content_query import query_content_ids, query_content_page
+from app.content_query import query_content_ids
 from app.database import SessionLocal
 from app.deps import get_current_profile, get_db, require_login
 from app.downloader import DownloadError, VideoUnavailableError, download_audio
@@ -13,7 +13,7 @@ from app.formatting import safe_filename
 from app.models import Content, Feed, User
 from app.page_context import playlist_filter
 from app.progress import ProgressRegistry
-from app.schemas import ContentOut, ContentPageOut, FavoriteOut, QueueOut, SavedOut, StatusOut
+from app.schemas import ContentOut, FavoriteOut, QueueOut, SavedOut, StatusOut
 from app.storage import unlink_if_unshared
 from app.timeutil import utcnow
 from app.youtube.urls import VIDEO_ID_RE
@@ -107,21 +107,6 @@ def _run_download(content_id: int, video_id: str, quality: str) -> None:
         # unavailable before (a licence that has since landed in this
         # country, a re-upload) no longer holds.
         is_unavailable=False,
-    )
-
-
-@router.get("", response_model=ContentPageOut)
-def list_content(
-    page: int = 1,
-    filter: str = "",
-    profile: User = Depends(get_current_profile),
-    db: Session = Depends(get_db),
-) -> ContentPageOut:
-    items, page, total_pages = query_content_page(db, profile.id, page, filter)
-    return ContentPageOut(
-        items=[ContentOut.from_content(c) for c in items],
-        page=page,
-        total_pages=total_pages,
     )
 
 

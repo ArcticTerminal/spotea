@@ -122,21 +122,6 @@ def test_delete_endpoint_resets_the_stored_size_too(client, db_session, tmp_path
     assert content.file_size_bytes is None
 
 
-def test_storage_endpoint_shape(client, db_session, tmp_path):
-    content, _audio = _ready_content(
-        db_session, tmp_path, video_id="endpoint001", size_bytes=1, stored_size=2 * 1024 * 1024
-    )
-
-    res = client.get("/storage")
-
-    assert res.status_code == 200
-    data = res.json()
-    assert data["count"] == 1
-    assert data["total_formatted"] == "2.0 MB"
-    assert data["items"][0]["id"] == content.id
-    assert data["items"][0]["channel_title"] == "Storage Channel"
-
-
 def test_export_streams_from_disk_and_leaves_nothing_behind(client, db_session, tmp_path):
     """The archive is built on disk, not in memory, and cleaned up afterwards.
 

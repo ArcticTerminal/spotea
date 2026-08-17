@@ -15,7 +15,7 @@
         </span>
         <span class="channel-card-info">
           <span class="channel-card-title">Favorites</span>
-          <span class="channel-card-count" id="library-count-favorites">{{ favorites_count }} video{{ '' if favorites_count == 1 else 's' }}</span>
+          <span class="channel-card-count">{{ favorites_count }} video{{ '' if favorites_count == 1 else 's' }}</span>
         </span>
       </a>
       <a class="channel-card" href="/#saved" data-detail-kind="saved">
@@ -24,7 +24,7 @@
         </span>
         <span class="channel-card-info">
           <span class="channel-card-title">Saved for later</span>
-          <span class="channel-card-count" id="library-count-saved">{{ saved_count }} video{{ '' if saved_count == 1 else 's' }}</span>
+          <span class="channel-card-count">{{ saved_count }} video{{ '' if saved_count == 1 else 's' }}</span>
         </span>
       </a>
       <a class="channel-card" href="/#new-uploads" data-detail-kind="new-uploads">
@@ -42,7 +42,7 @@
         </span>
         <span class="channel-card-info">
           <span class="channel-card-title">Recently Played</span>
-          <span class="channel-card-count" id="library-count-recently-played">{{ recently_played_count }} video{{ '' if recently_played_count == 1 else 's' }}</span>
+          <span class="channel-card-count">{{ recently_played_count }} video{{ '' if recently_played_count == 1 else 's' }}</span>
         </span>
       </a>
       {% for feed in feeds %}

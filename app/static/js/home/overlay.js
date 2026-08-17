@@ -542,8 +542,9 @@ export function setupPlayerOverlay() {
   if (!homeTab) return;
 
   homeTab.addEventListener("click", (event) => {
-    // Let ctrl/cmd/shift-click and middle-click behave natively (open the
-    // standalone /player/{id} page in a new tab) instead of hijacking them.
+    // Let ctrl/cmd/shift-click and middle-click behave natively (open a new
+    // tab on this same #player/{id} hash, which handleInitialRoute resolves
+    // on boot) instead of hijacking them.
     if (event.ctrlKey || event.metaKey || event.shiftKey || event.button !== 0) return;
     if (event.target.closest(".btn-save")) return; // content-actions.js owns this
 
@@ -557,10 +558,9 @@ export function setupPlayerOverlay() {
   });
 }
 
-// Unlike player.html (whose #player-root always has a server-rendered content
-// id, so prepareAudio's own resume logic just works after the bfcache-driven
-// reload), the overlay starts every fresh page load closed and empty — it has
-// to be explicitly reopened before there's anything for that logic to attach to.
+// #player-root has no server-rendered content id — the overlay starts every
+// fresh page load closed and empty — so it has to be explicitly reopened
+// before prepareAudio's resume logic has anything to attach to.
 export function resumeOverlayIfNeeded() {
   const root = document.getElementById("player-root");
   if (!root || root.dataset.contentId) return;

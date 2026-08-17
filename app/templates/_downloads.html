@@ -7,7 +7,7 @@
 <div class="storage-summary">
       <div>
         <span class="storage-total" id="storage-total">{{ usage.total_bytes | filesize }}</span>
-        <span class="muted" id="storage-count">across {{ usage.count }} item{{ '' if usage.count == 1 else 's' }}</span>
+        <span class="muted">across {{ usage.count }} item{{ '' if usage.count == 1 else 's' }}</span>
       </div>
       <div class="storage-summary-actions" id="storage-summary-actions" {% if not usage.count %}hidden{% endif %}>
         <a href="/storage/export" download class="btn-quiet">Export all</a>
