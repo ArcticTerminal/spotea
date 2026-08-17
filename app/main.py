@@ -12,6 +12,7 @@ from app.app_settings import get_app_settings
 from app.config import settings
 from app.database import Base, SessionLocal, engine
 from app.deps import NotAuthenticated, require_login
+from app.middleware import install as install_middleware
 from app.migrations import run_migrations
 from app.routers import auth as auth_router
 from app.routers import content as content_router
@@ -66,7 +67,15 @@ app.add_middleware(
     secret_key=settings.secret_key,
     session_cookie="spotea_session",
     same_site="lax",
+    # Off by default because the app is reachable over plain HTTP on a LAN,
+    # which is how most installs run it; set SESSION_HTTPS_ONLY=true when it's
+    # behind a TLS-terminating proxy so the session cookie can't leak over an
+    # unencrypted hop.
+    https_only=settings.session_https_only,
 )
+
+# Added after SessionMiddleware, so these run outside it — see middleware.install.
+install_middleware(app)
 
 class RevalidatingStaticFiles(StaticFiles):
     """Static files that must be revalidated before reuse.

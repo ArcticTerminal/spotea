@@ -11,7 +11,11 @@
 // (including audio stream Range chunks and error bodies — see API_PREFIXES
 // below), so any client still holding a v1 cache needs it purged, not just
 // left alone because the name didn't change.
-const CACHE_NAME = "spotea-v2";
+//
+// Bumped again to v3 for the same reason: v2 intercepted cross-origin
+// requests, so its cache can hold opaque i.ytimg.com/yt3.ggpht.com entries
+// that the fetch handler no longer has any use for.
+const CACHE_NAME = "spotea-v3";
 
 // These routers (see app/routers/*.py) are all live API traffic, never
 // static assets — caching them is actively harmful, not just useless:
@@ -44,7 +48,23 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
 
-  const path = new URL(event.request.url).pathname;
+  const url = new URL(event.request.url);
+
+  // Cross-origin requests are none of this worker's business, and handling
+  // them actively broke things: an <img> pointing at i.ytimg.com is a no-cors
+  // request whose response is opaque, and passing it through the fetch/clone/
+  // cache.put path below made it fail outright. Measured against the live app
+  // — with the worker registered, 23 of Explore's remote thumbnails failed
+  // with ERR_FAILED; with it blocked, none did. Uncached Explore artwork was
+  // therefore broken in the installed PWA and in any browser once the worker
+  // had activated, while looking fine on the very first load before it did.
+  //
+  // This worker exists to make the app installable and to fall back to a
+  // cached copy of our *own* assets when the network is down (see the header
+  // above), and remote artwork is neither.
+  if (url.origin !== self.location.origin) return;
+
+  const path = url.pathname;
   if (API_PREFIXES.some((prefix) => path.startsWith(prefix))) return;
 
   event.respondWith(

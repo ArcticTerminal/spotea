@@ -3,7 +3,12 @@
 {% block title %}Spotea{% endblock %}
 
 {% block head_extra %}
-  <script>
+  {# The one inline script in the app, and the reason the CSP carries a nonce
+     at all — it has to run before first paint, so moving it to an external
+     file would put a blocking request in front of every render. The nonce
+     comes off request.state, which Jinja2Templates exposes on every template
+     without any router having to pass it (see app/middleware.py). #}
+  <script nonce="{{ request.state.csp_nonce }}">
     // Runs before the body paints, so the right tab (from the URL, falling
     // back to the last one used) is already correct on first render —
     // without this, the server always renders Library first and JS only

@@ -75,3 +75,34 @@ def test_escape_html_is_the_only_escaper_used_in_markup() -> None:
             offenders.append(f"{path}: {match.group(0)}")
 
     assert not offenders, "attribute interpolation without escapeHtml:\n" + "\n".join(offenders)
+
+
+def test_service_worker_ignores_cross_origin_requests() -> None:
+    """The worker must not intercept anything it doesn't serve itself.
+
+    It used to handle every GET, including the no-cors `<img>` requests for
+    remote artwork on i.ytimg.com. Passing an opaque response through its
+    fetch/clone/cache.put path made those fail outright: measured against the
+    live app, 23 of Explore's thumbnails failed with ERR_FAILED while the
+    worker was registered and none did with it blocked. So uncached Explore
+    artwork was broken in the installed PWA, and fine on the very first load
+    before the worker activated — which is what made it look intermittent.
+    """
+    source = (JS_DIR / "sw.js").read_text()
+
+    # Matched on the exact expressions rather than loose substrings — both
+    # phrases also appear in the prose around them, and an earlier version of
+    # this test happily found them in a comment.
+    check = "url.origin !== self.location.origin"
+    write = "cache.put(event.request"
+
+    assert check in source, (
+        "sw.js no longer compares the request's origin, so it is intercepting "
+        "remote artwork again"
+    )
+    assert write in source, "sw.js's caching call moved; this guard needs updating"
+    # The early return has to come before the caching path, or the check is
+    # decoration.
+    assert source.index(check) < source.index(write), (
+        "the origin check must short-circuit before the cache write"
+    )

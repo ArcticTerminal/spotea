@@ -21,6 +21,11 @@ _TEST_DIR = Path(tempfile.mkdtemp(prefix="spotea-test-"))
 os.environ["DATABASE_URL"] = f"sqlite:///{_TEST_DIR / 'test.db'}"
 os.environ["STORAGE_DIR"] = str(_TEST_DIR / "storage")
 os.environ["AVATARS_DIR"] = str(_TEST_DIR / "avatars")
+# Was missing while every other data path was covered, so settings.thumbnails_dir
+# kept its production default through the whole suite. Nothing wrote there yet,
+# which is the only reason it never showed — exactly the "even indirectly" case
+# this file exists to rule out.
+os.environ["THUMBNAILS_DIR"] = str(_TEST_DIR / "thumbnails")
 os.environ["APP_PASSWORD"] = "test-password"
 os.environ["SECRET_KEY"] = "test-secret-key-not-for-production-use"
 
@@ -42,6 +47,7 @@ def _assert_paths_isolated() -> None:
     assert str(_TEST_DIR) in settings.database_url
     assert str(_TEST_DIR) in str(settings.storage_dir)
     assert str(_TEST_DIR) in str(settings.avatars_dir)
+    assert str(_TEST_DIR) in str(settings.thumbnails_dir)
 
 
 _assert_paths_isolated()

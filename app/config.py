@@ -14,6 +14,11 @@ class Settings(BaseSettings):
     avatars_dir: Path = Path("/app/data/avatars")
     thumbnails_dir: Path = Path("/app/data/thumbnails")
     audio_format: str = "m4a"
+    # Marks the session cookie Secure, so it is only ever sent over HTTPS.
+    # Off by default: plenty of installs are reached over plain HTTP on a LAN,
+    # and turning it on there would make login silently impossible. Turn it on
+    # once the app sits behind a TLS proxy (see README).
+    session_https_only: bool = False
 
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=False, extra="ignore")
 
