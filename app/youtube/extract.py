@@ -18,19 +18,46 @@ from dataclasses import dataclass
 import yt_dlp
 
 from app.youtube.urls import (
+    CHANNEL_ID_RE,
     CHANNEL_ID_URL_RE,
     CHANNEL_PAGE_URL_TEMPLATE,
     VIDEO_ID_RE,
     YOUTUBE_WATCH_URL,
     absolute_thumbnail_url,
     channel_feed_url,
+    extract_channel_id,
+    is_youtube_url,
     longform_playlist_url,
 )
 
-# playlist_items="0" fetches channel-level metadata without any videos.
-_CHANNEL_RESOLVE_OPTS = {
+# Same value and same reasoning as downloader.py's SOCKET_TIMEOUT_SECONDS, but
+# it had never been applied to these metadata calls — which is worse than for a
+# download, because these run inside a request (POST /feeds) and inside
+# feed_sync's 8-thread refresh pool. With no socket_timeout yt-dlp inherits the
+# OS TCP timeout, so a host that accepts the connection and stops answering
+# pins the thread for minutes.
+METADATA_SOCKET_TIMEOUT_SECONDS = 10
+
+# The timeout alone isn't a bound: yt-dlp's defaults (retries=10,
+# extractor_retries=3) multiply it, which is how a "10 second timeout" turns
+# back into minutes. Two attempts is enough for the transient case — and unlike
+# downloader.py there's no client ladder behind these to make a stubborn retry
+# worthwhile.
+METADATA_RETRIES = 2
+
+# Shared by every extraction in this module and by search.py, which runs the
+# same kind of call from a keystroke.
+NETWORK_OPTS = {
     "quiet": True,
     "no_warnings": True,
+    "socket_timeout": METADATA_SOCKET_TIMEOUT_SECONDS,
+    "retries": METADATA_RETRIES,
+    "extractor_retries": METADATA_RETRIES,
+}
+
+# playlist_items="0" fetches channel-level metadata without any videos.
+_CHANNEL_RESOLVE_OPTS = {
+    **NETWORK_OPTS,
     "extract_flat": "in_playlist",
     "playlist_items": "0",
 }
@@ -38,21 +65,16 @@ _CHANNEL_RESOLVE_OPTS = {
 # Deliberately not flat: a flat search result's channel_id can be missing or
 # ambiguous for a video credited to multiple channels (e.g. a feature) — see
 # resolve_video_channel. This runs once, only on the single video the user picks.
-_VIDEO_CHANNEL_RESOLVE_OPTS = {
-    "quiet": True,
-    "no_warnings": True,
-}
+_VIDEO_CHANNEL_RESOLVE_OPTS = dict(NETWORK_OPTS)
 
 _DURATION_FETCH_OPTS = {
-    "quiet": True,
-    "no_warnings": True,
+    **NETWORK_OPTS,
     "extract_flat": "in_playlist",
     "playlist_items": "1-50",
 }
 
 _BACKFILL_FETCH_OPTS = {
-    "quiet": True,
-    "no_warnings": True,
+    **NETWORK_OPTS,
     "extract_flat": "in_playlist",
 }
 
@@ -64,7 +86,24 @@ class ChannelResolutionError(Exception):
 def resolve_feed_url(url: str) -> str:
     """Turn a YouTube channel URL (any form: @handle, /channel/UC.., /c/.., /user/..)
     or an already-direct RSS feed URL into a usable RSS feed URL."""
+    url = url.strip()
+    # Every branch below either fetches this URL or hands it to yt-dlp, whose
+    # error text reaches the client — see is_youtube_url for what that allowed.
+    # Rejected here as well as in fetch_feed so the user gets the real reason
+    # instead of a channel-resolution failure from yt-dlp.
+    if not is_youtube_url(url):
+        raise ChannelResolutionError("Only youtube.com and youtu.be URLs can be followed")
+
     if "feeds/videos.xml" in url:
+        # Canonicalised through channel_feed_url rather than returned as typed,
+        # so an "http://" or "m.youtube.com" spelling of a feed the user already
+        # follows is still recognised as that feed — create_feed_from_rss_url
+        # dedups on the exact rss_url string. A playlist feed (playlist_id=UULF..,
+        # what longform_feed_url builds) has no channel_id to canonicalise and
+        # passes through untouched.
+        channel_id = extract_channel_id(url)
+        if channel_id and CHANNEL_ID_RE.match(channel_id):
+            return channel_feed_url(channel_id)
         return url
 
     direct_match = CHANNEL_ID_URL_RE.search(url)

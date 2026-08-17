@@ -15,7 +15,7 @@ from app.progress import ProgressRegistry
 from app.services.backfill import run_backfill
 from app.services.feed_add import FeedAlreadyExistsError, create_feed_from_rss_url
 from app.youtube.extract import ChannelResolutionError, resolve_feed_url
-from app.youtube.rss import InvalidFeedError
+from app.youtube.rss import FeedError
 
 # In-memory only, same rationale as backfill.py's registry. Keyed by a
 # random job id (not a feed id — one job spans many feeds). Unlike a feed's
@@ -94,7 +94,10 @@ def run_bulk_import(job_id: str, progress: dict, lines: list[str], user_id: int)
                     entry["status"] = "duplicate"
                     entry["error"] = None
                     entry["channel_title"] = exc.channel_title
-                except InvalidFeedError as exc:
+                except FeedError as exc:
+                    # Both halves of FeedError land in the same place here: a
+                    # bad URL and an unreachable YouTube are equally "this one
+                    # line didn't work", and the message says which.
                     entry["error"] = str(exc)
 
             progress["results"].append(entry)

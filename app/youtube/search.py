@@ -16,6 +16,7 @@ from dataclasses import dataclass
 import yt_dlp
 
 from app.images import cached_avatar_path, download_avatar
+from app.youtube.extract import NETWORK_OPTS
 from app.youtube.urls import (
     CHANNEL_SEARCH_URL_TEMPLATE,
     PLAYLIST_ID_RE,
@@ -36,9 +37,11 @@ PLAYLIST_ITEM_LIMIT = 50
 
 
 def _flat_opts(limit: int) -> dict:
+    # NETWORK_OPTS bounds the call — search runs on a request thread from a
+    # keystroke, so an unbounded one is the worst place for it. See its
+    # definition in extract.py.
     return {
-        "quiet": True,
-        "no_warnings": True,
+        **NETWORK_OPTS,
         "extract_flat": "in_playlist",
         "playlist_items": f"1-{limit}",
     }

@@ -7,11 +7,23 @@ business knowing about audio downloads — had to import from the audio
 downloader just to cache an avatar.
 """
 
+import os
 import urllib.error
 import urllib.request
 from pathlib import Path
 
 from app.config import settings
+
+FETCH_TIMEOUT_SECONDS = 10
+
+# Far above any real thumbnail (~30 KB) or avatar (~50 KB). It exists because
+# read() is otherwise unbounded and this writes straight to disk.
+MAX_IMAGE_BYTES = 8 * 1024 * 1024
+
+# Renamed into place from this, rather than written to the destination directly.
+# The suffix is distinct from storage.py's EXPORT_TEMP_SUFFIX so a sweeper can
+# tell the two apart.
+_TEMP_SUFFIX = ".download.tmp"
 
 
 def _download_image(directory: Path, filename: str, image_url: str, url_prefix: str) -> str | None:
@@ -22,9 +34,26 @@ def _download_image(directory: Path, filename: str, image_url: str, url_prefix: 
 
     try:
         req = urllib.request.Request(image_url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            dest.write_bytes(resp.read())
+        with urllib.request.urlopen(req, timeout=FETCH_TIMEOUT_SECONDS) as resp:
+            body = resp.read(MAX_IMAGE_BYTES + 1)
     except (urllib.error.URLError, OSError, TimeoutError):
+        return None
+
+    if not body or len(body) > MAX_IMAGE_BYTES:
+        return None
+
+    # dest.is_file() above is the *only* cache check there is, and nothing ever
+    # re-downloads an image that exists — so a write cut short (a container
+    # killed by `docker compose up --build` mid-refresh, a dropped connection)
+    # used to leave a truncated JPEG that every later call accepted as a
+    # complete cached image, permanently. os.replace is atomic within a
+    # directory, so the destination only ever appears whole.
+    temp = dest.with_name(dest.name + _TEMP_SUFFIX)
+    try:
+        temp.write_bytes(body)
+        os.replace(temp, dest)
+    except OSError:
+        temp.unlink(missing_ok=True)
         return None
 
     return f"{url_prefix}/{dest.name}"

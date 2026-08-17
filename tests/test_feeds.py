@@ -1,12 +1,14 @@
+import logging
 from datetime import datetime
 
 import app.feed_sync as feed_sync_module
+import app.routers.feeds as feeds_router
 import app.services.backfill as backfill_module
 import app.services.feed_add as feed_add_module
 from app.feed_sync import FeedFetchResult, apply_feed_data
 from app.models import Content, Feed
 from app.youtube.extract import BackfillEntry
-from app.youtube.rss import ParsedEntry, ParsedFeed
+from app.youtube.rss import FeedUnavailableError, InvalidFeedError, ParsedEntry, ParsedFeed
 from app.youtube.urls import channel_feed_url
 
 USER_ID = 1
@@ -215,6 +217,57 @@ def test_refresh_feeds_isolates_one_failing_feed(db_session, monkeypatch):
     assert new_count == 1
     saved = db_session.query(Content).filter(Content.feed_id == feed_ok.id).all()
     assert len(saved) == 1
+
+
+def test_a_failing_feed_fetch_is_logged_rather_than_swallowed(db_session, monkeypatch, caplog):
+    """fetch_feed_data turns any FeedError into "no new content", which is the
+    right behaviour for a refresh spanning every channel — but it used to leave
+    no trace at all. A YouTube 429, which hits every feed at once, produced a
+    refresh that reported zero new uploads and said nothing about why."""
+    monkeypatch.setattr(
+        feed_sync_module,
+        "fetch_feed",
+        lambda url: (_ for _ in ()).throw(FeedUnavailableError("Could not fetch RSS feed: 429")),
+    )
+
+    with caplog.at_level(logging.WARNING, logger="app.feed_sync"):
+        result = feed_sync_module.fetch_feed_data(7, channel_feed_url("UCabcdefghij"), None)
+
+    assert result.parsed is None
+    assert "429" in caplog.text
+    assert "7" in caplog.text
+
+
+def test_adding_a_feed_youtube_would_not_serve_is_not_a_bad_request(client, monkeypatch):
+    """A 400 tells the user their URL is wrong. When YouTube rate-limits us or
+    the network is down, that is both false and unactionable — the whole reason
+    rss.py splits FeedUnavailableError out of InvalidFeedError."""
+    monkeypatch.setattr(
+        feeds_router,
+        "add_feed_core",
+        lambda db, url, user_id: (_ for _ in ()).throw(
+            FeedUnavailableError("Could not fetch RSS feed: HTTP Error 429")
+        ),
+    )
+
+    res = client.post("/feeds", json={"channel_url": "https://www.youtube.com/@handle"})
+
+    assert res.status_code == 502
+    assert "429" in res.json()["detail"]
+
+
+def test_adding_a_feed_that_really_is_the_wrong_url_is_still_a_bad_request(client, monkeypatch):
+    monkeypatch.setattr(
+        feeds_router,
+        "add_feed_core",
+        lambda db, url, user_id: (_ for _ in ()).throw(
+            InvalidFeedError("URL is not a valid YouTube channel RSS feed")
+        ),
+    )
+
+    res = client.post("/feeds", json={"channel_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"})
+
+    assert res.status_code == 400
 
 
 def test_run_backfill_marks_done_on_unexpected_failure(db_session, monkeypatch):

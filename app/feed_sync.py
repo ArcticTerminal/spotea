@@ -8,7 +8,7 @@ from app.database import SessionLocal
 from app.images import download_avatar, download_thumbnail
 from app.models import Content, Feed
 from app.youtube.extract import fetch_channel_avatar_url, fetch_channel_video_durations
-from app.youtube.rss import InvalidFeedError, ParsedFeed, fetch_feed
+from app.youtube.rss import FeedError, ParsedFeed, fetch_feed
 from app.youtube.urls import SHORT_MAX_DURATION_SECONDS, extract_channel_id, longform_feed_url
 
 logger = logging.getLogger(__name__)
@@ -43,7 +43,12 @@ def fetch_feed_data(feed_id: int, rss_url: str, avatar_url: str | None) -> FeedF
 
     try:
         parsed = fetch_feed(fetch_url)
-    except InvalidFeedError:
+    except FeedError as exc:
+        # A refresh is meant to survive one bad feed, so this stays a
+        # skip — but logged, because it used to be entirely silent: a
+        # YouTube 429 across every channel produced a refresh that
+        # reported zero new content and left no trace of why.
+        logger.warning("Feed %s: %s", feed_id, exc)
         return FeedFetchResult(parsed=None, durations={}, channel_id=channel_id)
 
     durations: dict[str, int] = {}

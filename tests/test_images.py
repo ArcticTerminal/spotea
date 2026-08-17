@@ -1,0 +1,164 @@
+"""Caching remote images to disk (app/images.py).
+
+The interesting property here isn't the fetch, it's that `dest.is_file()` is the
+only cache check the app has and nothing ever re-downloads an image that exists.
+That makes a half-written file permanent, so the write has to be all-or-nothing.
+"""
+
+import urllib.error
+from types import SimpleNamespace
+
+import pytest
+
+from app import images
+from app.config import settings
+from app.images import _TEMP_SUFFIX, MAX_IMAGE_BYTES, _download_image, cached_avatar_path
+
+JPEG = b"\xff\xd8\xff" + b"\x00" * 512
+
+
+class _FakeResponse:
+    def __init__(self, body: bytes, read_sizes: list[int]):
+        self._body = body
+        self._read_sizes = read_sizes
+
+    def read(self, size: int = -1) -> bytes:
+        self._read_sizes.append(size)
+        return self._body[:size] if size >= 0 else self._body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        return False
+
+
+@pytest.fixture
+def network(monkeypatch):
+    """`install(outcome)` makes the next fetch return those bytes or raise that
+    exception, and returns a recorder holding the (request, timeout) pairs made
+    and the sizes read() was asked for."""
+    calls: list[tuple[object, float | None]] = []
+    read_sizes: list[int] = []
+    recorder = SimpleNamespace(calls=calls, read_sizes=read_sizes)
+
+    def install(outcome):
+        def fake_urlopen(request, timeout=None):
+            calls.append((request, timeout))
+            if isinstance(outcome, Exception):
+                raise outcome
+            return _FakeResponse(outcome, read_sizes)
+
+        monkeypatch.setattr(images.urllib.request, "urlopen", fake_urlopen)
+        return recorder
+
+    return install
+
+
+def _temp_files(directory):
+    return list(directory.glob(f"*{_TEMP_SUFFIX}"))
+
+
+def test_an_image_is_fetched_once_and_served_from_our_origin(network, tmp_path):
+    recorder = network(JPEG)
+
+    url = _download_image(tmp_path, "vid00000001.jpg", "https://i.ytimg.com/x.jpg", "/thumbnails")
+
+    assert url == "/thumbnails/vid00000001.jpg"
+    assert (tmp_path / "vid00000001.jpg").read_bytes() == JPEG
+    assert len(recorder.calls) == 1
+    assert _temp_files(tmp_path) == []
+
+
+def test_the_fetch_carries_a_timeout(network, tmp_path):
+    recorder = network(JPEG)
+
+    _download_image(tmp_path, "vid00000001.jpg", "https://i.ytimg.com/x.jpg", "/thumbnails")
+
+    assert recorder.calls[0][1] == images.FETCH_TIMEOUT_SECONDS
+
+
+def test_an_already_cached_image_is_not_refetched(network, tmp_path):
+    """What makes caching worth anything — every RSS refresh calls this for
+    every entry, not just new ones (see download_thumbnail's docstring)."""
+    recorder = network(JPEG)
+    (tmp_path / "vid00000001.jpg").write_bytes(JPEG)
+
+    url = _download_image(tmp_path, "vid00000001.jpg", "https://i.ytimg.com/x.jpg", "/thumbnails")
+
+    assert url == "/thumbnails/vid00000001.jpg"
+    assert recorder.calls == []
+
+
+def test_a_failed_fetch_leaves_nothing_behind(network, tmp_path):
+    network(urllib.error.URLError("no route to host"))
+
+    assert _download_image(tmp_path, "vid00000001.jpg", "https://i.ytimg.com/x.jpg", "/thumbnails") is None
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_an_oversized_response_is_neither_read_whole_nor_written(network, tmp_path):
+    """Two halves of one guarantee: the read is capped, so an enormous response
+    is never pulled into memory in the first place, *and* what came back over
+    the cap is discarded rather than written straight to disk."""
+    recorder = network(b"x" * (MAX_IMAGE_BYTES + 1))
+
+    assert _download_image(tmp_path, "vid00000001.jpg", "https://i.ytimg.com/x.jpg", "/thumbnails") is None
+    assert recorder.read_sizes == [MAX_IMAGE_BYTES + 1]
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_an_empty_response_is_not_written(network, tmp_path):
+    """A zero-byte file would be cached as a valid image forever, which renders
+    as a broken thumbnail no refresh can heal."""
+    network(b"")
+
+    assert _download_image(tmp_path, "vid00000001.jpg", "https://i.ytimg.com/x.jpg", "/thumbnails") is None
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_the_destination_never_holds_a_partial_file(network, tmp_path, monkeypatch):
+    """The reason for the temp-file-and-rename: bytes must never appear at the
+    destination path until all of them have arrived, because nothing will ever
+    replace a file that exists."""
+    network(JPEG)
+    dest = tmp_path / "vid00000001.jpg"
+    existed_before_rename = []
+
+    real_replace = images.os.replace
+
+    def watching_replace(src, dst):
+        existed_before_rename.append(dest.exists())
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(images.os, "replace", watching_replace)
+
+    _download_image(tmp_path, dest.name, "https://i.ytimg.com/x.jpg", "/thumbnails")
+
+    assert existed_before_rename == [False]
+    assert dest.read_bytes() == JPEG
+
+
+def test_a_failed_rename_cleans_up_its_temp_file(network, tmp_path, monkeypatch):
+    """Otherwise the leftovers accumulate in a directory nothing prunes."""
+    network(JPEG)
+
+    def failing_replace(src, dst):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(images.os, "replace", failing_replace)
+
+    assert _download_image(tmp_path, "vid00000001.jpg", "https://i.ytimg.com/x.jpg", "/thumbnails") is None
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_cached_avatar_path_reports_only_what_is_on_disk():
+    settings.avatars_dir.mkdir(parents=True, exist_ok=True)
+    channel_id = "UCcachedavatartest00000"
+    assert cached_avatar_path(channel_id) is None
+
+    (settings.avatars_dir / f"{channel_id}.jpg").write_bytes(JPEG)
+    try:
+        assert cached_avatar_path(channel_id) == f"/avatars/{channel_id}.jpg"
+    finally:
+        (settings.avatars_dir / f"{channel_id}.jpg").unlink()

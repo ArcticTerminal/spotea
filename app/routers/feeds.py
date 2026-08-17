@@ -32,7 +32,7 @@ from app.services.bulk_import import import_progress, run_bulk_import
 from app.services.feed_add import FeedAlreadyExistsError, add_feed_core
 from app.storage import purge_content
 from app.youtube.extract import ChannelResolutionError
-from app.youtube.rss import InvalidFeedError
+from app.youtube.rss import FeedUnavailableError, InvalidFeedError
 
 router = APIRouter(prefix="/feeds", tags=["feeds"], dependencies=[Depends(require_login)])
 
@@ -50,6 +50,12 @@ def add_feed(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Feed already added") from exc
     except ChannelResolutionError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    # A feed YouTube wouldn't serve us is not a malformed request, and saying
+    # 400 to it tells the user their URL is wrong when it isn't — which is what
+    # rss.FeedError's split exists to stop. Sibling classes, so the order of
+    # these two handlers doesn't matter; the status codes do.
+    except FeedUnavailableError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
     except InvalidFeedError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 

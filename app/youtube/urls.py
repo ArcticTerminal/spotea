@@ -5,6 +5,7 @@ this package builds on it.
 """
 
 import re
+from urllib.parse import urlsplit
 
 VIDEO_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{11}$")
 
@@ -54,6 +55,46 @@ VIDEO_SEARCH_URL_TEMPLATE = "https://www.youtube.com/results?search_query={query
 PLAYLIST_SEARCH_URL_TEMPLATE = "https://www.youtube.com/results?search_query={query}&sp=EgIQAw%3D%3D"
 
 CHANNEL_PAGE_URL_TEMPLATE = "https://www.youtube.com/channel/{channel_id}"
+
+
+# Every URL this package is handed ends up being fetched — by rss.fetch_feed
+# or by yt-dlp — and the only thing standing between "follow this channel" and
+# a request-forgery primitive is the host. Without this check an authenticated
+# user could point POST /feeds at 127.0.0.1 or a LAN address and read the
+# failure text back; no Feed row could survive it (a real one needs a
+# yt_channelid in the response), so it was a probe rather than a breach, but
+# the probe is itself the leak. Checked at both entry points — resolve_feed_url,
+# so the error arrives before any network call, and fetch_feed, which is what
+# actually opens the socket.
+_YOUTUBE_HOSTS = frozenset(
+    {
+        "youtube.com",
+        "www.youtube.com",
+        "m.youtube.com",
+        "music.youtube.com",
+        "youtu.be",
+        "www.youtu.be",
+    }
+)
+
+
+def is_youtube_url(url: str) -> bool:
+    """True only for an http(s) URL naming one of YouTube's own hosts.
+
+    A scheme-less "youtube.com/@handle" is accepted by assuming https: that's
+    the form a browser address bar displays, so it's the form people paste,
+    and yt-dlp accepted it before this check existed. `hostname` (rather than
+    `netloc`) is what makes "https://youtube.com@evil.example/" fail — the
+    userinfo trick is the whole reason not to do this with a substring test.
+    """
+    candidate = url.strip()
+    if "://" not in candidate:
+        candidate = f"https://{candidate}"
+
+    split = urlsplit(candidate)
+    if split.scheme not in ("http", "https"):
+        return False
+    return (split.hostname or "").lower() in _YOUTUBE_HOSTS
 
 
 def extract_channel_id(rss_url: str) -> str | None:
