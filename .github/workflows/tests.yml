@@ -22,7 +22,7 @@ jobs:
           pip install --no-cache-dir yt-dlp bgutil-ytdlp-pot-provider
 
       - name: Run tests
-        run: pytest
+        run: python -m pytest
 
       - name: Lint (ruff)
         run: ruff check .
