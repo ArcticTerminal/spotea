@@ -47,4 +47,18 @@ ENV XDG_CACHE_HOME=/app/data/.cache
 
 EXPOSE 8000
 
+# Do NOT add --workers (and don't set WEB_CONCURRENCY on this service either
+# — uvicorn honors that env var exactly like --workers when the flag itself
+# is omitted, which it is here). Download progress (app/services/backfill.py,
+# app/services/bulk_import.py), app/progress.py's ProgressRegistry, and the
+# recommendations build lock (app/services/recommendations.py) are all
+# in-process, module-level state — a second uvicorn worker is a second OS
+# process with its own copy of that state, so polling clients would see
+# progress silently go missing or the build lock stop serializing runs.
+# app/main.py's lifespan asserts WEB_CONCURRENCY isn't set to anything but 1
+# for exactly this reason, but that can't catch an explicit `--workers N`
+# added to this CMD line by hand — there's no reliable way for the app to
+# detect that from inside the process (uvicorn spawns workers via
+# multiprocessing's "spawn" context, and the child doesn't inherit the
+# parent's sys.argv), so this comment is the only guard against that case.
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

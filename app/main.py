@@ -1,4 +1,5 @@
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
@@ -36,8 +37,39 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s:     %(name)s: %(m
 logger = logging.getLogger(__name__)
 
 
+def _assert_single_worker() -> None:
+    """Refuse to start under more than one uvicorn worker.
+
+    Download/backfill/import progress (app/progress.py's ProgressRegistry)
+    and the recommendations build lock (app/services/recommendations.py) are
+    in-process, module-level state — a second worker is a second OS process
+    with its own copy, so polling clients would see progress silently go
+    missing or the build lock stop serializing runs. See the Dockerfile CMD
+    comment for the fuller version of this.
+
+    This can only catch the WEB_CONCURRENCY env-var route to multiple
+    workers, not an explicit `--workers N` added to the CMD by hand: uvicorn
+    reads WEB_CONCURRENCY exactly like --workers whenever --workers itself is
+    omitted (true of this image's CMD), and that env var is still visible via
+    os.environ in each worker uvicorn spawns — but --workers passed directly
+    on the command line leaves no trace an in-process check can see (uvicorn
+    spawns workers via multiprocessing's "spawn" context, and the child
+    doesn't inherit the parent's sys.argv). That gap is real and is
+    intentionally left to the Dockerfile comment rather than something
+    invented here.
+    """
+    concurrency = os.environ.get("WEB_CONCURRENCY")
+    if concurrency is not None and int(concurrency) != 1:
+        raise RuntimeError(
+            f"WEB_CONCURRENCY={concurrency!r} — Spotea must run with exactly "
+            "one worker (unset WEB_CONCURRENCY or set it to 1). See "
+            "app/progress.py and the Dockerfile CMD comment for why."
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _assert_single_worker()
     Base.metadata.create_all(bind=engine)
     run_migrations(engine)
 

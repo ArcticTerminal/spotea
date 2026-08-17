@@ -8,8 +8,45 @@ services:
     env_file:
       - .env
     restart: unless-stopped
+    # Small self-hosted deployment (single SQLite DB, no other services or
+    # deploy/swarm config in this file), but downloads/yt-dlp
+    # extraction/ffmpeg are spiky. 1.5G is generous headroom over normal
+    # steady-state usage while still stopping a runaway extraction from
+    # taking down the host instead of just its own container.
+    mem_limit: 1536m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # /health (app/main.py) does a real DB round-trip plus an in-process
+    # scheduler check and is cheap, so a short interval/timeout is fine — but
+    # startup itself does real work first (DB migrations, scheduler
+    # bring-up), hence the longer start_period before failures count.
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
     depends_on:
-      - pot-provider
+      # Not `condition: service_healthy`: pot-provider is a third-party image
+      # (see its own block below) we can't give a reliable `test:` command
+      # without guessing at what's on its PATH or what its HTTP surface
+      # looks like. `service_started` just makes explicit what an unqualified
+      # depends_on already gave us implicitly — pot-provider's container is
+      # running, not that port 4416 is accepting requests yet.
+      # app/downloader.py already treats pot-provider being unreachable as
+      # non-fatal (falls back to PO-token-free clients), so this is a
+      # startup-ordering nicety, not a correctness dependency.
+      pot-provider:
+        condition: service_started
 
   # Generates YouTube PO (Proof-of-Origin) tokens for yt-dlp — see
   # app/downloader.py's ydl_opts. Without this, YouTube's SABR rollout
@@ -20,3 +57,20 @@ services:
   pot-provider:
     image: brainicism/bgutil-ytdlp-pot-provider
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # No healthcheck here (and so no condition: service_healthy on app's
+    # depends_on above): this image is third-party and unbuilt by us, and
+    # neither this repo nor the image's own docs record what's on its PATH
+    # (curl/wget/node/...) or whether it exposes anything pollable over HTTP
+    # beyond the actual PO-token endpoint yt-dlp calls, which needs a real
+    # request body to exercise — not something to just GET. A guessed `test:`
+    # command that turns out wrong leaves the container permanently
+    # "unhealthy", which is worse than having no healthcheck at all (and
+    # would wedge app's startup if service_healthy were used above). Revisit
+    # both this block and app's depends_on condition together if this image's
+    # healthcheck story ever becomes knowable (e.g. by inspecting a running
+    # container's filesystem).
