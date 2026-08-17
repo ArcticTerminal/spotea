@@ -1,10 +1,10 @@
-<!-- Home/Library/Explore-only in-page player: an overlay (full "now playing"
+<!-- Home/Library/Explore's in-page player: an overlay (full "now playing"
      view) plus a persistent mini-bar that stays visible while it's
-     collapsed. The controls themselves come from _player_controls.html, the
-     same partial player.html uses — see its header for why sharing the ids
-     is safe. Starts with an empty #player-root dataset (nothing loaded
-     until a track is actually opened, see home/overlay.js's openPlayer), unlike
-     player.html where Jinja fills it in server-side. -->
+     collapsed. The controls themselves come from _player_controls.html —
+     see its header for why the element ids are bound directly. Starts
+     with an empty #player-root dataset; nothing is loaded until a track
+     is actually opened (see home/overlay.js's openPlayer), which fills it
+     in client-side. -->
 <div id="player-overlay" class="player-overlay" hidden>
   <div class="player-card" id="player-root" data-content-id="" data-status="" data-stream="">
     <button type="button" class="back-link" id="overlay-collapse-btn" aria-label="Collapse">

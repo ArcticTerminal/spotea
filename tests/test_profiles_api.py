@@ -1,6 +1,7 @@
 import os
 
 from app.auth import hash_password
+from app.content_query import query_content_page
 from app.models import Account, Content, Feed, User
 from app.storage import unlink_if_unshared
 
@@ -30,30 +31,33 @@ def test_new_profile_starts_with_an_empty_library(client, db_session):
 
     res = client.post("/profiles", json={"name": "Music"})
     assert res.status_code == 201
+    new_profile_id = res.json()["id"]
     assert res.json()["is_current"] is True
 
     # Creating a profile auto-switches into it — the default profile's
     # content must not leak into the brand-new one.
-    res = client.get("/content")
-    assert res.json()["items"] == []
+    items, _page, _total_pages = query_content_page(db_session, new_profile_id)
+    assert items == []
 
 
 def test_switching_back_restores_the_original_profile_scope(client, db_session):
     _seed_content(db_session, DEFAULT_PROFILE_ID)
 
     new_profile_id = client.post("/profiles", json={"name": "Music"}).json()["id"]
-    assert client.get("/content").json()["items"] == []
+    items, _page, _total_pages = query_content_page(db_session, new_profile_id)
+    assert items == []
 
     res = client.post(f"/profiles/{DEFAULT_PROFILE_ID}/switch")
     assert res.status_code == 200
     assert res.json()["is_current"] is True
 
-    body = client.get("/content").json()
-    assert len(body["items"]) == 1
+    items, _page, _total_pages = query_content_page(db_session, DEFAULT_PROFILE_ID)
+    assert len(items) == 1
 
     # The other profile's (empty) scope is still intact and independently reachable.
     client.post(f"/profiles/{new_profile_id}/switch")
-    assert client.get("/content").json()["items"] == []
+    items, _page, _total_pages = query_content_page(db_session, new_profile_id)
+    assert items == []
 
 
 def test_cannot_delete_the_last_remaining_profile(client):

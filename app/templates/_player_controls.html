@@ -1,20 +1,17 @@
-{# The half of the player that is genuinely identical in both places it
-   appears: the standalone /player/{id} page and Home/Library/Explore's
-   in-page overlay. Same element ids in both, on purpose — player.js's
-   setupPlayer/prepareAudio/setupMediaSession/setupFavorite bind by id and
-   work against whichever is present, and the two are never in the same
-   document.
+{# The controls half of the player card, split out of _player_overlay.html
+   (its only includer). Element ids are bound directly rather than
+   scoped/namespaced — player.js's
+   setupPlayer/prepareAudio/setupMediaSession/setupFavorite rely on that.
 
-   What differs between the two is only initial state, passed in by the
-   caller (see both includers' {% with %}):
-     duration_label      — server-rendered starting value; the overlay has
-                           no track yet, so it starts at "0:00"
-     favorite_content_id — empty for the overlay until openPlayer loads one
+   Initial state comes in from the includer via {% with %}:
+     duration_label      — starts at "0:00"; the overlay has no track
+                           loaded yet
+     favorite_content_id — empty until openPlayer loads a track
      favorite_is_on      — drives the class, aria-pressed and svg fill
 
    Everything above this in the card (back link, artwork, title/channel)
-   stays in the two callers: the page renders them from `content`
-   server-side, the overlay starts them empty and home/overlay.js fills them in.
+   stays in _player_overlay.html, which starts them empty and
+   home/overlay.js fills them in once a track is opened.
 #}
     {# The only <audio> in the document, and it has to stay that way — two of
        them are two media sessions competing to be the one iOS shows in Now

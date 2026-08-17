@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 
+from app.content_query import query_content_page
 from app.models import Content, Feed, User
 
 USER_ID = 1
@@ -31,74 +32,6 @@ def _seed(db_session, count=25):
     db_session.add_all(items)
     db_session.commit()
     return feed, items
-
-
-def test_get_content_default_page_shape(client, db_session):
-    _seed(db_session, count=25)
-
-    res = client.get("/content")
-    assert res.status_code == 200
-
-    body = res.json()
-    assert set(body.keys()) == {"items", "page", "total_pages"}
-    assert body["page"] == 1
-    assert body["total_pages"] == 2
-    assert len(body["items"]) == 20
-
-    first = body["items"][0]
-    assert set(first.keys()) == {
-        "id",
-        "feed_id",
-        "channel_title",
-        "video_id",
-        "title",
-        "thumbnail_url",
-        "duration_seconds",
-        "published_at",
-        "status",
-        "added_at",
-        "is_favorite",
-        "is_saved",
-        "is_played",
-        "is_unavailable",
-    }
-    assert first["channel_title"] == "Test Channel"
-    assert first["title"] == "Title 025"
-
-
-def test_get_content_out_of_range_page_clamps_instead_of_erroring(client, db_session):
-    _seed(db_session, count=5)
-
-    res = client.get("/content", params={"page": 999})
-    assert res.status_code == 200
-
-    body = res.json()
-    assert body["page"] == 1
-    assert body["total_pages"] == 1
-    assert len(body["items"]) == 5
-
-
-def test_get_content_favorites_filter(client, db_session):
-    _seed(db_session, count=25)
-
-    res = client.get("/content", params={"filter": "__favorites__"})
-    assert res.status_code == 200
-
-    body = res.json()
-    assert len(body["items"]) == 1
-    assert body["items"][0]["is_favorite"] is True
-
-
-def test_get_content_channel_filter(client, db_session):
-    _seed(db_session, count=5)
-
-    res = client.get("/content", params={"filter": "Test Channel"})
-    assert res.status_code == 200
-    assert len(res.json()["items"]) == 5
-
-    res = client.get("/content", params={"filter": "Nonexistent Channel"})
-    assert res.status_code == 200
-    assert res.json()["items"] == []
 
 
 def test_get_single_content_returns_full_shape(client, db_session):
@@ -166,7 +99,11 @@ def test_channel_queue_is_the_whole_channel_in_list_order(client, db_session):
 
     # Same order the track list renders, newest-first — a queue that agreed
     # on the set but not the order would look like shuffle was stuck on.
-    listed = [item["id"] for page in (1, 2) for item in client.get(f"/content?page={page}").json()["items"]]
+    listed = [
+        item.id
+        for page in (1, 2)
+        for item in query_content_page(db_session, USER_ID, page=page)[0]
+    ]
     assert ids == listed
 
 
@@ -174,7 +111,8 @@ def test_playlist_queue_matches_its_detail_panel(client, db_session):
     feed, items = _seed(db_session, count=25)
     ids = client.get("/content/queue/playlist/favorites").json()["ids"]
     # _seed favorites exactly one row (i == 0, the newest).
-    assert ids == [item["id"] for item in client.get("/content?filter=__favorites__").json()["items"]]
+    favorites, _page, _total_pages = query_content_page(db_session, USER_ID, filter="__favorites__")
+    assert ids == [item.id for item in favorites]
     assert len(ids) == 1
 
 

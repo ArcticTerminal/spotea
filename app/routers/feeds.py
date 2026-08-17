@@ -87,13 +87,6 @@ def get_bulk_import_status(job_id: str) -> BulkImportStatusOut:
         results=[BulkImportResultOut(**r) for r in progress["results"]],
     )
 
-@router.get("", response_model=list[FeedOut])
-def list_feeds(
-    profile: User = Depends(get_current_profile), db: Session = Depends(get_db)
-) -> list[Feed]:
-    return followed_feeds(db, profile.id).all()
-
-
 @router.get("/{feed_id}/backfill-status", response_model=BackfillStatusOut)
 def get_backfill_status(
     feed_id: int, profile: User = Depends(get_current_profile), db: Session = Depends(get_db)

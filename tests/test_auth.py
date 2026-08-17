@@ -13,7 +13,7 @@ DEFAULT_ACCOUNT_PASSWORD = "test-password"
 
 def test_protected_route_redirects_to_login_when_unauthenticated():
     with TestClient(app) as anon:
-        res = anon.get("/content", follow_redirects=False)
+        res = anon.get("/", follow_redirects=False)
 
     assert res.status_code == 303
     assert res.headers["location"] == "/login"
@@ -39,17 +39,17 @@ def test_login_with_correct_password_grants_access(client):
     # `client` (from conftest) has already logged in for real — confirm a
     # protected route is actually reachable now, not just that login itself
     # returned 200.
-    res = client.get("/content")
+    res = client.get("/")
     assert res.status_code == 200
 
 
 def test_logout_revokes_access():
     with TestClient(app) as c:
         c.post("/login", data={"email": DEFAULT_ACCOUNT_EMAIL, "password": DEFAULT_ACCOUNT_PASSWORD})
-        assert c.get("/content").status_code == 200
+        assert c.get("/").status_code == 200
 
         c.post("/logout")
-        res = c.get("/content", follow_redirects=False)
+        res = c.get("/", follow_redirects=False)
 
     assert res.status_code == 303
     assert res.headers["location"] == "/login"
@@ -68,7 +68,7 @@ def test_register_creates_account_and_logs_in():
         )
         assert res.status_code == 303
         assert res.headers["location"] == "/#home"
-        assert anon.get("/content").status_code == 200
+        assert anon.get("/").status_code == 200
 
 
 def test_register_rejects_duplicate_email():

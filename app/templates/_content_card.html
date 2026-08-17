@@ -2,10 +2,6 @@
   class="card"
   data-content-id="{{ item.id }}"
   data-status="{{ item.status }}"
-  data-title="{{ item.title }}"
-  data-channel="{{ item.feed.channel_title or '' }}"
-  data-published="{{ item.published_at.isoformat() if item.published_at else '' }}"
-  data-favorite="{{ 'true' if item.is_favorite else 'false' }}"
   data-saved="{{ 'true' if item.is_saved else 'false' }}"
 >
   <a class="thumb" href="/#player/{{ item.id }}" aria-label="Play {{ item.title }}">

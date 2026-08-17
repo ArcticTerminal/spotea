@@ -23,9 +23,10 @@ export function installBfcacheReload() {
   // pageshow's own saveResumeState call (above) only covers the bfcache-
   // restore case — it runs *after* coming back, on the assumption there's
   // still something to snapshot at that moment. But leaving index.html for a
-  // real, non-bfcache-eligible navigation (e.g. tapping a channel's "Library"
-  // back-link, or any other in-app link to a standalone page) never restores
-  // via pageshow at all when you return — landing back on a *fresh* load of
+  // real, non-bfcache-eligible navigation (e.g. logging out — everything
+  // else, channel/playlist/player included, is a hash change within this
+  // same document now) never restores via pageshow at all when you return —
+  // landing back on a *fresh* load of
   // index.html instead, where resumeOverlayIfNeeded (home/overlay.js) finds
   // nothing in sessionStorage to resume and the mini-player just doesn't come
   // back. pagehide fires on every departure regardless of whether the page
@@ -39,9 +40,9 @@ export function installBfcacheReload() {
 // every backgrounding/foregrounding cycle (this fires constantly on iOS PWA,
 // which aggressively reloads backgrounded standalone web apps) would restart
 // the current track from the beginning. Snapshotted here, restored by
-// player.js's prepareAudio (player.html) and home/overlay.js's
-// resumeOverlayIfNeeded (the Home/Library/Explore overlay, which starts
-// closed on a fresh load and has to be reopened first).
+// player.js's prepareAudio and home/overlay.js's resumeOverlayIfNeeded (the
+// Home/Library/Explore overlay, which starts closed on a fresh load and has
+// to be reopened first).
 function saveResumeState() {
   const audio = document.getElementById("audio");
   const root = document.getElementById("player-root");
@@ -57,16 +58,17 @@ function saveResumeState() {
   // whoever's listening.
   if (!audio.src) return;
   try {
-    // Absent (player.html, which has no overlay to collapse) defaults to
-    // NOT expanded. This flag only matters to home/overlay.js's
-    // resumeOverlayIfNeeded (index.html-only) — and since pagehide (above)
-    // saves on every departure, not just a bfcache-driven reload of
-    // index.html itself, leaving the standalone player page for the
-    // Home/Library/Explore SPA (e.g. player.html -> back -> a channel page's
-    // "Library" link) goes through this exact path. Defaulting to expanded
-    // there used to hijack the screen with the full "now playing" overlay
-    // just from landing on the SPA with something already playing; the mini
-    // bar alone is the least surprising way for that playback to follow you in.
+    // The overlay element is always present in practice — resume.js only
+    // runs on index.html (see pages/index.js), which always renders it —
+    // so `: false` below is just a defensive fallback. This flag only
+    // matters to home/overlay.js's resumeOverlayIfNeeded, and since
+    // pagehide (above) saves on every departure, not just a bfcache-driven
+    // reload, a real navigation away from index.html and back (e.g. logging
+    // out, then back in) goes through this exact path too. Defaulting to
+    // expanded there used to hijack the screen with the full "now playing"
+    // overlay just from landing on the SPA with something already playing;
+    // the mini bar alone is the least surprising way for that playback to
+    // follow you in.
     const overlay = document.getElementById("player-overlay");
     const wasExpanded = overlay ? !overlay.hidden : false;
     sessionStorage.setItem(

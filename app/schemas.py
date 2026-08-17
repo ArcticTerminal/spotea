@@ -71,12 +71,6 @@ class ContentOut(BaseModel):
         )
 
 
-class ContentPageOut(BaseModel):
-    items: list[ContentOut]
-    page: int
-    total_pages: int
-
-
 class QueueOut(BaseModel):
     """One channel's or pinned playlist's full track order, ids only — what
     "Play all" loads. Capped at content_query.QUEUE_MAX_ITEMS."""
@@ -103,19 +97,6 @@ class FavoriteOut(BaseModel):
 class SavedOut(BaseModel):
     id: int
     is_saved: bool
-
-
-class StorageItemOut(BaseModel):
-    id: int
-    title: str
-    channel_title: str | None
-    size_formatted: str
-
-
-class StorageUsageOut(BaseModel):
-    total_formatted: str
-    count: int
-    items: list[StorageItemOut]
 
 
 class ChannelSearchResultOut(BaseModel):

@@ -15,7 +15,7 @@
 
   /* Surfaces (backgrounds), darkest to lightest */
   --bg-page: #121212;
-  --bg-page-glow: #1f1f1f; /* radial-gradient center on the standalone player page */
+  --bg-page-glow: #1f1f1f; /* radial-gradient center on the in-page player overlay's backdrop */
   --bg-sunken: #181818; /* channel card */
   --bg-base: #1a1a1a; /* content cards, chips, list rows */
   --bg-raised: #1e1e1e; /* login card, search results, summary panels */
@@ -969,13 +969,6 @@ html[data-active-tab="detail"] .tab-panel[data-tab-panel="detail"] {
   align-items: center;
 }
 
-.recommendations-actions {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  min-width: 0;
-}
-
 /* The "based on … · updated …" line. Truncates rather than wraps: it sits on
    the shelf heading's own line, and a second line there pushes the whole
    shelf down for a caption. */
@@ -1306,34 +1299,9 @@ button.track-link {
   font-size: 1.1rem;
 }
 
-.content-header-actions {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-}
-
 .muted {
   color: var(--text-muted);
   font-size: 0.85rem;
-}
-
-.grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 0.75rem;
-}
-
-@media (min-width: 480px) {
-  .grid {
-    gap: 1rem;
-  }
-}
-
-@media (min-width: 700px) {
-  .grid {
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-    gap: 1.25rem;
-  }
 }
 
 .shelf {
@@ -1398,14 +1366,11 @@ button.track-link {
 
 .shelf-row > .card {
   -webkit-user-drag: none;
+  flex: 0 0 170px;
 }
 
 .shelf-row > .card img {
   pointer-events: none;
-}
-
-.shelf-row > .card {
-  flex: 0 0 170px;
 }
 
 @media (min-width: 480px) {
@@ -1935,7 +1900,6 @@ button.track-link {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  flex-shrink: 0;
 }
 
 .btn-save svg {
@@ -1995,27 +1959,6 @@ button.track-link {
   margin: 0;
   font-size: 0.75rem;
   color: var(--text-subtle);
-}
-
-.btn-delete {
-  background: none;
-  border: none;
-  color: var(--text-primary);
-  cursor: pointer;
-  padding: 0.3rem;
-  line-height: 1;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.btn-delete svg {
-  width: 16px;
-  height: 16px;
-}
-
-.btn-delete:hover {
-  color: var(--danger);
 }
 
 .spinner {
