@@ -104,13 +104,26 @@ def _clean_tables(_init_schema):
     is cleaned up here too, not just other tables — otherwise it'd silently
     carry over into later tests' counts. accounts must be preserved
     alongside users, not just users — otherwise the preserved profile row is
-    left with a dangling account_id FK after the first test."""
+    left with a dangling account_id FK after the first test.
+
+    The preserved account row's own mutable columns are reset explicitly,
+    not just its child rows deleted — feed_refresh_interval_minutes lives on
+    this row now (see models.Account), and several tests PUT a non-default
+    value through Settings; without this reset that value would silently
+    carry into whatever test happens to run next, the same leak the
+    per-table deletes above exist to prevent everywhere else.
+    """
     yield
     with engine.begin() as conn:
         for table in reversed(Base.metadata.sorted_tables):
             if table.name == "users":
                 conn.execute(table.delete().where(table.c.id != DEFAULT_PROFILE_ID))
             elif table.name == "accounts":
+                conn.execute(
+                    table.update()
+                    .where(table.c.id == DEFAULT_ACCOUNT_ID)
+                    .values(feed_refresh_interval_minutes=30, feeds_refreshed_at=None)
+                )
                 conn.execute(table.delete().where(table.c.id != DEFAULT_ACCOUNT_ID))
             else:
                 conn.execute(table.delete())

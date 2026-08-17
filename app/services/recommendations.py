@@ -46,11 +46,10 @@ from app.youtube.search import search_channels, search_playlists, search_videos
 logger = logging.getLogger(__name__)
 
 # Floor on how old a batch can be before the next visit to Explore rebuilds
-# it. Not a constant of its own: callers pass the profile's configured feed
-# refresh interval (see AppSettings.feed_refresh_interval_minutes), so
-# "how often does this app go and look at YouTube again" stays one setting
-# rather than two. This is only the fallback for a caller that has no
-# settings row to read.
+# it. Not a constant of its own: callers pass the profile's account's
+# configured feed refresh interval (see Account.feed_refresh_interval_minutes),
+# so "how often does this app go and look at YouTube again" stays one setting
+# rather than two. This is only the fallback for a caller that passes no ttl.
 DEFAULT_TTL = timedelta(minutes=30)
 
 # Interests sampled per run. Each one costs three searches (songs, channels,

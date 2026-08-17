@@ -31,6 +31,19 @@ class Account(Base):
     # creation cycle. Validity (still one of this account's own profiles) is
     # checked at the application layer instead, in get_current_profile.
     last_active_profile_id: Mapped[int | None] = mapped_column(default=None)
+    # How often the background scheduler refreshes this account's feeds — see
+    # scheduler.py. One account's choice covers every one of its profiles
+    # (household model: kids' and parents' profiles share one refresh
+    # cadence); a different account picks independently. Used to live as a
+    # single AppSettings row shared by the whole deployment, from before
+    # multiple real accounts existed.
+    feed_refresh_interval_minutes: Mapped[int] = mapped_column(default=30)
+    # When the scheduler last refreshed this account's feeds. None means
+    # never (a brand-new account, or one migrated from the old shared
+    # AppSettings row) — the scheduler treats that the same as "overdue",
+    # so a fresh account's first tick refreshes it immediately rather than
+    # waiting a full interval with nothing to compare against.
+    feeds_refreshed_at: Mapped[datetime | None] = mapped_column(default=None)
 
     profiles: Mapped[list["User"]] = relationship(back_populates="account", cascade="all, delete-orphan")
 
@@ -83,18 +96,6 @@ class RecommendationCache(Base):
     generated_at: Mapped[datetime] = mapped_column(default=utcnow)
 
     user: Mapped["User"] = relationship(back_populates="recommendation_cache")
-
-
-class AppSettings(Base):
-    """Singleton row (fixed id, see app_settings.APP_SETTINGS_ID) holding
-    settings that apply to the whole app rather than one profile — this is a
-    single-deployment household app, so there's one background refresh loop
-    shared by every profile's feeds, not one per profile."""
-
-    __tablename__ = "app_settings"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    feed_refresh_interval_minutes: Mapped[int] = mapped_column(default=30)
 
 
 class Feed(Base):

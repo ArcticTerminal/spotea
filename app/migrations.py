@@ -45,6 +45,14 @@ _COLUMN_MIGRATIONS = [
     # pre-existing row except the already-errored ones — those are classified
     # from their stored error_message below.
     ("content", "is_unavailable", "BOOLEAN NOT NULL DEFAULT 0"),
+    # Both moved from a single AppSettings row (one interval shared by the
+    # whole deployment) onto Account, once real accounts existed and "one
+    # interval for everyone" stopped making sense. DEFAULT 30 here is only
+    # what a *new* account with no history gets — an existing install's
+    # accounts are overwritten with whatever the old shared row actually held
+    # right below, in _migrate_refresh_interval_off_app_settings.
+    ("accounts", "feed_refresh_interval_minutes", "INTEGER NOT NULL DEFAULT 30"),
+    ("accounts", "feeds_refreshed_at", "DATETIME"),
 ]
 
 
@@ -101,6 +109,36 @@ def _remove_legacy_shorts(conn, existing_tables: set[str]) -> None:
         logger.info("Removed %d untouched Short(s) imported before the duration filter", result.rowcount)
 
 
+def _migrate_refresh_interval_off_app_settings(conn, existing_tables: set[str]) -> None:
+    """One-time move of the shared refresh interval onto every account, then
+    drop the table it used to live on.
+
+    Before real accounts existed, `feed_refresh_interval_minutes` was a
+    single value on a singleton `app_settings` row, shared by the whole
+    deployment. The column migration above already gave every `accounts` row
+    a DEFAULT of 30 — correct for a brand-new account, but wrong for an
+    existing install whose owner had actually picked something else; this
+    copies the old row's real value over that default. Self-disabling: the
+    only gate is `app_settings` still existing, since dropping it here is
+    what stops this running (and overwriting a since-changed per-account
+    value) on every later startup.
+    """
+    if "app_settings" not in existing_tables:
+        return
+
+    old_interval = conn.execute(
+        text("SELECT feed_refresh_interval_minutes FROM app_settings WHERE id = 1")
+    ).scalar()
+    if old_interval is not None:
+        conn.execute(
+            text("UPDATE accounts SET feed_refresh_interval_minutes = :interval"),
+            {"interval": old_interval},
+        )
+        logger.info("Migrated shared feed refresh interval (%d min) onto every account", old_interval)
+
+    conn.execute(text("DROP TABLE app_settings"))
+
+
 def run_migrations(engine: Engine) -> None:
     inspector = inspect(engine)
     existing_tables = set(inspector.get_table_names())
@@ -121,6 +159,7 @@ def run_migrations(engine: Engine) -> None:
 
         _create_missing_indexes(conn, engine, existing_tables)
         _remove_legacy_shorts(conn, existing_tables)
+        _migrate_refresh_interval_off_app_settings(conn, existing_tables)
 
         # Downloading has always been a play-triggered action (see
         # content.py), so any 'ready' row from before last_played_at existed

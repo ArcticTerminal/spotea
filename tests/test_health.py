@@ -1,7 +1,7 @@
 """/health and the background refresh loop's survival.
 
 Both halves of one bug: the loop used to die on any exception raised outside
-its inner try (`_read_interval_minutes` was outside it, and "database is
+its inner try (reading the refresh interval was outside it, and "database is
 locked" there is entirely plausible while eight refresh threads write), and
 /health returned a hardcoded ok, so nothing noticed. The app looked healthy
 and simply stopped ever fetching a new upload.
@@ -47,23 +47,21 @@ def test_health_is_503_when_the_database_is_unreachable(client, monkeypatch):
     assert body["database"] is False
 
 
-def test_refresh_loop_survives_a_failure_reading_the_interval(monkeypatch):
-    """The actual regression: an exception on the first line of the cycle.
+def test_refresh_loop_survives_a_failure_during_a_cycle(monkeypatch):
+    """The actual regression: an exception anywhere in the cycle.
 
     Before the fix this killed the task outright and the only place that
     would ever have surfaced it was the `await` in the lifespan's shutdown.
     """
     calls: list[int] = []
 
-    def sometimes_locked() -> int:
+    def sometimes_locked() -> None:
         calls.append(1)
         if len(calls) == 1:
             raise RuntimeError("database is locked")
-        # Second time round: a normal interval, so the loop settles into its
-        # wait and touches neither the database nor the network.
-        return 60
+        # Second time round: nothing due, so this is a normal no-op cycle.
 
-    monkeypatch.setattr(scheduler, "_read_interval_minutes", sometimes_locked)
+    monkeypatch.setattr(scheduler, "_refresh_due_accounts", sometimes_locked)
     monkeypatch.setattr(scheduler, "ERROR_BACKOFF_SECONDS", 0)
 
     async def drive() -> tuple[bool, int]:
@@ -80,4 +78,4 @@ def test_refresh_loop_survives_a_failure_reading_the_interval(monkeypatch):
     alive, attempts = asyncio.run(drive())
 
     assert attempts >= 2, "the loop did not come back round after the failure"
-    assert alive, "the loop died on an exception raised outside the refresh call"
+    assert alive, "the loop died on an exception raised during a cycle"

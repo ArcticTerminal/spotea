@@ -2,7 +2,6 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
-from app.app_settings import get_app_settings
 from app.deps import get_current_profile, get_db, require_login
 from app.interests import parse_interests
 from app.models import User
@@ -41,7 +40,7 @@ def home(
         "index.html",
         {
             "audio_quality": profile.audio_quality,
-            "feed_refresh_interval_minutes": get_app_settings(db).feed_refresh_interval_minutes,
+            "feed_refresh_interval_minutes": profile.account.feed_refresh_interval_minutes,
             # Server-rendered rather than fetched by home/settings.js on boot:
             # the interest chips are part of the Settings panel's first paint,
             # and filling them in afterwards flashes an empty editor on every

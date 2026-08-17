@@ -15,7 +15,6 @@ from datetime import timedelta
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.app_settings import get_app_settings
 from app.deps import get_current_profile, get_db, require_login
 from app.interests import parse_interests
 from app.models import User
@@ -31,7 +30,7 @@ def _recommendations_out(db: Session, profile: User, *, force: bool) -> Recommen
     # The batch goes stale on the same interval the user picked for background
     # feed refreshes, rather than on a cadence of its own — see
     # services/recommendations.py.
-    ttl = timedelta(minutes=get_app_settings(db).feed_refresh_interval_minutes)
+    ttl = timedelta(minutes=profile.account.feed_refresh_interval_minutes)
     batch, generated_at = get_recommendations(db, profile, ttl=ttl, force=force)
     return RecommendationsOut(
         interests=parse_interests(profile.interests),

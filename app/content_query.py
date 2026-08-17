@@ -13,7 +13,7 @@ from sqlalchemy import and_, or_
 from sqlalchemy.orm import Query, Session, joinedload
 from sqlalchemy.sql.elements import ColumnElement
 
-from app.models import Content, Feed
+from app.models import Content, Feed, User
 from app.timeutil import utcnow
 
 DEFAULT_PAGE_SIZE = 20
@@ -57,8 +57,10 @@ def new_upload_filter() -> ColumnElement[bool]:
     )
 
 
-def followed_feeds(db: Session, user_id: int | None = None) -> Query[Feed]:
-    """Feeds the user actually follows, newest first.
+def followed_feeds(
+    db: Session, user_id: int | None = None, account_id: int | None = None
+) -> Query[Feed]:
+    """Feeds actually followed, newest first.
 
     followed=False rows are Explore placeholders auto-created to hold a
     single video (see routers/explore.py's _get_or_create_placeholder_feed)
@@ -68,12 +70,18 @@ def followed_feeds(db: Session, user_id: int | None = None) -> Query[Feed]:
     omitting the filter is what would silently turn "I grabbed one song"
     into "I follow this channel now".
 
-    user_id is optional because the background scheduler refreshes every
-    profile's feeds at once, not one profile's.
+    Scoped one of three ways: everything (both filters omitted), one
+    profile's own (`user_id`, what a request handler scopes to), or one
+    whole account's across every one of its profiles (`account_id` — the
+    background scheduler refreshes per account now that the refresh
+    interval is per-Account rather than one shared setting; see
+    scheduler.py). `user_id` wins if both are somehow given.
     """
     query = db.query(Feed).filter(Feed.followed.is_(True))
     if user_id is not None:
         query = query.filter(Feed.user_id == user_id)
+    elif account_id is not None:
+        query = query.join(User, Feed.user_id == User.id).filter(User.account_id == account_id)
     return query.order_by(Feed.added_at.desc())
 
 

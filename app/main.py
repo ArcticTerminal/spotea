@@ -8,7 +8,6 @@ from sqlalchemy import text
 from starlette.middleware.sessions import SessionMiddleware
 
 from app import scheduler
-from app.app_settings import get_app_settings
 from app.config import settings
 from app.database import Base, SessionLocal, engine
 from app.deps import NotAuthenticated, require_login
@@ -37,19 +36,10 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s:     %(name)s: %(m
 logger = logging.getLogger(__name__)
 
 
-def _ensure_app_settings() -> None:
-    # get_app_settings creates the row if it's missing, so this is just
-    # "do that once at startup" rather than leaving the first request to
-    # pay for it.
-    with SessionLocal() as db:
-        get_app_settings(db)
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     run_migrations(engine)
-    _ensure_app_settings()
 
     # Started/stopped through the scheduler module rather than held as a local
     # task here, so /health can ask it whether the loop is still alive.
