@@ -39,10 +39,30 @@ export function classifyHash(hash) {
   return { type: "unknown" };
 }
 
+// Every caller interpolates the result into a double-quoted HTML attribute
+// (data-title, aria-label, title, src, ...) as well as into text, so this has
+// to be safe in both positions.
+//
+// This used to be `div.textContent = str; return div.innerHTML`, which is not.
+// Serializing a text node escapes `&`, `<` and `>` and nothing else — quotes
+// come back through untouched, because inside a text node they need no
+// escaping. In attribute position they end the attribute: a video titled
+// `" onerror="…` closes data-title and everything after it is parsed as
+// further attributes on the same element. Verified against the real
+// recVideoCardHtml — three injected handlers fired, and the `<img onerror>`
+// one needed no interaction at all, since a broken src fires it on render.
+//
+// YouTube titles carry quotes constantly (`Why Windows "Clones" Are Bad`), so
+// this was also corrupting ordinary markup long before it was a way in.
+// Server-rendered templates were never affected: Jinja's autoescape covers
+// quotes.
 export function escapeHtml(str) {
-  const div = document.createElement("div");
-  div.textContent = str ?? "";
-  return div.innerHTML;
+  return String(str ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 // Mirrors format_duration() in app/formatting.py (M:SS, or H:MM:SS past an

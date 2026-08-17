@@ -1,13 +1,13 @@
-import asyncio
-import contextlib
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import text
 from starlette.middleware.sessions import SessionMiddleware
 
+from app import scheduler
 from app.app_settings import get_app_settings
 from app.config import settings
 from app.database import Base, SessionLocal, engine
@@ -24,7 +24,6 @@ from app.routers import profiles as profiles_router
 from app.routers import recommendations as recommendations_router
 from app.routers import settings as settings_router
 from app.routers import storage as storage_router
-from app.scheduler import run_scheduler
 
 # uvicorn configures only its own loggers, leaving the root at WARNING, so
 # every logger.info() this app makes went nowhere. That's not cosmetic: the
@@ -33,6 +32,8 @@ from app.scheduler import run_scheduler
 # reaching a handler. uvicorn's own loggers don't propagate, so this doesn't
 # duplicate the access log.
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:     %(name)s: %(message)s")
+
+logger = logging.getLogger(__name__)
 
 
 def _ensure_app_settings() -> None:
@@ -49,13 +50,13 @@ async def lifespan(app: FastAPI):
     run_migrations(engine)
     _ensure_app_settings()
 
-    scheduler_task = asyncio.create_task(run_scheduler())
+    # Started/stopped through the scheduler module rather than held as a local
+    # task here, so /health can ask it whether the loop is still alive.
+    scheduler.start()
     try:
         yield
     finally:
-        scheduler_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await scheduler_task
+        await scheduler.stop()
 
 
 app = FastAPI(title="Spotea", lifespan=lifespan)
@@ -106,8 +107,33 @@ async def handle_not_authenticated(request: Request, exc: NotAuthenticated) -> R
 
 
 @app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok"}
+def health(response: Response) -> dict[str, object]:
+    """Liveness that can actually fail.
+
+    This used to return a hardcoded {"status": "ok"} — true whether or not the
+    database was reachable and whether or not background refreshing had
+    stopped. A probe that cannot fail is not a probe; it reported healthy
+    through exactly the outage it existed to catch (see scheduler.run_scheduler).
+
+    Deliberately cheap enough for a container healthcheck to poll: one
+    `SELECT 1` and an in-process flag, touching no user data and doing no
+    per-profile work.
+    """
+    checks = {"database": _database_reachable(), "scheduler": scheduler.is_alive()}
+    healthy = all(checks.values())
+    if not healthy:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    return {"status": "ok" if healthy else "degraded", **checks}
+
+
+def _database_reachable() -> bool:
+    try:
+        with SessionLocal() as db:
+            db.execute(text("SELECT 1"))
+        return True
+    except Exception:
+        logger.exception("Health check: database unreachable")
+        return False
 
 
 @app.get("/sw.js")

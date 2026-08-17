@@ -6,6 +6,9 @@ stored value is what's reported, and a row from before the column existed
 still gets measured (once) rather than reporting 0 forever.
 """
 
+import io
+import zipfile
+
 from app.models import Content, Feed
 from app.storage import clear_all, collect_usage
 
@@ -132,3 +135,38 @@ def test_storage_endpoint_shape(client, db_session, tmp_path):
     assert data["total_formatted"] == "2.0 MB"
     assert data["items"][0]["id"] == content.id
     assert data["items"][0]["channel_title"] == "Storage Channel"
+
+
+def test_export_streams_from_disk_and_leaves_nothing_behind(client, db_session, tmp_path):
+    """The archive is built on disk, not in memory, and cleaned up afterwards.
+
+    It used to be assembled in an `io.BytesIO` with ZIP_STORED, i.e. the whole
+    library held in RAM for one request — a 1 GB library made "Export all" a
+    1 GB allocation. This pins the observable half of that change: a real zip
+    comes back, and no `.export.tmp` survives the response.
+    """
+    from app.config import settings
+    from app.routers.storage import EXPORT_TEMP_SUFFIX
+
+    first, _ = _ready_content(db_session, tmp_path, video_id="export00001", size_bytes=32)
+    second, _ = _ready_content(db_session, tmp_path, video_id="export00002", size_bytes=48)
+
+    res = client.get("/storage/export")
+
+    assert res.status_code == 200
+    assert res.headers["content-type"] == "application/zip"
+
+    with zipfile.ZipFile(io.BytesIO(res.content)) as zf:
+        names = sorted(zf.namelist())
+        assert names == [f"Track {first.video_id}.m4a", f"Track {second.video_id}.m4a"]
+        # ZIP_STORED, so entries come back byte-identical to what's on disk.
+        assert len(zf.read(names[0])) == 32
+
+    leftovers = list(settings.storage_dir.glob(f"*{EXPORT_TEMP_SUFFIX}"))
+    assert leftovers == [], f"export left temp files behind: {leftovers}"
+
+
+def test_export_with_nothing_downloaded_is_a_conflict(client, db_session):
+    res = client.get("/storage/export")
+
+    assert res.status_code == 409

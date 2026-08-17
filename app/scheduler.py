@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import logging
 
 from app.app_settings import get_app_settings
@@ -17,6 +18,18 @@ logger = logging.getLogger(__name__)
 # raises "bound to a different event loop".
 _wake_event: asyncio.Event | None = None
 _loop: asyncio.AbstractEventLoop | None = None
+
+# The running loop's task, owned here rather than by main.py's lifespan so
+# that /health can ask whether background refreshing is actually still
+# happening — see is_alive below.
+_task: asyncio.Task | None = None
+
+# How long to wait before starting the cycle over after an unexpected failure.
+# Without a pause, a persistent error (a locked database, a missing settings
+# row) would turn the loop into a tight spin that logs a traceback per
+# iteration; with one, the loop keeps trying at a rate that stays readable in
+# the log and leaves the interval it would otherwise have slept roughly intact.
+ERROR_BACKOFF_SECONDS = 60
 
 
 def request_reschedule() -> None:
@@ -43,26 +56,65 @@ def _refresh_all_feeds() -> None:
 
 
 async def run_scheduler() -> None:
-    """Runs for the lifetime of the app (started/cancelled in main.py's
-    lifespan), refreshing every profile's feeds on a shared interval — see
+    """Runs for the lifetime of the app (started/stopped via start/stop below),
+    refreshing every profile's feeds on a shared interval — see
     AppSettings.feed_refresh_interval_minutes. Keeps content fresh on its
-    own, so nothing on the client needs to block on a refresh anymore."""
+    own, so nothing on the client needs to block on a refresh anymore.
+
+    The whole cycle is guarded, not just the refresh. It used to be only the
+    refresh: `_read_interval_minutes` sat outside any try, so a single
+    "database is locked" there — entirely plausible while eight refresh
+    threads are writing — killed this task outright. Nothing noticed. The
+    lifespan only awaits it at shutdown, so from the outside the app was
+    healthy and simply never fetched a new upload again; the only symptom was
+    "no new videos", which reads as a YouTube or RSS problem. See is_alive
+    below for the other half of the fix.
+    """
     global _wake_event, _loop
     _loop = asyncio.get_running_loop()
     _wake_event = asyncio.Event()
 
     while True:
-        interval_minutes = await asyncio.to_thread(_read_interval_minutes)
-        _wake_event.clear()
+        # CancelledError is a BaseException, so `except Exception` below lets
+        # a shutdown through untouched.
         try:
-            await asyncio.wait_for(_wake_event.wait(), timeout=interval_minutes * 60)
-            # Woke early because the interval setting changed — reschedule
-            # with the new value rather than refreshing right now.
-            continue
-        except TimeoutError:
-            pass  # interval elapsed naturally — time to refresh
+            interval_minutes = await asyncio.to_thread(_read_interval_minutes)
+            _wake_event.clear()
+            try:
+                await asyncio.wait_for(_wake_event.wait(), timeout=interval_minutes * 60)
+                # Woke early because the interval setting changed — reschedule
+                # with the new value rather than refreshing right now.
+                continue
+            except TimeoutError:
+                pass  # interval elapsed naturally — time to refresh
 
-        try:
             await asyncio.to_thread(_refresh_all_feeds)
         except Exception:
-            logger.exception("Background feed refresh failed")
+            logger.exception("Feed refresh cycle failed; retrying in %ds", ERROR_BACKOFF_SECONDS)
+            await asyncio.sleep(ERROR_BACKOFF_SECONDS)
+
+
+def start() -> None:
+    """Begin the refresh loop, keeping a handle on it for is_alive/stop."""
+    global _task
+    _task = asyncio.create_task(run_scheduler())
+
+
+async def stop() -> None:
+    global _task
+    if _task is None:
+        return
+    _task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await _task
+    _task = None
+
+
+def is_alive() -> bool:
+    """Whether the refresh loop is still running.
+
+    False means background refreshing has stopped for good and the process
+    needs replacing — which is exactly what /health reports, so that
+    compose's `restart: unless-stopped` can act on it.
+    """
+    return _task is not None and not _task.done()
