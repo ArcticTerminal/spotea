@@ -122,20 +122,33 @@ export async function openPlayer(contentId, { expanded = true, requireVisible = 
     return;
   }
 
-  // Switching tracks (or starting fresh): stop whatever's currently loaded
-  // immediately, rather than leaving it playing underneath the new track's
-  // own "Downloading audio…" state until that one's ready.
+  // Nothing is stopped here, deliberately. Switching tracks used to open with
+  // audio.pause() so the outgoing track didn't play on underneath the new
+  // one's "Preparing audio…" state — first unconditionally, then guarded to
+  // skip the case where the element had already run out on its own.
   //
-  // Guarded because on an auto-advance there is nothing to stop — the track
-  // ran out, so the element is already paused. Calling pause() there only
-  // told the OS we were done with audio, at the one moment we most needed it
-  // to think otherwise.
-  if (!activeAudio().paused) activeAudio().pause();
-  const seekBar = document.getElementById("seek-bar");
-  seekBar.value = 0;
-  document.getElementById("current-time").textContent = "0:00";
-  paintRange(seekBar);
-  document.getElementById("mini-player-progress-fill").style.width = "0%";
+  // Both versions were wrong in the same way, and the guard only hid it on
+  // the auto-advance path. pause() tells iOS the page is done with audio,
+  // which closes the background-audio grant that lets a backgrounded page
+  // start anything at all; every later play() is then silently ignored until
+  // the app is foregrounded. On an auto-advance the element is already paused
+  // so the guard skipped the call and that path worked — but a lock-screen
+  // next tap arrives with the current track genuinely playing, so the guard
+  // let it through and that path never worked once. Breadcrumbs from a real
+  // device (see reportPlayback): tap, pause, then a 6.7s download, then
+  // play-requested from a setTimeout that iOS had already stopped listening
+  // to, then `playing` only on the next visibilitychange.
+  //
+  // Assigning audio.src in startPlayback interrupts the outgoing resource by
+  // itself, without ever telling the OS the page is finished with sound — so
+  // the element holds the audio session continuously across the swap, which
+  // is the one state in which iOS accepts a new resource off screen. The cost
+  // is that a track needing a download plays the outgoing one for those few
+  // seconds instead of cutting to silence, which is the better of the two.
+  //
+  // The progress UI is reset from prepareAudio's onStart below rather than
+  // here, so it changes when the audio changes: zeroing it here would blank
+  // the bar for a track that is still audibly playing.
 
   // Taken, not read: the cached copy is only good for the one handoff it was
   // fetched for, and leaving it in place would let a later, unrelated open of
@@ -215,6 +228,15 @@ export async function openPlayer(contentId, { expanded = true, requireVisible = 
   const start = () => {
     prepareAudio(
       () => {
+        // onStart fires just after audio.src is reassigned, i.e. the moment
+        // the outgoing track actually stops being what's playing — see the
+        // note in openPlayer above for why this can't be done up front.
+        const seekBar = document.getElementById("seek-bar");
+        seekBar.value = 0;
+        document.getElementById("current-time").textContent = "0:00";
+        paintRange(seekBar);
+        document.getElementById("mini-player-progress-fill").style.width = "0%";
+
         // The server records the play when /stream is requested, which only
         // happens after audio.src is assigned — refreshing right here would
         // race it and re-render shelves that don't know about this play yet.
@@ -442,7 +464,17 @@ export function setupPlayerOverlay() {
   // A track running out is the whole point of having a queue; with none
   // loaded nextId() is null and playback simply stops, as it always did.
   onPlayerEvent("ended", () => {
-    const finished = document.getElementById("player-root").dataset.contentId;
+    const root = document.getElementById("player-root");
+    const finished = root.dataset.contentId;
+    // A track switch no longer stops the outgoing track (see openPlayer), so
+    // one can now run out while a *different* one is still downloading: the
+    // element is still on the old resource, but the DOM and the queue pointer
+    // already describe the incoming one. Advancing on that would step
+    // straight over the track that's on its way in.
+    if (root.dataset.stream && !activeAudio().currentSrc.endsWith(root.dataset.stream)) {
+      reportPlayback("outgoing-ended", { contentId: finished });
+      return;
+    }
     const next = nextId();
     // The first breadcrumb of a handoff, and the one that makes the rest
     // legible: everything after it in the log either happened in this same
@@ -481,6 +513,19 @@ export function setupPlayerOverlay() {
 
   document.addEventListener(QUEUE_CHANGED, syncQueueControls);
   syncQueueControls();
+
+  // Re-asserted the moment audio is genuinely coming out, for the same reason
+  // applyNowPlayingMetadata is (see player.js): iOS only reliably accepts a
+  // Now Playing update while the page holds the audio session, and every
+  // QUEUE_CHANGED that matters to the *first* track of a queue fires before
+  // there is one. "Play all" builds the queue and then opens the player
+  // (home/detail.js), so the only setActionHandler("nexttrack") call track one
+  // ever gets lands in the silent gap before playback — iOS drops it, decides
+  // the page has no track controls, and falls back to drawing the ±15s seek
+  // pair instead. From track two on, every queue change happens mid-playback
+  // and is taken, which is why the buttons appear for the rest of the session
+  // and only the first track is ever wrong.
+  onPlayerEvent("playing", syncQueueControls);
 
   document.getElementById("mini-player-expand").addEventListener("click", expandPlayer);
   document.getElementById("overlay-collapse-btn").addEventListener("click", (event) => {

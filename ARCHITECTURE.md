@@ -935,28 +935,77 @@ stopping whenever you left Home/Library/Explore before this (see the
 Library section above and §11).
 
 **Playback runs on a single `<audio>` element**, its `src` reassigned per
-track. That single fact used to be two interchangeable elements
-(`#audio` / `#audio-standby`), pre-rolling the next track on the second one a
-few seconds before the current one ended so a background handoff never had to
-call `play()` on a paused element — iOS silently refuses that while
-backgrounded (see below). It genuinely fixed background auto-advance, but
-traded it for a worse, better-documented problem: Apple's own HTML5
-audio/video docs say *"all devices running iOS are limited to playback of a
-single audio or video stream at any time [...] playing multiple simultaneous
-audio streams is also not supported"* — and the crossfade needed exactly
-that, two elements genuinely playing at once. In practice this meant iOS's
-Now Playing system couldn't tell which element was the real one: Dynamic
-Island stopped updating on track change, the play/pause button and
-lock-screen controls fell out of sync, and the two tracks were audibly both
-there in a way that wasn't just the intended crossfade. Reverted to one
-element, which every one of those systems tracks unambiguously.
+track — and once the real bug was found, that turned out to be enough on its
+own: background auto-advance, a lock screen that stays right, and a working
+next button all run on one element. Two more elaborate architectures were
+built and reverted first, on a diagnosis that turned out to be wrong.
 
-The refusal that motivated the two-deck detour in the first place is real
-and still applies, and is worth keeping on record since it'll be the first
-thing anyone re-derives if background auto-advance is revisited: a
-backgrounded iOS app may keep playing what is already playing, but it may
-not *start* a paused element, and the refusal is silent — `play()` neither
-resolves nor rejects. Measured via `routers/debug.py` breadcrumbs:
+**The actual bug:** every track switch (`openPlayer` in `home/overlay.js`)
+called `audio.pause()` as a first step, *including on an auto-advance* —
+where the previous track had already run out on its own and the element was
+paused already. Calling `pause()` tells iOS the page is done
+with audio; that's what closes the background-audio grant that lets a page
+keep running once the screen is off. A moment later that same handler loaded
+the next track and called `play()` — but iOS had already decided the app was
+finished with sound, and silently ignored it until the app was foregrounded
+again. Fix, in `openPlayer`:
+
+The first fix guarded the call rather than removing it, so that a track which
+had stopped on its own was never told to stop a second time:
+
+```js
+if (!activeAudio().paused) activeAudio().pause();
+```
+
+**That was half a fix, and the half it covered hid the other half.** "Already
+paused" describes the auto-advance case and only that one, so auto-advance
+started working and the guard looked complete. A lock-screen **next** tap
+arrives with the current track genuinely playing — the guard lets the
+`pause()` straight through, and that path never worked once. Breadcrumbs for
+a single next tap on a track that still needed downloading:
+
+```
+(tap, ~00:21:37)  pause()
+                  GET  /content/43927          metadata
+                  POST /content/43927/download
+                  GET  /content/43927/status   x7, over 6.5s
+play-requested    hidden   43927  readyState=0     (+6.7s, from a setTimeout)
+                  GET  /content/43927/stream   206 Partial Content
+playing           visible  43927                   (+12.5s, on unlock)
+```
+
+So the rule is not "guard the `pause()`" but **never call `pause()` on a
+track switch at all**. Assigning `audio.src` interrupts the outgoing resource
+by itself without ever telling the OS the page is finished with sound, so the
+element holds the audio session continuously across the swap — the one state
+in which iOS accepts a new resource off screen. `closePlayer`, which really
+is done with audio, is the only legitimate caller left.
+
+Two things follow from dropping it. A track that needs downloading now plays
+the *outgoing* one for those few seconds rather than cutting to silence,
+which is the better of the two. And an outgoing track can now reach its own
+`ended` while a different one is still being prepared — the element is still
+on the old resource while the DOM and queue pointer already describe the
+incoming one — so `ended` bails out when `audio.currentSrc` doesn't match
+`root.dataset.stream`, rather than advancing straight past the track that is
+already on its way in.
+
+**What is left is a race, not a rule.** Every `play-requested` logs
+`readyState: 0`: `cacheUpcoming` gets the mp3 onto the *server's* disk
+(`handoff-cached: ready`), but the element itself still fetches over the
+network at the handoff, with the app off screen. Measured, that lands in
+359–1240 ms when it works and never at all when it doesn't. Closing it means
+having the bytes in hand before the swap — fetching the next track into a
+`Blob` during the current one and handing the element an object URL, so the
+handoff touches no network (`/stream?download=1` already skips the
+`last_played_at` write, so recording the play would need its own call again).
+Considered, not attempted.
+
+Everything below is the two wrong turns taken before any of this was found.
+
+**What this was mistaken for, twice.** The guard didn't exist yet when this
+was first investigated, and the measured symptom read exactly like a known
+platform limit, not a bug in this code:
 
 ```
 play-requested    hidden   43958  readyState=4
@@ -964,36 +1013,33 @@ playback-stalled  hidden   43958  readyState=4      (+3.0s)
 playing           visible  43958                    (+7.7s)
 ```
 
-(`playback-stalled` is an ordinary `setTimeout` that *fired* while still
-hidden, three seconds in — the page was not frozen, and neither was the
-network: `readyState 4` means the whole track was already in memory. `play()`
-still did nothing until the app came back on screen.) The consequence: a
-queued track that runs out while the app is backgrounded does not
-auto-advance until the app is foregrounded again — at which point it resumes
-immediately, from wherever the previous track had actually finished. Fixing
-that properly (without reintroducing the two-stream problem above) would mean
-a single element that never actually stops between tracks — gapless playback
-via Media Source Extensions, appending each track's bytes into one continuous
-buffer rather than swapping `src`. That's a materially bigger project, not
-attempted here.
+`readyState 4` means the whole track was already in memory — not a download
+problem — and `playback-stalled` is an ordinary `setTimeout` that *fired*
+three seconds in, still hidden, so the page wasn't frozen either. `play()`
+just did nothing until the app came back on screen. That matches Apple's own
+HTML5 docs, which say a backgrounded iOS app may keep playing what's already
+playing but may not *start* a paused element. As a general platform fact
+that's true — but it wasn't what was happening here: the redundant `pause()`
+a moment earlier had already told iOS the page was finished, before that
+`play()` was ever attempted. Two increasingly elaborate architectures got
+built on that wrong diagnosis:
 
-**A backgrounded iOS app cannot start a new media resource.** Not "is slow
-to", not "needs a nudge". The element loads its metadata, the server serves
-real bytes (`GET /content/{id}/stream` logs `206 Partial Content`), and then
-it simply stops at `readyState 1` and never reaches `HAVE_FUTURE_DATA`.
-`play()` neither resolves nor rejects. Foreground the app and it starts, from
-0:00. Two things were tried against this and both were reverted:
-
-- **Two interchangeable decks** (`#audio` / `#audio-standby`), pre-rolling the
-  next track a few seconds early so the handoff never had to start anything.
-  It worked — and put two elements genuinely playing at once, which Apple's
-  docs rule out outright, with the Now Playing consequences described above.
+- **Two interchangeable decks** (`#audio` / `#audio-standby`), pre-rolling
+  the next track a few seconds early so a handoff never had to *start*
+  anything new. It worked — not because starting-while-backgrounded was
+  really forbidden, but because pre-rolling early meant `pause()` on the
+  outgoing deck and `play()` on the incoming one both happened while the app
+  was still audibly playing something. It also put two elements genuinely
+  playing at once, which Apple's docs separately rule out (*"all devices
+  running iOS are limited to playback of a single audio or video stream at
+  any time"*) — Now Playing couldn't tell which element was the real one:
+  Dynamic Island stopped updating on track change, lock-screen controls fell
+  out of sync, and the two tracks were audibly both there at once.
 - **A keep-alive clip** on a second `#keepalive` element, looping something
   inaudible across the gap, on the theory that a page which never stops
-  playing keeps its permission to play. **It does not.** The breadcrumb log
-  has the clip rendering (`keepalive-playing`, hidden) three seconds before
-  the real track was still sitting at `readyState 1` — permission refused
-  with something audibly playing on the very same page:
+  playing keeps its permission to play. It didn't fix anything — the real
+  problem was the stray `pause()` call, not the silence — and it recreated
+  the same two-elements-competing symptom as the decks, in a smaller package:
 
   ```
   track-ended         hidden   44194  next=44195
@@ -1003,16 +1049,12 @@ it simply stops at `readyState 1` and never reaches `HAVE_FUTURE_DATA`.
   playback-stalled    hidden   44195  readyState=1  (+3.2s)   <- track never does
   ```
 
-  All it bought was the same Now Playing ambiguity as the decks, in a smaller
-  package, and it was why the lock screen stayed wrong long after the decks
-  were gone. Removed entirely.
+  It was also why the lock screen stayed wrong long after the decks were
+  gone.
 
-So: one element, no second stream, and **no background auto-advance** — a
-track that runs out while the app is off screen stops there and resumes when
-the app is opened. The only architecture that satisfies both is Media Source
-Extensions (one element whose playback never stops between tracks, so nothing
-ever has to be *started* in the background), which is a materially bigger
-project and is not attempted here.
+Both are reverted; neither should be retried. **One element, the `pause()`
+guard above, nothing else that plays audio** — that's the whole fix, and it's
+simpler than either detour was.
 
 **Now Playing is published twice per track, on purpose.** iOS only reliably
 accepts an update while the page genuinely holds the audio session, and a
@@ -1199,6 +1241,18 @@ rather than disabled when no queue is loaded, since a permanently dead
 control costs real width on a phone. Notably, previous/next stay live while
 `.transport` is in its `is-disabled` (downloading/failed) state — a track
 stuck on "Download failed" is exactly when someone wants to skip past it.
+
+`syncQueueControls` runs on `QUEUE_CHANGED` **and again on `playing`**, and
+the second one is not redundant for the same reason `applyNowPlayingMetadata`
+is published twice: iOS only reliably accepts a Now Playing update while the
+page holds the audio session, and every queue change that matters to the
+*first* track fires before there is one. "Play all" builds the queue and then
+opens the player, so the only `setActionHandler("nexttrack", …)` call track
+one would otherwise get lands in the silent gap before playback. iOS drops
+it, concludes the page has no track controls, and draws the ±15s seek pair in
+their place — the symptom being next/previous missing on the first track of a
+queue and appearing, correctly, on every one after it (from track two on the
+queue changes mid-playback, where the registration is taken).
 
 Because a download is only triggered by playing something, every track
 change in a queue would otherwise cost the same 2-4s wait as the first (see

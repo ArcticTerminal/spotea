@@ -128,13 +128,21 @@ export function reportPlayback(event, detail = {}) {
 // backgrounded start the next one, and both were reverted. This comment is
 // the record of what was measured, so it isn't re-derived a third time.
 //
-// **A backgrounded iOS app cannot start a new media resource.** Not "is slow
-// to", not "needs a nudge" — the element loads its metadata, serves real
-// bytes (the server logs 206 Partial Content), and then simply stops at
-// readyState 1 and never reaches HAVE_FUTURE_DATA. play() neither resolves
-// nor rejects. Bring the app to the foreground and it starts, from 0:00.
+// **The rule is not "a backgrounded iOS app cannot start a new media
+// resource."** That is what the measurements looked like, and it is what the
+// two reverted architectures below were built to work around, but it is the
+// wrong reading. What actually holds: a backgrounded page may start a new
+// resource *for as long as it still holds the audio session*, and the page
+// gives that session up the moment it calls pause(). The failure mode is the
+// same either way — the element serves real bytes (the server logs 206
+// Partial Content) and then stops short of HAVE_FUTURE_DATA, with play()
+// neither resolving nor rejecting until the app is foregrounded — so the two
+// causes are indistinguishable from the element alone. The way to tell them
+// apart is whether anything called pause() first. Nothing on a track switch
+// may (see home/overlay.js's openPlayer); closePlayer, which really is done
+// with audio, is the only caller that should.
 //
-// Two things were tried against that, in order:
+// Two things were tried against the wrong reading, in order:
 //
 //   - **Two interchangeable decks**, pre-rolling the next track on a second
 //     element a few seconds early so the handoff never had to start anything.
@@ -156,13 +164,20 @@ export function reportPlayback(event, detail = {}) {
 //     was the reason the lock screen stayed wrong long after the decks were
 //     gone.
 //
-// So: one element, no second stream, and no background auto-advance. A track
-// that runs out while the app is off screen stops there and resumes when the
-// app is opened. The only architecture that could satisfy both is Media
-// Source Extensions — one element whose playback never stops between tracks,
-// so nothing ever has to be *started* in the background. That is a materially
-// bigger project (server-side segmenting, a continuous timeline across track
-// boundaries) and is not attempted here.
+// So: one element, no second stream, and no pause() on a track switch —
+// which is enough for background auto-advance on its own, verified on device
+// and in the breadcrumb log. Neither deck nor clip is needed, and neither
+// should come back; both worked only by accident, because pre-rolling early
+// meant the pause()/play() pair happened while the page was still audibly
+// playing something, which is what the current code arranges deliberately.
+//
+// What remains is a race rather than a rule: the element is at readyState 0
+// when the new src is assigned, so a handoff still has to fetch the audio
+// over the network with the app off screen. It usually lands in well under a
+// second, but a slow one can miss. Closing that would mean having the bytes
+// in hand before the handoff (fetching the next track into a Blob during the
+// current one and handing the element an object URL, so the swap touches no
+// network at all) — a real option, not attempted here.
 // ---------------------------------------------------------------------------
 
 /** The element driving the transport. */
@@ -204,20 +219,30 @@ const SILENT_AUDIO_DATA_URI =
 let audioUnlocked = false;
 function unlockAudio() {
   if (audioUnlocked) return;
-  audioUnlocked = true;
 
   const audio = activeAudio();
   // No element, or something is already loaded on it — either nothing to do,
   // or a play() already ran on it some other way. Either way, don't stomp a
   // loaded (possibly playing) source with the silent clip.
-  if (audio && !audio.src) {
-    // What WebKit needs is the *call* happening synchronously inside the
-    // click — not that the promise resolves, which is why this doesn't wait
-    // on .then() before pausing.
-    audio.src = SILENT_AUDIO_DATA_URI;
-    audio.play().catch(() => {});
-    audio.pause();
-  }
+  //
+  // Returning *without* setting the flag matters: on iOS this page reloads on
+  // every bfcache restore (see resume.js), and a reload with something
+  // playing runs resumeOverlayIfNeeded -> openPlayer -> startPlayback at boot,
+  // which assigns audio.src before the user has clicked anything. Burning the
+  // one-shot flag on that first click would mark the element unlocked when
+  // nothing had been unlocked at all — and since that boot-time play() has no
+  // gesture behind it, WebKit refuses it, so the element really is still
+  // locked. Leaving the flag alone costs a no-op call per click and lets a
+  // later one (closePlayer clears src) actually do the unlock.
+  if (!audio || audio.src) return;
+
+  audioUnlocked = true;
+  // What WebKit needs is the *call* happening synchronously inside the
+  // click — not that the promise resolves, which is why this doesn't wait
+  // on .then() before pausing.
+  audio.src = SILENT_AUDIO_DATA_URI;
+  audio.play().catch(() => {});
+  audio.pause();
 }
 
 // Range inputs can't style their "already played" portion natively, so paint it
