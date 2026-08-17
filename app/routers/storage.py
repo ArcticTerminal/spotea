@@ -14,7 +14,7 @@ from app.config import settings
 from app.deps import get_current_profile, get_db, require_login
 from app.formatting import format_size, safe_filename
 from app.models import Content, User
-from app.storage import clear_all
+from app.storage import EXPORT_TEMP_SUFFIX, clear_all
 
 logger = logging.getLogger(__name__)
 
@@ -27,13 +27,6 @@ def clear_storage(
 ) -> dict[str, int]:
     cleared = clear_all(db, profile.id)
     return {"cleared": cleared}
-
-
-# Suffix for the half-written archive below. Distinct from yt-dlp's own
-# ".part" leftovers so an orphan sweep can treat the two differently — an
-# export in progress is live for as long as the download lasts, whereas a
-# stray ".part" never is.
-EXPORT_TEMP_SUFFIX = ".export.tmp"
 
 
 def _archive_name(title: str, suffix: str, used: set[str]) -> str:

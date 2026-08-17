@@ -9,6 +9,7 @@ failure regression test lives in test_health.py, which already covers the
 try/except shape.
 """
 
+import asyncio
 from datetime import timedelta
 
 from app.content_query import followed_feeds
@@ -129,6 +130,31 @@ def test_refresh_due_accounts_stamps_feeds_refreshed_at(db_session, monkeypatch)
     db_session.expire_all()
     refreshed = db_session.get(Account, DEFAULT_ACCOUNT_ID)
     assert refreshed.feeds_refreshed_at is not None
+
+
+def test_run_scheduler_sweeps_disk_every_tick(monkeypatch):
+    """The disk/DB sweeps (storage.sweep_orphans, sweep_stale_previews — see
+    scheduler._sweep_disk) have to run every tick regardless of which, if
+    any, accounts were due — they're not account-scoped at all."""
+    import app.scheduler as scheduler_module
+
+    calls = []
+    monkeypatch.setattr(scheduler_module, "_refresh_due_accounts", lambda: None)
+    monkeypatch.setattr(scheduler_module, "_sweep_disk", lambda: calls.append(1))
+
+    async def drive():
+        scheduler_module.start()
+        try:
+            for _ in range(200):
+                await asyncio.sleep(0.005)
+                if calls:
+                    break
+        finally:
+            await scheduler_module.stop()
+
+    asyncio.run(drive())
+
+    assert calls, "the scheduler tick never called _sweep_disk"
 
 
 def test_refresh_due_accounts_skips_an_account_that_is_not_due(db_session, monkeypatch):

@@ -25,6 +25,7 @@ from app.routers import profiles as profiles_router
 from app.routers import recommendations as recommendations_router
 from app.routers import settings as settings_router
 from app.routers import storage as storage_router
+from app.storage import sweep_startup_leftovers
 
 # uvicorn configures only its own loggers, leaving the root at WARNING, so
 # every logger.info() this app makes went nowhere. That's not cosmetic: the
@@ -72,6 +73,14 @@ async def lifespan(app: FastAPI):
     _assert_single_worker()
     Base.metadata.create_all(bind=engine)
     run_migrations(engine)
+
+    # Exactly once, here, before anything else in the process has had a
+    # chance to start a download — see storage.sweep_startup_leftovers for
+    # why this is the only moment a ".part" file is safe to delete
+    # unconditionally.
+    removed = sweep_startup_leftovers()
+    if removed:
+        logger.info("Removed %d abandoned .part file(s) from a previous run", removed)
 
     # Started/stopped through the scheduler module rather than held as a local
     # task here, so /health can ask it whether the loop is still alive.

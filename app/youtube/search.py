@@ -10,12 +10,11 @@ behaviour: one interest coming back empty shouldn't sink the whole batch.
 """
 
 import urllib.parse
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 import yt_dlp
 
-from app.images import cached_avatar_path, download_avatar
+from app.images import cached_avatar_path
 from app.youtube.extract import NETWORK_OPTS
 from app.youtube.urls import (
     CHANNEL_SEARCH_URL_TEMPLATE,
@@ -45,11 +44,6 @@ def _flat_opts(limit: int) -> dict:
         "extract_flat": "in_playlist",
         "playlist_items": f"1-{limit}",
     }
-
-# Avatar downloads run in parallel — sequentially, ~8 results would add
-# several seconds to every keystroke's search request.
-_AVATAR_POOL_SIZE = 8
-
 
 @dataclass
 class ChannelSearchResult:
@@ -170,46 +164,49 @@ def _video_result(entry: dict) -> VideoSearchResult | None:
     )
 
 
-def _cached_or_downloaded_avatar(channel_id: str, remote_url: str | None) -> str | None:
-    """A search result's avatar as a same-origin path. Hotlinked avatars are
-    exposed to Chrome's Opaque Response Blocking the same way a followed
-    channel's is (see images.download_avatar), and the cache is keyed by
-    channel id alone — so a channel already followed, or searched for
-    earlier, costs nothing here."""
+def _cached_avatar_or_hotlink(channel_id: str, remote_url: str | None) -> str | None:
+    """A search result's avatar — reused from disk if this channel already
+    has one (already followed, or found in an earlier search), hotlinked
+    straight from YouTube otherwise. This used to download a fresh copy for
+    every result instead: measured live, 977 of 1060 avatar files on disk
+    (92%, 16.4 MB) were exactly that — orphans with no Feed row ever
+    pointing at them, because nothing anywhere ever deletes an avatar. Per
+    the locked decision, only a channel someone actually follows earns a
+    local copy now (see feed_sync.fetch_feed_data); Explore search reuses
+    what exists without creating more. `remote_url` already went through
+    absolute_thumbnail_url's yt3.ggpht.com rewrite (see _best_thumbnail_url),
+    which is what makes hotlinking it viable at all — the alternative,
+    yt3.googleusercontent.com, gets blocked by Chrome's Opaque Response
+    Blocking when hotlinked. That rewrite doesn't eliminate ORB for every
+    case, so some never-followed channels may still render with no avatar —
+    a knowingly accepted tradeoff, not a bug.
+    """
     if not remote_url:
         return None
-    return cached_avatar_path(channel_id) or download_avatar(channel_id, remote_url)
+    return cached_avatar_path(channel_id) or remote_url
 
 
 def search_channels(query: str) -> list[ChannelSearchResult]:
     search_url = CHANNEL_SEARCH_URL_TEMPLATE.format(query=urllib.parse.quote(query))
 
-    entries = []
+    results = []
     for entry in _search_entries(search_url):
         channel_id = entry.get("channel_id") or entry.get("id")
         if not channel_id:
             continue
         remote_thumbnail_url = _best_thumbnail_url(entry.get("thumbnails") or [])
-        entries.append((channel_id, entry, remote_thumbnail_url))
-
-    if not entries:
-        return []
-
-    with ThreadPoolExecutor(max_workers=min(len(entries), _AVATAR_POOL_SIZE)) as pool:
-        thumbnail_urls = list(pool.map(lambda e: _cached_or_downloaded_avatar(e[0], e[2]), entries))
-
-    return [
-        ChannelSearchResult(
-            channel_id=channel_id,
-            title=entry.get("title") or entry.get("channel") or channel_id,
-            thumbnail_url=thumbnail_url,
-            subscriber_count=entry.get("channel_follower_count"),
-            channel_url=entry.get("channel_url")
-            or entry.get("url")
-            or f"https://www.youtube.com/channel/{channel_id}",
+        results.append(
+            ChannelSearchResult(
+                channel_id=channel_id,
+                title=entry.get("title") or entry.get("channel") or channel_id,
+                thumbnail_url=_cached_avatar_or_hotlink(channel_id, remote_thumbnail_url),
+                subscriber_count=entry.get("channel_follower_count"),
+                channel_url=entry.get("channel_url")
+                or entry.get("url")
+                or f"https://www.youtube.com/channel/{channel_id}",
+            )
         )
-        for (channel_id, entry, _), thumbnail_url in zip(entries, thumbnail_urls, strict=True)
-    ]
+    return results
 
 
 def search_videos(query: str) -> list[VideoSearchResult]:

@@ -8,6 +8,7 @@ from app.content_query import followed_feeds
 from app.database import SessionLocal
 from app.feed_sync import refresh_feeds
 from app.models import Account
+from app.storage import sweep_orphans, sweep_stale_previews
 from app.timeutil import utcnow
 
 logger = logging.getLogger(__name__)
@@ -70,11 +71,22 @@ def _refresh_due_accounts() -> None:
                 )
 
 
+def _sweep_disk() -> None:
+    """The other half of every tick — file and row cleanup that has nothing
+    to do with any one account, so it runs unconditionally rather than
+    gated on _due_accounts. See storage.py's module docstring for why these
+    two (and not a ".part" sweep) are safe to run on this cadence."""
+    with SessionLocal() as db:
+        sweep_orphans(db)
+        sweep_stale_previews(db)
+
+
 async def run_scheduler() -> None:
     """Runs for the lifetime of the app (started/stopped via start/stop
     below), checking on TICK_SECONDS which accounts are due for their own
     configured interval and refreshing just those — see _due_accounts and
-    Account.feed_refresh_interval_minutes.
+    Account.feed_refresh_interval_minutes — then sweeping disk/DB leftovers
+    (see _sweep_disk) regardless of which, if any, accounts were due.
 
     The whole cycle is guarded, not just the refresh. It used to be only the
     refresh: reading the (then-singleton) interval setting sat outside any
@@ -90,6 +102,7 @@ async def run_scheduler() -> None:
         # a shutdown through untouched.
         try:
             await asyncio.to_thread(_refresh_due_accounts)
+            await asyncio.to_thread(_sweep_disk)
         except Exception:
             logger.exception("Feed refresh cycle failed; retrying in %ds", ERROR_BACKOFF_SECONDS)
             await asyncio.sleep(ERROR_BACKOFF_SECONDS)

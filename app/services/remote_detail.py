@@ -103,10 +103,11 @@ def remote_channel_context(db: Session, user_id: int, channel_id: str) -> dict |
         {
             "video_count": len(uploads.items),
             "count_label": f"Latest {len(uploads.items)} uploads",
-            # Whatever the recommendation search already downloaded for this
-            # channel (see youtube/search.py's _cached_or_downloaded_avatar).
-            # Not fetched here if missing: a deep link to a channel never
-            # searched for just renders without one.
+            # Only a channel already followed has a local avatar to reuse
+            # (see youtube/search.py's _cached_avatar_or_hotlink) — this
+            # route has no remote thumbnail_url to hotlink as a fallback the
+            # way a search result does, so a channel that's never been
+            # followed just renders with no avatar at all.
             "hero_image": cached_avatar_path(channel_id),
             "hero_is_avatar": True,
             "channel_url": CHANNEL_PAGE_URL_TEMPLATE.format(channel_id=channel_id),
