@@ -16,7 +16,7 @@ from sqlalchemy.sql.elements import ColumnElement
 from app.models import Content, Feed, User
 from app.timeutil import utcnow
 
-DEFAULT_PAGE_SIZE = 20
+DEFAULT_PAGE_SIZE = 50
 
 # How far back "New Uploads" reaches — is_new_upload alone (see models.py's
 # Content.is_new_upload) only means "RSS-sourced, not backfilled," which

@@ -339,6 +339,107 @@ def test_run_backfill_skips_likely_shorts(db_session, monkeypatch):
     assert remaining == {"longvid002"}
 
 
+def test_existing_ids_check_is_scoped_to_this_channels_candidates_not_the_whole_library(db_session, monkeypatch):
+    """Regression for O(channels x library): the existing-ids check used to
+    query every video_id the user has, regardless of channel — bulk-
+    importing 50 channels re-read the user's entire library 50 times.
+    Scoped to this backfill's own candidate ids instead. An unscoped and a
+    scoped query return the identical *result* here, so the only thing that
+    actually distinguishes them is how much they read — verified by
+    capturing the real SQL bind parameters rather than the return value."""
+    from sqlalchemy import event
+
+    from app.database import engine
+
+    channel_id = "UCbackfillscope"
+    feed = Feed(user_id=USER_ID, rss_url=channel_feed_url(channel_id), channel_title="Scope Test", followed=True)
+    db_session.add(feed)
+    db_session.commit()
+    db_session.refresh(feed)
+
+    # A pile of unrelated library content a candidate-scoped query has no
+    # reason to touch.
+    other_feed = Feed(user_id=USER_ID, rss_url="https://example.com/scope-unrelated", channel_title="Unrelated")
+    db_session.add(other_feed)
+    db_session.commit()
+    db_session.refresh(other_feed)
+    db_session.add_all(
+        Content(feed_id=other_feed.id, user_id=USER_ID, video_id=f"unrelated{i:04d}", title="x") for i in range(50)
+    )
+    db_session.commit()
+
+    monkeypatch.setattr(
+        backfill_module,
+        "fetch_channel_all_videos",
+        lambda channel_id, on_progress=None: [
+            BackfillEntry(video_id="scopecand01", title="T", thumbnail_url=None, duration_seconds=None)
+        ],
+    )
+
+    captured = []
+
+    def capture(conn, cursor, statement, parameters, context, executemany):
+        if "video_id in" in statement.lower():
+            captured.append(parameters)
+
+    event.listen(engine, "before_cursor_execute", capture)
+    try:
+        backfill_module.run_backfill(feed.id, channel_id, db_session)
+    finally:
+        event.remove(engine, "before_cursor_execute", capture)
+
+    assert captured, "expected a Content.video_id IN (...) query"
+    assert len(captured[0]) < 10, (
+        f"the existing-ids query bound {len(captured[0])} parameters — it read the whole "
+        "50-row unrelated library instead of just this channel's own candidate id"
+    )
+
+
+def test_progress_is_not_updated_on_every_single_saved_row(db_session, monkeypatch):
+    """Regression: each backfill_progress.set() call takes a lock and sweeps
+    the whole registry — cheap per call, but a channel with thousands of new
+    videos turned that into thousands of redundant cycles for a number the
+    polling UI only samples a few times a second. Verified by counting the
+    actual set() calls across a backfill with more rows than one throttle
+    window, and confirming the very last row still gets an accurate report."""
+    channel_id = "UCbackfillthrottle"
+    feed = Feed(user_id=USER_ID, rss_url=channel_feed_url(channel_id), channel_title="Throttle", followed=True)
+    db_session.add(feed)
+    db_session.commit()
+    db_session.refresh(feed)
+
+    row_count = backfill_module.PROGRESS_UPDATE_INTERVAL * 3 + 1
+    monkeypatch.setattr(
+        backfill_module,
+        "fetch_channel_all_videos",
+        lambda channel_id, on_progress=None: [
+            BackfillEntry(video_id=f"throttle{i:04d}", title="T", thumbnail_url=None, duration_seconds=None)
+            for i in range(row_count)
+        ],
+    )
+
+    calls = []
+    original_set = backfill_module.backfill_progress.set
+
+    def spy_set(key, value):
+        calls.append(value)
+        original_set(key, value)
+
+    monkeypatch.setattr(backfill_module.backfill_progress, "set", spy_set)
+
+    backfill_module.run_backfill(feed.id, channel_id, db_session)
+
+    saving_calls = [v for v in calls if v[0] == "saving"]
+    assert len(saving_calls) < row_count / 2, (
+        f"{len(saving_calls)} 'saving' progress updates for {row_count} rows — "
+        "still reporting on (close to) every row instead of throttling"
+    )
+    assert saving_calls[-1] == ("saving", row_count, row_count), (
+        "the final row must still report exact progress even when it doesn't "
+        "land on a throttle-interval boundary"
+    )
+
+
 def test_unfollowing_a_channel_with_no_engaged_content_deletes_it_entirely(client, db_session):
     feed, _content = _seed_feed_with_content(db_session)
 

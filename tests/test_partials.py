@@ -262,7 +262,7 @@ def test_playlist_detail_fragment_404s_for_an_unknown_kind(client):
 
 
 def test_detail_pagination(client, db_session):
-    """Same DEFAULT_PAGE_SIZE=20 threshold as the fragment/page tests above."""
+    """DEFAULT_PAGE_SIZE=50 — same threshold as the fragment/page tests above."""
     feed = _seed(db_session)
     db_session.add_all(
         [
@@ -270,17 +270,57 @@ def test_detail_pagination(client, db_session):
                 feed_id=feed.id, user_id=USER_ID, video_id=f"bulkvid{i:04d}"[:11], title=f"Bulk {i}",
                 published_at=datetime(2025, 6, 1) - timedelta(days=i), is_favorite=True,
             )
-            for i in range(25)
+            for i in range(55)
         ]
     )
     db_session.commit()
 
     first_page = client.get("/partials/detail/playlist/favorites")
-    assert "Page 1 of 2" in first_page.text
+    assert 'aria-label="Pagination, page 1 of 2"' in first_page.text
+    assert 'is-current" aria-current="page">1</span>' in first_page.text
+    assert 'page=2">2</a>' in first_page.text
 
     second_page = client.get("/partials/detail/playlist/favorites?page=2")
     assert second_page.status_code == 200
-    assert "Page 2 of 2" in second_page.text
+    assert 'aria-label="Pagination, page 2 of 2"' in second_page.text
+    assert 'is-current" aria-current="page">2</span>' in second_page.text
+
+
+def test_pagination_numbered_links_are_windowed_around_the_current_page(client, db_session):
+    """A channel/playlist with a few thousand videos runs past a thousand
+    pages at DEFAULT_PAGE_SIZE — showing every page number would be its own
+    scroll-forever problem, so only current ± 2 plus the first/last page (with
+    an ellipsis for the gap) actually render as links. _seed() itself adds
+    one favorite ("partfav0001"), so 499 more makes an even 500 — exactly 10
+    pages at DEFAULT_PAGE_SIZE=50."""
+    feed = _seed(db_session)
+    db_session.add_all(
+        [
+            Content(
+                feed_id=feed.id, user_id=USER_ID, video_id=f"windowvi{i:03d}"[:11], title=f"Window {i}",
+                published_at=datetime(2025, 6, 1) - timedelta(days=i), is_favorite=True,
+            )
+            for i in range(499)
+        ]
+    )
+    db_session.commit()
+
+    res = client.get("/partials/detail/playlist/favorites?page=5")
+    assert res.status_code == 200
+    assert 'aria-label="Pagination, page 5 of 10"' in res.text
+    # Window is 3-7 (current ± 2): 3, 4, [5], 6, 7 all render as links/current.
+    for page in (3, 4, 6, 7):
+        assert f'page={page}">{page}</a>' in res.text
+    assert 'is-current" aria-current="page">5</span>' in res.text
+    # First (1) and last (10) page always render, each with its own ellipsis
+    # since there's a real gap on both sides of the 3-7 window.
+    assert 'page=1">1</a>' in res.text
+    assert 'page=10">10</a>' in res.text
+    assert res.text.count('class="pagination-ellipsis"') == 2
+    # Page 2 and page 8 are inside neither the window nor the first/last
+    # pins, so they must not appear as their own link.
+    assert 'page=2">2</a>' not in res.text
+    assert 'page=8">8</a>' not in res.text
 
 
 def test_detail_fragments_require_login():

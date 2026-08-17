@@ -32,6 +32,10 @@ logger = logging.getLogger(__name__)
 # "never ran". Entries are dropped when their feed is deleted (see routers/feeds.py's delete_feed).
 backfill_progress: ProgressRegistry[int, tuple[str, int, int]] = ProgressRegistry()
 
+# How often the per-row saving loop below reports progress, in rows. Not 1:
+# see the comment at its call site.
+PROGRESS_UPDATE_INTERVAL = 25
+
 
 def run_backfill(feed_id: int, channel_id: str, db: Session) -> None:
     """One-time full-history scan for a channel, run in the background so
@@ -72,9 +76,19 @@ def run_backfill(feed_id: int, channel_id: str, db: Session) -> None:
         # reasoning in feed_sync.apply_feed_data. Skipping it here, rather
         # than inserting a second row, avoids tripping Content's
         # (user_id, video_id) unique constraint.
+        #
+        # Scoped to this channel's own candidate ids, not the user's whole
+        # library: bulk import calls run_backfill once per channel in a
+        # loop, and an unscoped query re-read the entire library (tens of
+        # thousands of rows for a long-time user) on every single one —
+        # O(channels x library) for a 50-channel import. The candidate set
+        # is at most len(videos), which is what actually needs checking.
+        candidate_ids = {v.video_id for v in videos}
         existing_ids = {
             row.video_id
-            for row in db.query(Content.video_id).filter(Content.user_id == feed.user_id)
+            for row in db.query(Content.video_id).filter(
+                Content.user_id == feed.user_id, Content.video_id.in_(candidate_ids)
+            )
         }
         # Same defensive Shorts guard as feed_sync.apply_feed_data — the
         # Videos-tab playlist backfill relies on is supposed to exclude
@@ -115,7 +129,15 @@ def run_backfill(feed_id: int, channel_id: str, db: Session) -> None:
                     published_at=anchor - timedelta(seconds=i),
                 )
             )
-            backfill_progress.set(feed_id, ("saving", i, total))
+            # Every row took a lock and swept the whole registry — cheap
+            # per call (a handful of in-flight jobs), but a large channel's
+            # thousands of rows turned that into thousands of redundant
+            # cycles for a number the polling UI only samples a few times a
+            # second anyway. Always report the last row so a poll landing
+            # right at the end still sees "done" progress, not a stale
+            # in-between count.
+            if i % PROGRESS_UPDATE_INTERVAL == 0 or i == total:
+                backfill_progress.set(feed_id, ("saving", i, total))
 
         db.commit()
         backfill_progress.set(feed_id, ("done", total, total))

@@ -1491,11 +1491,20 @@ button.track-link {
   pointer-events: none;
 }
 
-.pagination-indicator {
-  color: var(--text-muted);
-  font-size: 0.8rem;
-  min-width: 6.5rem;
-  text-align: center;
+.pagination-btn.is-current {
+  background: var(--bg-elevated);
+  color: var(--white);
+  font-weight: 600;
+  pointer-events: none;
+}
+
+.pagination-ellipsis {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  color: var(--text-disabled);
 }
 
 .channel-grid {

@@ -12,11 +12,18 @@ run at import time, at the very top of this file, before the `from app...`
 imports later on.
 """
 
+import atexit
 import os
+import shutil
 import tempfile
 from pathlib import Path
 
 _TEST_DIR = Path(tempfile.mkdtemp(prefix="spotea-test-"))
+# mkdtemp doesn't clean up after itself, and this runs at import time (before
+# any pytest fixture could), so a fixture teardown can't own this either —
+# atexit is the only hook that fires regardless of how the run ends. 17 of
+# these had piled up in $TMPDIR/spotea-test-* before this existed.
+atexit.register(shutil.rmtree, _TEST_DIR, ignore_errors=True)
 
 os.environ["DATABASE_URL"] = f"sqlite:///{_TEST_DIR / 'test.db'}"
 os.environ["STORAGE_DIR"] = str(_TEST_DIR / "storage")

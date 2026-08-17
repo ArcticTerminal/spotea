@@ -90,12 +90,13 @@ def test_get_single_content_404_for_another_users_content(client, db_session):
 
 def test_channel_queue_is_the_whole_channel_in_list_order(client, db_session):
     """The queue behind "Play all" deliberately ignores pagination — the
-    detail panel shows twenty rows at a time, but playing a channel means the
-    channel."""
-    feed, _ = _seed(db_session, count=25)
+    detail panel shows DEFAULT_PAGE_SIZE rows at a time, but playing a
+    channel means the channel. count=55 (not the module default of 25) so
+    the two-page traversal below still spans a real page boundary."""
+    feed, _ = _seed(db_session, count=55)
 
     ids = client.get(f"/content/queue/channel/{feed.id}").json()["ids"]
-    assert len(ids) == 25
+    assert len(ids) == 55
 
     # Same order the track list renders, newest-first — a queue that agreed
     # on the set but not the order would look like shuffle was stuck on.

@@ -37,20 +37,20 @@ def _seed(db_session, *, channels=("Alpha Channel", "Beta Channel"), count=25):
     return feeds, items
 
 
-def test_default_pagination_is_newest_first_20_per_page(db_session):
-    _seed(db_session, count=25)
+def test_default_pagination_is_newest_first_50_per_page(db_session):
+    _seed(db_session, count=55)
 
     items, page, total_pages = query_content_page(db_session, USER_ID)
 
     assert page == 1
     assert total_pages == 2
-    assert len(items) == 20
-    assert items[0].title == "Title 025"  # most recently published
+    assert len(items) == 50
+    assert items[0].title == "Title 055"  # most recently published
     assert items[-1].title == "Title 006"
 
 
 def test_second_page_has_the_remainder(db_session):
-    _seed(db_session, count=25)
+    _seed(db_session, count=55)
 
     items, page, total_pages = query_content_page(db_session, USER_ID, page=2)
 
@@ -61,16 +61,16 @@ def test_second_page_has_the_remainder(db_session):
 
 
 def test_page_zero_and_negative_clamp_to_first_page(db_session):
-    _seed(db_session, count=25)
+    _seed(db_session, count=55)
 
     for requested in (0, -5, -1):
         items, page, total_pages = query_content_page(db_session, USER_ID, page=requested)
         assert page == 1
-        assert len(items) == 20
+        assert len(items) == 50
 
 
 def test_page_past_the_end_clamps_to_last_page(db_session):
-    _seed(db_session, count=25)
+    _seed(db_session, count=55)
 
     items, page, total_pages = query_content_page(db_session, USER_ID, page=9999)
 
