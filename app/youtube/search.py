@@ -99,6 +99,19 @@ class ChannelUploads:
     items: list[VideoSearchResult]
 
 
+@dataclass
+class ChannelProfile:
+    """A channel's display metadata with none of its videos — what
+    fetch_channel_profile reads off the channel page itself. Distinct from
+    ChannelUploads, which is the uploads playlist and carries the items but,
+    despite the field, never a real subscriber_count."""
+
+    channel_id: str
+    title: str | None
+    subscriber_count: int | None
+    avatar_url: str | None
+
+
 def _best_thumbnail_url(thumbnails: list[dict]) -> str | None:
     """The largest *usable* thumbnail from a flat entry.
 
@@ -338,18 +351,18 @@ def fetch_channel_uploads(channel_id: str) -> ChannelUploads:
     )
 
 
-def fetch_channel_avatar(channel_id: str) -> str | None:
-    """A channel's own avatar, straight from its channel page rather than its
-    uploads playlist — fetch_channel_uploads' UULF read carries no avatar at
-    all (verified live: its top-level thumbnails are the *first video's*
-    thumbnail, not the channel's), which is why a never-followed, never-
-    searched-for channel opened cold (a hard refresh, a deep link, a browser
-    back/forward) used to always render with none.
+def fetch_channel_profile(channel_id: str) -> ChannelProfile:
+    """A channel's own display metadata — name, subscriber count, avatar —
+    from one read of its channel page.
 
-    remote_channel_context (services/remote_detail.py) reaches for this only
-    as a last resort — after a local copy and the avatar the client's own
-    card already had to offer both come up empty — since it's a second live
-    yt-dlp call the common "opened from a card" path has no need to pay for.
+    All three come out of the *same* extraction, which is the whole point:
+    resolving a channel used to cost two live calls, one here for the avatar
+    and a second fetch_channel_uploads for the name, whose 50-item uploads
+    read was then thrown away except for its title. Worse, that read carries
+    no subscriber count at all (verified live — the UULF playlist response
+    has no channel_follower_count, so every row resolved through it ended up
+    with None), while the channel page does. See services/genre_artists.py,
+    which was paying exactly that.
 
     The channel page's own thumbnails carry the avatar under a stable
     "avatar_uncropped" id (unlike the banner entries alongside it, which
@@ -362,4 +375,28 @@ def fetch_channel_avatar(channel_id: str) -> str | None:
     avatar = next(
         (t for t in info.get("thumbnails") or [] if t.get("id") == "avatar_uncropped"), None
     )
-    return absolute_thumbnail_url(avatar["url"]) if avatar else None
+    return ChannelProfile(
+        channel_id=channel_id,
+        title=info.get("channel") or info.get("uploader"),
+        subscriber_count=info.get("channel_follower_count"),
+        avatar_url=absolute_thumbnail_url(avatar["url"]) if avatar else None,
+    )
+
+
+def fetch_channel_avatar(channel_id: str) -> str | None:
+    """A channel's own avatar, straight from its channel page rather than its
+    uploads playlist — fetch_channel_uploads' UULF read carries no avatar at
+    all (verified live: its top-level thumbnails are the *first video's*
+    thumbnail, not the channel's), which is why a never-followed, never-
+    searched-for channel opened cold (a hard refresh, a deep link, a browser
+    back/forward) used to always render with none.
+
+    remote_channel_context (services/remote_detail.py) reaches for this only
+    as a last resort — after a local copy and the avatar the client's own
+    card already had to offer both come up empty — since it's a second live
+    yt-dlp call the common "opened from a card" path has no need to pay for.
+    That caller wants the avatar and nothing else, so it keeps its own narrow
+    entry point rather than growing a ChannelProfile it would only ever read
+    one field of.
+    """
+    return fetch_channel_profile(channel_id).avatar_url

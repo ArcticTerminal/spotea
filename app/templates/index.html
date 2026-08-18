@@ -265,64 +265,113 @@
   >
     <div class="modal modal-onboarding">
       <div class="modal-header">
-        <h2>What kind of music are you into?</h2>
+        {# Text swapped by home/onboarding.js as the wizard moves between
+           steps — the kind picked on step one also changes what the chip
+           step's question should be. #}
+        <h2 id="onboarding-title">What do you want to listen to?</h2>
         <button type="button" id="onboarding-close" class="modal-close" aria-label="Close">×</button>
       </div>
 
-      <div id="onboarding-step-genres">
-        <p class="muted">
-          Pick a few genres — Explore's <strong>For you</strong> shelves and the channel
-          suggestions on the next step are searched from these. You can always add more
-          later from Settings.
-        </p>
-        {# Genre strings come from app/genres.py (MUSIC_GENRES), the same
-           list services/genre_artists.py seeds its MusicBrainz cache from —
-           a Jinja loop here instead of hardcoded buttons keeps the two
-           unable to drift apart. #}
-        <div class="genre-grid">
-          {% for genre in music_genres %}
-          <button type="button" class="genre-chip" data-genre="{{ genre }}">{{ genre }}</button>
-          {% endfor %}
+      <div id="onboarding-step-kind" class="onboarding-step">
+        <div class="onboarding-step-body">
+          <p class="muted">
+            Pick one to get you started — you can always follow both kinds later.
+          </p>
+          <div class="kind-cards">
+            <button type="button" class="kind-card" data-kind="music">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M9 18V5l12-2v13" />
+                <circle cx="6" cy="18" r="3" />
+                <circle cx="18" cy="16" r="3" />
+              </svg>
+              <span class="kind-card-name">Music</span>
+              <span class="kind-card-desc">Artists, albums and mixes</span>
+            </button>
+            <button type="button" class="kind-card" data-kind="podcast">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                <line x1="12" y1="19" x2="12" y2="23" />
+                <line x1="8" y1="23" x2="16" y2="23" />
+              </svg>
+              <span class="kind-card-name">Podcasts</span>
+              <span class="kind-card-desc">Shows, talks and interviews</span>
+            </button>
+          </div>
         </div>
-        <form id="onboarding-genre-form" class="interests-add-form">
-          <input
-            type="text"
-            id="onboarding-genre-input"
-            placeholder="Something else…"
-            maxlength="60"
-            autocomplete="off"
-            autocapitalize="off"
-            autocorrect="off"
-            aria-label="Add a genre"
-          />
-          <button type="submit" class="btn-quiet">Add</button>
-        </form>
+      </div>
+
+      <div id="onboarding-step-genres" class="onboarding-step" hidden>
+        <div class="onboarding-step-body">
+          <p class="muted" data-kind-copy="music">
+            Pick a few genres — Explore's <strong>For you</strong> shelves and the channel
+            suggestions on the next step are searched from these. You can always add more
+            later from Settings.
+          </p>
+          <p class="muted" data-kind-copy="podcast" hidden>
+            Pick a few topics — the show suggestions on the next step and Explore's
+            <strong>For you</strong> shelves are searched from these. You can always add
+            more later from Settings.
+          </p>
+          {# Chip strings come from app/genres.py (MUSIC_GENRES /
+             PODCAST_CATEGORIES), the same lists the curated suggestion
+             seeds (scripts/seed_music_artists.py,
+             scripts/seed_podcast_channels.py) key off of — Jinja loops here
+             instead of hardcoded buttons keep them unable to drift apart.
+             Which grid shows follows the kind picked on the previous
+             step. #}
+          <div class="genre-grid" data-kind-grid="music">
+            {% for genre in music_genres %}
+            <button type="button" class="genre-chip" data-genre="{{ genre }}">{{ genre }}</button>
+            {% endfor %}
+          </div>
+          <div class="genre-grid" data-kind-grid="podcast" hidden>
+            {% for category in podcast_categories %}
+            <button type="button" class="genre-chip" data-genre="{{ category }}">{{ category }}</button>
+            {% endfor %}
+          </div>
+          <form id="onboarding-genre-form" class="interests-add-form">
+            <input
+              type="text"
+              id="onboarding-genre-input"
+              placeholder="Something else…"
+              maxlength="60"
+              autocomplete="off"
+              autocapitalize="off"
+              autocorrect="off"
+              aria-label="Add a genre"
+            />
+            <button type="submit" class="btn-quiet">Add</button>
+          </form>
+        </div>
         <div class="modal-actions">
+          <button type="button" id="onboarding-genres-back" class="btn-quiet onboarding-back">Back</button>
           <button type="button" id="onboarding-genres-skip" class="btn-quiet">Skip</button>
           <button type="button" id="onboarding-genres-next" class="btn-primary" disabled>Next</button>
         </div>
       </div>
 
-      <div id="onboarding-step-channels" hidden>
-        <p class="muted">
-          A few channels worth following, based on what you picked — or search for your own.
-        </p>
+      <div id="onboarding-step-channels" class="onboarding-step" hidden>
+        <div class="onboarding-step-body">
+          <p class="muted">
+            A few channels worth following, based on what you picked — or search for your own.
+          </p>
 
-        <ul id="onboarding-suggested-channels" class="search-results"></ul>
+          <ul id="onboarding-suggested-channels" class="search-results"></ul>
 
-        <div class="channel-search">
-          <input
-            type="text"
-            id="onboarding-search-input"
-            placeholder="Search for a channel…"
-            autocomplete="off"
-            autocapitalize="off"
-            autocorrect="off"
-            aria-label="Search channels"
-          />
+          <div class="channel-search">
+            <input
+              type="text"
+              id="onboarding-search-input"
+              placeholder="Search for a channel…"
+              autocomplete="off"
+              autocapitalize="off"
+              autocorrect="off"
+              aria-label="Search channels"
+            />
+          </div>
+          <ul id="onboarding-search-results" class="search-results"></ul>
         </div>
-        <ul id="onboarding-search-results" class="search-results"></ul>
-
         <div class="modal-actions">
           <button type="button" id="onboarding-open-bulk-import" class="btn-quiet">Import many at once</button>
           <button type="button" id="onboarding-finish" class="btn-primary">Finish</button>

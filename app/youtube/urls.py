@@ -153,3 +153,28 @@ def absolute_thumbnail_url(raw: str | None) -> str | None:
     # confirm it's really an image. ggpht.com (YouTube's dedicated image
     # CDN) sends them and renders fine, so rewrite to that host.
     return url.replace("//yt3.googleusercontent.com/", "//yt3.ggpht.com/")
+
+
+# Google's image CDN takes the rendered size in the URL's trailing "=s<n>"
+# segment and resizes server-side. yt-dlp reports channel avatars as "=s0",
+# which is the *original* upload — measured live, one came back at 390 KB
+# for a picture the app never draws larger than 88 CSS pixels.
+_AVATAR_SIZE_RE = re.compile(r"=s\d+(-[^=]*)?$")
+
+
+def avatar_url_at_size(url: str | None, size: int) -> str | None:
+    """The same avatar, asked for at `size` pixels instead of whatever size
+    the URL currently names.
+
+    Worth doing wherever a stored avatar URL is rendered into a small fixed
+    box: at "=s0" a dozen suggestion cards pulled roughly 4.7 MB through
+    /avatar-proxy, versus about 180 KB at "=s176" — same images, same CDN,
+    a size parameter apart.
+
+    Applied at render time rather than baked into what gets stored, so the
+    stored URL stays exactly what YouTube reported and the display size
+    remains a property of the surface drawing it.
+    """
+    if not url:
+        return None
+    return _AVATAR_SIZE_RE.sub(f"=s{size}", url)

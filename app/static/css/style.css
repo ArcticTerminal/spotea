@@ -799,12 +799,138 @@ html[data-active-tab="detail"] .tab-panel[data-tab-panel="detail"] {
 
 /* --- Onboarding wizard --------------------------------------------------- */
 
-.modal-onboarding {
-  max-width: 480px;
-  max-height: 85vh;
+/* Full-screen takeover instead of a centered card — .modal-overlay's shared
+   centering padding would just be dead space around something that already
+   fills the screen, and a fixed card size fights a wizard meant to grow
+   (more steps, richer per-step content) rather than stay this small.
+   Both overrides need to out-specificity the shared .modal-overlay/.modal
+   rules below (same single-class specificity, later in the cascade) rather
+   than rely on source order — #onboarding-overlay's id does that for the
+   overlay, and the doubled-up .modal.modal-onboarding does it for the card. */
+#onboarding-overlay {
+  padding: 0;
+}
+
+.modal.modal-onboarding {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  border-radius: 0;
+  box-shadow: none;
+  background: var(--bg-page);
   display: flex;
   flex-direction: column;
+  /* The step body below is the one scroll container, so its sticky-feeling
+     .modal-actions footer (last flex child, not itself scrolled) stays put
+     at the bottom of the screen instead of scrolling away with the content
+     above it. */
+  overflow: hidden;
+}
+
+/* The header/footer bars stay full-bleed (border spanning edge to edge
+   reads as a page, not a leftover card), but their content lines up with
+   the 560px-wide, centered step body below via matching horizontal
+   padding — plain auto-margins can't do that on an element that's meant
+   to stay full width itself. Below 560px+the base gutter, this collapses
+   to the flat 1.25rem gutter every other input/list in the app already
+   uses; above it, it grows to keep pace with the centered column. */
+.modal-onboarding .modal-header {
+  flex-shrink: 0;
+  margin-bottom: 0;
+  padding: 1rem max(1.25rem, calc((100% - 560px) / 2 + 1.25rem));
+  padding-top: calc(1rem + env(safe-area-inset-top, 0px));
+  border-bottom: 1px solid var(--border-default);
+  box-sizing: border-box;
+}
+
+.onboarding-step {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Any author-set display beats the UA stylesheet's [hidden] { display: none }
+   (author origin wins regardless of specificity), so the JS-toggled hidden
+   steps would otherwise render right alongside the visible one. */
+.onboarding-step[hidden] {
+  display: none;
+}
+
+/* Same [hidden]-vs-display trap as .onboarding-step above: .genre-grid sets
+   display: flex, and the chip step keeps the inactive kind's grid hidden. */
+.genre-grid[hidden] {
+  display: none;
+}
+
+/* First step's two big choices — deliberately card-sized, not chip-sized:
+   this is a fork in the flow, not a multi-select. */
+.kind-cards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.kind-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.3rem;
+  padding: 1.25rem 1rem;
+  background: var(--bg-base);
+  border: 1px solid var(--border-default);
+  border-radius: 12px;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.kind-card:hover {
+  border-color: var(--accent);
+}
+
+.kind-card svg {
+  width: 26px;
+  height: 26px;
+  color: var(--accent);
+  margin-bottom: 0.35rem;
+}
+
+.kind-card-name {
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.kind-card-desc {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+/* Back sits at the opposite end of the footer from Skip/Next — it leaves
+   the flow rather than advancing it. */
+.onboarding-back {
+  margin-right: auto;
+}
+
+.onboarding-step-body {
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  width: 100%;
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 1.25rem;
+  box-sizing: border-box;
+}
+
+.modal-onboarding .modal-actions {
+  flex-shrink: 0;
+  padding: 1rem max(1.25rem, calc((100% - 560px) / 2 + 1.25rem))
+    calc(1rem + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--border-default);
+  box-sizing: border-box;
 }
 
 .genre-grid {

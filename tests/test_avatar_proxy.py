@@ -49,12 +49,36 @@ def test_a_lookalike_host_is_rejected(client, monkeypatch):
     assert res.status_code == 400
 
 
-def test_a_failed_upstream_fetch_is_a_404(client, monkeypatch):
+def test_a_failed_upstream_fetch_serves_a_blank_pixel(client, monkeypatch):
+    """Not a 404, which is what this used to answer.
+
+    An <img> whose src fails paints the browser's own broken-image glyph.
+    Every avatar in the app renders through .search-result-thumb, which
+    already draws the grey circle used for a channel with no avatar at all,
+    so a transparent pixel lands in exactly that placeholder — no markup and
+    no onerror handler anywhere. The onboarding wizard needs it: its avatar
+    URLs ship committed in scripts/channel_profiles.py and go stale whenever
+    a channel changes its picture.
+    """
     monkeypatch.setattr(main, "fetch_image_bytes", lambda url: None)
 
     res = client.get("/avatar-proxy", params={"u": "https://yt3.ggpht.com/abc"})
 
-    assert res.status_code == 404
+    assert res.status_code == 200
+    assert res.headers["content-type"] == "image/png"
+    assert res.content.startswith(b"\x89PNG")
+
+
+def test_the_blank_pixel_is_not_cached(client, monkeypatch):
+    """A real avatar is cached for a day; this stand-in must not be, or one
+    transient upstream hiccup freezes a blank circle in the browser until
+    tomorrow. Nothing is stored server-side either, so the next render
+    retries."""
+    monkeypatch.setattr(main, "fetch_image_bytes", lambda url: None)
+
+    res = client.get("/avatar-proxy", params={"u": "https://yt3.ggpht.com/abc"})
+
+    assert res.headers["cache-control"] == "no-store"
 
 
 def test_avatar_proxy_requires_login():

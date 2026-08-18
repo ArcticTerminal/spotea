@@ -10,6 +10,7 @@ the browser to hotlink directly.
 """
 
 from app.youtube import search as yt_search
+from app.youtube import urls
 from app.youtube.search import search_channels
 
 CHANNEL_ID = "UCX6OQ3DkcsbYNE6H8uQQuVA"
@@ -84,3 +85,29 @@ def test_search_channels_no_longer_imports_a_download_step(monkeypatch):
     source = inspect.getsource(yt_search)
     assert "download_avatar" not in source
     assert "ThreadPoolExecutor" not in source
+
+
+def test_avatar_url_at_size_replaces_the_size_segment():
+    """Google's image CDN resizes server-side from the trailing "=s<n>".
+    yt-dlp reports channel avatars as "=s0" — the original upload, measured
+    live at 390 KB for something drawn in a 36px circle."""
+    assert (
+        urls.avatar_url_at_size("https://yt3.ggpht.com/abc=s0", 176)
+        == "https://yt3.ggpht.com/abc=s176"
+    )
+
+
+def test_avatar_url_at_size_replaces_a_decorated_size_segment():
+    """Some avatar URLs carry crop/format flags after the size."""
+    assert (
+        urls.avatar_url_at_size("https://yt3.ggpht.com/ytc/abc=s900-c-k-c0x00ffffff-no-rj", 176)
+        == "https://yt3.ggpht.com/ytc/abc=s176"
+    )
+
+
+def test_avatar_url_at_size_passes_through_a_url_with_no_size_segment():
+    assert urls.avatar_url_at_size("https://yt3.ggpht.com/abc", 176) == "https://yt3.ggpht.com/abc"
+
+
+def test_avatar_url_at_size_of_nothing_is_nothing():
+    assert urls.avatar_url_at_size(None, 176) is None

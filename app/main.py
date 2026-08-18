@@ -1,3 +1,4 @@
+import base64
 import logging
 import os
 import urllib.parse
@@ -226,6 +227,17 @@ def get_avatar(filename: str) -> FileResponse:
 _AVATAR_PROXY_ALLOWED_HOSTS = {"yt3.ggpht.com", "yt3.googleusercontent.com"}
 _AVATAR_PROXY_CACHE_HEADERS = {"Cache-Control": "private, max-age=86400"}
 
+# A 1x1 fully transparent PNG, served in place of an avatar whose upstream
+# fetch failed — see avatar_proxy below for why that beats an error status.
+_BLANK_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+)
+# Deliberately not _AVATAR_PROXY_CACHE_HEADERS' day-long cache: this is a
+# stand-in for a fetch that failed, and a transient upstream hiccup must not
+# freeze a blank circle in the browser until tomorrow. Nothing is stored, so
+# the next render retries.
+_AVATAR_PROXY_BLANK_HEADERS = {"Cache-Control": "no-store"}
+
 
 @app.get("/avatar-proxy", dependencies=[Depends(require_login)])
 def avatar_proxy(u: str) -> Response:
@@ -242,14 +254,32 @@ def avatar_proxy(u: str) -> Response:
     `u` only ever reaches here as a URL this app generated itself (see
     _cached_avatar_or_hotlink) — the host allowlist below is what keeps a
     tampered query string from turning this into an open fetch of arbitrary
-    hosts on the server's behalf."""
+    hosts on the server's behalf.
+
+    A failed upstream fetch answers with a blank pixel rather than an error
+    status. An <img> whose src 404s paints the browser's own broken-image
+    glyph, and every avatar in the app renders through .search-result-thumb,
+    which already carries the grey circle used for a channel with no avatar
+    at all — so a transparent pixel lands in exactly that placeholder
+    instead of a broken icon, with no markup or onerror handler anywhere.
+    This matters most for the onboarding wizard, whose avatar URLs ship
+    committed in scripts/channel_profiles.py and go stale whenever a channel
+    changes its picture, but Explore's search results hit the same path any
+    time Google refuses a fetch."""
     host = urllib.parse.urlparse(u).hostname
     if host not in _AVATAR_PROXY_ALLOWED_HOSTS:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST)
 
     fetched = fetch_image_bytes(u)
     if fetched is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+        # Logged rather than swallowed: turning every failure into a blank
+        # pixel would otherwise make a genuinely broken proxy (bad egress,
+        # DNS, an upstream host change) look like a page full of channels
+        # that merely have no avatar.
+        logger.warning("Avatar proxy could not fetch %s — serving a blank placeholder", u)
+        return Response(
+            content=_BLANK_PNG, media_type="image/png", headers=_AVATAR_PROXY_BLANK_HEADERS
+        )
 
     body, content_type = fetched
     return Response(content=body, media_type=content_type, headers=_AVATAR_PROXY_CACHE_HEADERS)

@@ -9,7 +9,7 @@ test_recommendations.py's fake_search fixture.
 from app.models import GenreArtist
 from app.services import genre_artists as ga
 from app.timeutil import utcnow
-from app.youtube.search import ChannelUploads
+from app.youtube.search import ChannelProfile
 
 GENRE = "Jazz"
 
@@ -112,79 +112,82 @@ def test_seed_genre_is_a_noop_once_the_target_is_already_met(db_session, monkeyp
     assert called == []  # never even asked MusicBrainz — already had enough
 
 
-def test_get_suggested_channels_resolves_unresolved_rows_once(db_session, monkeypatch):
-    unresolved = _row(db_session, channel_id="UCunresolved00000000")
+def test_get_suggested_channels_never_calls_youtube(db_session, monkeypatch):
+    """The whole point of the change this test guards.
+
+    Display metadata used to be resolved lazily, in-request, the first time
+    any profile picked a given genre — two live yt-dlp calls per channel,
+    twelve channels per pick, which left the wizard on "Finding channels…"
+    for minutes. It is a pure database read now; the resolution happens
+    offline in scripts/resolve_genre_artists.py and ships committed.
+    """
+    _row(db_session, channel_id="UCunresolved00000000")
+    _row(db_session, channel_id="UCresolved000000000", resolved=True, title="Cached Title")
+
+    def fail_if_called(channel_id):
+        raise AssertionError("serving suggestions must not touch YouTube")
+
+    monkeypatch.setattr(ga, "fetch_channel_profile", fail_if_called)
+
+    result = ga.get_suggested_channels(db_session, [GENRE])
+
+    assert {r["channel_id"] for r in result} == {"UCunresolved00000000", "UCresolved000000000"}
+
+
+def test_get_suggested_channels_puts_resolved_rows_first(db_session):
+    """A row still waiting on the generator has no avatar and only its
+    curated name, so it fills the shelf after the ones that can render
+    properly — but it does still appear, rather than vanishing."""
+    _row(db_session, channel_id="UCunresolved00000000", artist_name="Not Resolved Yet")
+    _row(db_session, channel_id="UCresolved000000000", resolved=True, title="Resolved")
+
+    result = ga.get_suggested_channels(db_session, [GENRE])
+
+    assert [r["title"] for r in result] == ["Resolved", "Not Resolved Yet"]
+    assert result[1]["thumbnail_url"] is None
+
+
+def test_suggested_channels_proxy_the_stored_remote_avatar_url(db_session):
+    """thumbnail_url holds the raw upstream URL (that is what makes it
+    committable); turning it into something the browser can load without
+    tripping Chrome's ORB is a read-time concern."""
     _row(
         db_session,
-        channel_id="UCresolved000000000",
+        channel_id="UCavatar00000000000",
         resolved=True,
-        title="Cached Title",
-        thumbnail_url="/avatar-proxy?u=x",
-        subscriber_count=42,
+        title="With Avatar",
+        thumbnail_url="https://yt3.ggpht.com/abc=s0",
     )
 
-    resolve_calls = []
-
-    def fake_uploads(channel_id):
-        resolve_calls.append(channel_id)
-        return ChannelUploads(channel_id=channel_id, title="Fresh Title", subscriber_count=7, items=[])
-
-    monkeypatch.setattr(ga, "fetch_channel_uploads", fake_uploads)
-    monkeypatch.setattr(ga, "fetch_channel_avatar", lambda channel_id: "https://example.com/avatar.jpg")
-    monkeypatch.setattr(ga, "cached_avatar_or_hotlink", lambda channel_id, remote_url: "/avatar-proxy?u=fresh")
-
     result = ga.get_suggested_channels(db_session, [GENRE])
 
-    # Only the never-resolved row triggered a YouTube lookup.
-    assert resolve_calls == ["UCunresolved00000000"]
-    by_id = {r["channel_id"]: r for r in result}
-    assert by_id["UCunresolved00000000"]["title"] == "Fresh Title"
-    assert by_id["UCunresolved00000000"]["subscriber_count"] == 7
-    assert by_id["UCresolved000000000"]["title"] == "Cached Title"
-    assert by_id["UCresolved000000000"]["subscriber_count"] == 42
-
-    db_session.refresh(unresolved)
-    assert unresolved.resolved_at is not None
+    # Asked for at the size the card actually draws, not the "=s0" original
+    # YouTube reports — see SUGGESTION_AVATAR_SIZE.
+    assert result[0]["thumbnail_url"] == "/avatar-proxy?u=https%3A%2F%2Fyt3.ggpht.com%2Fabc%3Ds176"
 
 
-def test_get_suggested_channels_falls_back_to_artist_name_on_a_dead_channel(db_session, monkeypatch):
-    """A channel MusicBrainz still links but YouTube no longer serves
-    shouldn't 500 the whole request — see genre_artists._resolve."""
-    _row(db_session, channel_id="UCdead0000000000000", artist_name="Gone Band")
+def test_suggested_channels_never_report_a_subscriber_count(db_session):
+    """Never displayed in the wizard, and deliberately not revived: the
+    lazy resolution this replaced read it off the uploads playlist, which
+    carries none, so the cards have never shown one. The channel page does
+    carry it, so filling it in would silently add a number — frozen at
+    generation time — that nobody asked for."""
+    _row(db_session, channel_id="UCsubs000000000000", resolved=True, title="T", subscriber_count=999)
 
-    def boom(channel_id):
-        raise RuntimeError("channel not found")
-
-    monkeypatch.setattr(ga, "fetch_channel_uploads", boom)
-    monkeypatch.setattr(ga, "fetch_channel_avatar", lambda channel_id: None)
-
-    result = ga.get_suggested_channels(db_session, [GENRE])
-
-    assert result[0]["title"] == "Gone Band"
-    row = db_session.query(GenreArtist).filter(GenreArtist.channel_id == "UCdead0000000000000").one()
-    assert row.resolved_at is not None  # stamped so it isn't retried forever
+    assert ga.get_suggested_channels(db_session, [GENRE])[0]["subscriber_count"] is None
 
 
 def test_get_suggested_channels_empty_for_an_unseeded_genre(db_session):
     assert ga.get_suggested_channels(db_session, ["Some Genre Nobody Seeded"]) == []
 
 
-def test_get_suggested_channels_empty_genres_list_short_circuits(db_session, monkeypatch):
-    called = []
-    monkeypatch.setattr(ga, "fetch_channel_uploads", lambda channel_id: called.append(1))
-
+def test_get_suggested_channels_empty_genres_list_short_circuits(db_session):
     assert ga.get_suggested_channels(db_session, []) == []
-    assert called == []
 
 
-def test_get_suggested_channels_resolves_at_most_the_target_across_several_genres(db_session, monkeypatch):
-    """Picking several genres, each with a full unresolved cache, used to
-    resolve every row of every one of them against YouTube before capping
-    the output — three genres meant up to 3 * ARTISTS_PER_GENRE real
-    lookups just to show ARTISTS_PER_GENRE results, which is what made the
-    onboarding wizard's "Finding channels…" step feel hung for minutes on a
-    multi-genre pick. Resolution has to be bounded by what's actually
-    returned, not by how many genres were asked for."""
+def test_get_suggested_channels_caps_at_the_target_across_several_genres(db_session):
+    """Round-robin across the picked genres so each is represented, capped
+    at ARTISTS_PER_GENRE overall."""
     for genre in ["Hip-Hop", "R&B", "Electronic"]:
         for i in range(ga.ARTISTS_PER_GENRE):
             db_session.add(
@@ -193,23 +196,100 @@ def test_get_suggested_channels_resolves_at_most_the_target_across_several_genre
                     artist_name=f"{genre} Artist {i}",
                     channel_id=f"UC{genre[:2]}{i:016d}",
                     channel_url=f"https://www.youtube.com/channel/UC{genre[:2]}{i:016d}",
+                    resolved_at=utcnow(),
                 )
             )
     db_session.commit()
 
-    resolve_calls = []
-    monkeypatch.setattr(
-        ga,
-        "fetch_channel_uploads",
-        lambda channel_id: resolve_calls.append(channel_id)
-        or ChannelUploads(channel_id=channel_id, title="T", subscriber_count=1, items=[]),
-    )
-    monkeypatch.setattr(ga, "fetch_channel_avatar", lambda channel_id: None)
-
     result = ga.get_suggested_channels(db_session, ["Hip-Hop", "R&B", "Electronic"])
 
     assert len(result) == ga.ARTISTS_PER_GENRE
-    assert len(resolve_calls) <= ga.ARTISTS_PER_GENRE
+    # Every picked genre got a look in, rather than the first one filling it.
+    assert len({r["title"].split(" Artist")[0] for r in result}) == 3
+
+
+def test_build_row_applies_a_committed_profile(db_session):
+    row = ga.build_row("Jazz", "Miles Davis", "UCmiles000000000000", ("Miles Davis", "https://yt3.ggpht.com/m=s0"))
+
+    assert row.title == "Miles Davis"
+    assert row.thumbnail_url == "https://yt3.ggpht.com/m=s0"
+    assert row.resolved_at is not None
+
+
+def test_build_row_leaves_a_channel_with_no_profile_unresolved(db_session):
+    """Just added to a curated list, generator not re-run yet. It has to be
+    left unresolved rather than stamped with a half-filled row, since that
+    flag is what get_suggested_channels sorts on."""
+    row = ga.build_row("Jazz", "New Act", "UCnew00000000000000", None)
+
+    assert row.title == "New Act"  # the curated name still shows
+    assert row.thumbnail_url is None
+    assert row.resolved_at is None
+
+
+def test_fetch_profile_reads_a_channel_in_one_call(monkeypatch):
+    """One channel-page read covers name and avatar together. It used to
+    take two calls, the second of which pulled a 50-item uploads playlist
+    and threw everything but the title away."""
+    calls = []
+    monkeypatch.setattr(
+        ga,
+        "fetch_channel_profile",
+        lambda channel_id: calls.append(channel_id)
+        or ChannelProfile(
+            channel_id=channel_id, title="Real Name", subscriber_count=1000, avatar_url="https://a=s0"
+        ),
+    )
+
+    profile = ga.fetch_profile("UCone000000000000000")
+
+    assert calls == ["UCone000000000000000"]
+    assert profile.title == "Real Name"
+
+
+def test_fetch_profile_is_none_when_the_channel_does_not_answer(monkeypatch):
+    """None rather than raising: the generator runs this over several
+    hundred channels, and one dead entry must not end the run."""
+
+    def boom(channel_id):
+        raise RuntimeError("channel not found")
+
+    monkeypatch.setattr(ga, "fetch_channel_profile", boom)
+
+    assert ga.fetch_profile("UCdead0000000000000") is None
+
+
+def test_apply_profile_stores_the_remote_url_not_a_display_one(db_session):
+    row = _row(db_session, channel_id="UCone000000000000000")
+
+    applied = ga.apply_profile(
+        row,
+        ChannelProfile(
+            channel_id=row.channel_id,
+            title="Real Name",
+            subscriber_count=1000,
+            avatar_url="https://yt3.ggpht.com/a=s0",
+        ),
+    )
+
+    assert applied is True
+    assert row.title == "Real Name"
+    # Stored raw — wrapping and sizing it for display happens at read time.
+    assert row.thumbnail_url == "https://yt3.ggpht.com/a=s0"
+    # Fetched (the channel page carries one) but deliberately not kept.
+    assert row.subscriber_count is None
+    assert row.resolved_at is not None
+
+
+def test_apply_profile_falls_back_to_the_curated_name_on_a_dead_channel(db_session):
+    """Still stamped resolved, so the generator doesn't retry a channel that
+    has already been shown not to answer on every future run."""
+    row = _row(db_session, channel_id="UCdead0000000000000", artist_name="Gone Band")
+
+    assert ga.apply_profile(row, None) is False
+    assert row.title == "Gone Band"
+    assert row.thumbnail_url is None
+    assert row.resolved_at is not None
 
 
 def test_get_suggested_channels_dedupes_and_caps_at_target(db_session, monkeypatch):
