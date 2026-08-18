@@ -8,6 +8,7 @@ immediately, while bulk import runs it inline, one channel at a time.
 """
 
 import logging
+from collections.abc import Iterable
 from datetime import timedelta
 
 from sqlalchemy import func
@@ -35,6 +36,29 @@ backfill_progress: ProgressRegistry[int, tuple[str, int, int]] = ProgressRegistr
 # How often the per-row saving loop below reports progress, in rows. Not 1:
 # see the comment at its call site.
 PROGRESS_UPDATE_INTERVAL = 25
+
+# The two phases a backfill is actually working in. The registry keeps
+# terminal entries readable for a while after the fact (see progress.py), so
+# "has an entry" and "is running" are different questions.
+ACTIVE_PHASES = frozenset({"scanning", "saving"})
+
+
+def backfilling_feed_ids(feed_ids: Iterable[int]) -> set[int]:
+    """Which of `feed_ids` have a history scan running right now.
+
+    A dict lookup each, no query — the registry is in-memory. Library's grid
+    asks this for every card it renders (see page_context.library_context) so
+    a channel still filling in can say so on its own card, which is what let
+    the onboarding wizard stop making anyone wait for a backfill at all: a
+    scan of a 6,500-video channel is minutes long, and nothing on the first
+    screen after onboarding needs it — the RSS sync that POST /feeds already
+    did before answering is what puts the channel's recent uploads there.
+    """
+    return {
+        feed_id
+        for feed_id in feed_ids
+        if (backfill_progress.get(feed_id) or ("", 0, 0))[0] in ACTIVE_PHASES
+    }
 
 
 def run_backfill(feed_id: int, channel_id: str, db: Session) -> None:

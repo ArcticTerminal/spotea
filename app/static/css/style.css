@@ -931,6 +931,22 @@ html[data-active-tab="detail"] .tab-panel[data-tab-panel="detail"] {
     calc(1rem + env(safe-area-inset-bottom, 0px));
   border-top: 1px solid var(--border-default);
   box-sizing: border-box;
+  /* The channels step's footer carries a counter as well as two buttons,
+     which is more than a narrow phone fits on one line. */
+  flex-wrap: wrap;
+  row-gap: 0.5rem;
+}
+
+/* The channels step's gate counter: how many channels are followed against
+   how many Finish is waiting for. Sits at the far left of the footer, away
+   from the actions — it reports state, it isn't one of them. Two classes
+   deep because `.modal p` further down sets its own margins, and the
+   margin-right: auto here is the whole point (it's what holds this at the
+   left end of a flex row that otherwise packs to the right). */
+.modal-onboarding .onboarding-progress {
+  margin: 0 auto 0 0;
+  align-self: center;
+  font-size: 0.85rem;
 }
 
 .genre-grid {
@@ -1383,6 +1399,13 @@ button.track-link {
   cursor: pointer;
 }
 
+/* While its delete is in flight: the row is no longer something to act on,
+   and its actions have been swapped for a spinner (see home/profiles.js). */
+.profile-row.is-busy {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
 .profile-row-main:disabled {
   cursor: default;
 }
@@ -1773,6 +1796,32 @@ button.track-link {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* A channel whose one-time history scan is still running says so where its
+   video count would be — the count is about to change anyway, and this is
+   the only place in the app that waits for a backfill now. */
+/* Never allowed to wrap: this line replaces a one-line video count inside a
+   fixed-height card, and a second line pushes the title out of alignment
+   with every other card in the row. Clipped instead. */
+.channel-card-preparing {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.channel-card-preparing-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.channel-card-preparing .spinner {
+  width: 12px;
+  height: 12px;
+  border-width: 2px;
+  flex-shrink: 0;
 }
 
 .channel-card-count {

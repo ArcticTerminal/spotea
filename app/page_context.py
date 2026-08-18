@@ -22,6 +22,7 @@ from app.content_query import (
 )
 from app.feed_sync import cache_thumbnail
 from app.models import Content, Feed
+from app.services.backfill import backfilling_feed_ids
 from app.storage import collect_usage, usage_summary
 
 HOME_SHELF_LIMIT = 12
@@ -136,8 +137,16 @@ def library_context(db: Session, user_id: int) -> dict:
     query_content_page) — a tile saying "12 videos" that opens onto a list of
     9 is worse than no count at all.
     """
+    feeds = followed_feeds(db, user_id).all()
     return {
-        "feeds": followed_feeds(db, user_id).all(),
+        "feeds": feeds,
+        # Which cards say "Preparing…" — a channel whose one-time history scan
+        # is still running (services/backfill.py). Read straight off the
+        # in-memory registry, so this costs a dict lookup per card and no
+        # query at all. It is the whole reason the onboarding wizard no
+        # longer makes anyone wait for a backfill: the wait moved onto the
+        # card of the channel it actually belongs to, where it can be ignored.
+        "preparing_feed_ids": backfilling_feed_ids(feed.id for feed in feeds),
         # One grouped count covers every channel's card, rather than a
         # per-feed query each — count_content can't be reused directly here
         # for that reason (it's one feed_id at a time), but the filter has to

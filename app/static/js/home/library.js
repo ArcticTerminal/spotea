@@ -6,6 +6,60 @@ import { api, showToast } from "../core.js";
 import { onFragmentsSwapped, refreshFragments } from "../fragments.js";
 import { openDetail } from "./detail.js";
 
+// How often a Library card that says "Fetching uploads…" checks whether
+// that is still true. A history scan is minutes long, so this is about
+// noticing it *ended*, not about tracking its progress — and it only runs at
+// all while such a card is on the page.
+const PREPARING_POLL_MS = 5000;
+
+let preparingTimer = null;
+
+/** The feed ids Library is currently showing as still being fetched. */
+function preparingFeedIds() {
+  return [...document.querySelectorAll("#library-grid [data-preparing]")].map(
+    (card) => card.dataset.detailId
+  );
+}
+
+async function checkPreparing() {
+  preparingTimer = null;
+  const showing = preparingFeedIds();
+  if (!showing.length) return;
+
+  const { ok, data } = await api("/feeds/backfilling");
+  if (ok) {
+    const stillRunning = new Set(data.map(String));
+    // Only when the grid and the server disagree — a card claiming to be
+    // preparing for a scan that has finished. Re-rendering on every tick
+    // regardless would be a needless swap of the whole grid every five
+    // seconds, most of them changing nothing.
+    if (showing.some((feedId) => !stillRunning.has(feedId))) await refreshFragments();
+  }
+  schedulePreparingCheck();
+}
+
+function schedulePreparingCheck() {
+  if (preparingTimer || !preparingFeedIds().length) return;
+  preparingTimer = setTimeout(checkPreparing, PREPARING_POLL_MS);
+}
+
+/**
+ * Keeps Library's "Fetching uploads…" cards honest.
+ *
+ * A newly followed channel is usable immediately — POST /feeds syncs its RSS
+ * before it answers — while its full upload history is still being scanned in
+ * the background, which for a large channel is minutes. That wait used to be
+ * held in front of whoever added it (the onboarding wizard sat on a loading
+ * screen for it); now it lives on the card of the channel it belongs to,
+ * where it can be ignored, and this is what takes it back off again.
+ */
+export function setupPreparingChannels() {
+  schedulePreparingCheck();
+  // A fragment swap can bring in cards that weren't preparing before (the
+  // onboarding wizard's own refresh, on the way out, is the usual one).
+  onFragmentsSwapped(schedulePreparingCheck);
+}
+
 // Delegated from the panel rather than the chip row/see-more links
 // themselves: both live inside the Home fragment and are replaced wholesale
 // on every refresh, which would take a directly-bound listener with them.

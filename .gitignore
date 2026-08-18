@@ -5,6 +5,9 @@ venv/
 .env
 .pytest_cache/
 data/*.db
+# SQLite's WAL sidecars, left next to the db by the running app.
+data/*.db-wal
+data/*.db-shm
 data/*.db.bak-*
 data/storage/*
 !data/storage/.gitkeep

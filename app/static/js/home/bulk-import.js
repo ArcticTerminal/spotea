@@ -11,6 +11,19 @@ import { api, escapeHtml, setupOverlay } from "../core.js";
 
 const POLL_INTERVAL_MS = 1000;
 
+/** Fired when an import run finishes. detail: { added } — how many channels
+ *  it newly followed (duplicates and failures aren't counted). Only the
+ *  onboarding wizard listens, so its "follow a few channels" gate counts an
+ *  import the same as its own Add buttons; the same one-way arrangement
+ *  home/remote.js uses for CHANNEL_FOLLOWED, and for the same reason —
+ *  this module has no business importing that one. */
+export const BULK_IMPORT_FINISHED = "spotea:bulkimportfinished";
+
+/** Whether the onboarding wizard is the thing this modal was opened over. */
+function openedFromOnboarding() {
+  return document.getElementById("onboarding-overlay")?.hidden === false;
+}
+
 function statusMeta(status) {
   if (status === "added") return { cls: "is-added", icon: "✓" };
   if (status === "duplicate") return { cls: "is-duplicate", icon: "•" };
@@ -117,7 +130,12 @@ export function setupBulkImport() {
         const skipped = data.total - added;
         progressText.textContent = `Done — ${added} added${skipped ? `, ${skipped} skipped` : ""}.`;
         againBtn.hidden = false;
-        reloadBtn.hidden = added === 0;
+        // Reloading out of a wizard the user hasn't finished would drop them
+        // straight past it (needs_onboarding is false the moment one channel
+        // exists), so there the wizard counts the import and refreshes the
+        // page's regions itself on the way out instead.
+        reloadBtn.hidden = added === 0 || openedFromOnboarding();
+        document.dispatchEvent(new CustomEvent(BULK_IMPORT_FINISHED, { detail: { added } }));
         break;
       }
 

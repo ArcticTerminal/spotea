@@ -239,49 +239,84 @@ function renderRecommendations(data) {
   wireScrollers();
 }
 
+// The payload of the batch currently rendered, as JSON. Re-rendering shelves
+// that came back identical replaces every card — and every <img> in them —
+// with a fresh copy of itself, which is a visible flash of empty thumbnails
+// in exchange for nothing. Identical is the normal case: the server only
+// rebuilds a batch once the profile's chosen refresh interval has elapsed
+// (see services/recommendations.py), so most re-checks answer with exactly
+// what is already on screen.
+let renderedPayload = null;
+
+// The load currently in flight, so a second caller joins it instead of
+// paying for its own round trip. The tab-activation check in particular
+// fires while the boot fetch is still running on any slow first load.
+let inFlight = null;
+
 /**
- * `quiet` skips the loading placeholder — used for the boot fetch and for
- * re-checking on later visits to Explore, where the shelves are already on
- * screen and swapping in a spinner over them would just be a flicker for
- * content that, most of the time, turns out unchanged (the GET route only
- * rebuilds once the profile's chosen refresh interval has actually elapsed;
- * see services/recommendations.py).
+ * Fetches the current batch and swaps the shelves in only if it differs from
+ * what is already rendered.
+ *
+ * `placeholder` is the only thing that ever puts a loading line into the
+ * panel, and only two callers pass it: the boot fetch (nothing is on screen
+ * yet, and the panel is usually not even the visible tab) and the app-wide
+ * Refresh. Opening Explore deliberately never does — the batch is fetched in
+ * the background at boot and re-checked quietly afterwards, so the tab is
+ * something you enter, not something you wait on.
  */
-async function loadRecommendations({ force = false, quiet = false } = {}) {
+async function loadRecommendations({ force = false, placeholder = false } = {}) {
   const body = document.getElementById("recommendations-body");
   if (!body) return;
+  if (inFlight && !force) return inFlight;
 
-  if (!quiet) {
+  if (placeholder) {
     body.innerHTML = `<p class="search-loading"><span class="spinner"></span>Finding things you might like…</p>`;
   }
 
-  const { ok, data } = await api(force ? "/recommendations/refresh" : "/recommendations", {
-    method: force ? "POST" : "GET",
-    errorMessage: "Could not load recommendations",
-  });
+  const load = (async () => {
+    const { ok, data } = await api(force ? "/recommendations/refresh" : "/recommendations", {
+      method: force ? "POST" : "GET",
+      errorMessage: "Could not load recommendations",
+    });
 
-  if (!ok) {
-    if (!quiet) body.innerHTML = `<p class="muted">Couldn't reach YouTube for recommendations just now.</p>`;
-    return;
+    if (!ok) {
+      // Only when this call is what put the placeholder there — a background
+      // re-check that fails leaves the shelves it could not improve on, which
+      // is the right outcome and needs no announcement.
+      if (placeholder) {
+        body.innerHTML = `<p class="muted">Couldn't reach YouTube for recommendations just now.</p>`;
+      }
+      return;
+    }
+
+    const payload = JSON.stringify(data);
+    if (payload === renderedPayload) return;
+    renderedPayload = payload;
+    renderRecommendations(data);
+  })();
+
+  if (!force) inFlight = load;
+  try {
+    await load;
+  } finally {
+    if (inFlight === load) inFlight = null;
   }
-  recommendationsLoaded = true;
-  renderRecommendations(data);
 }
 
-let recommendationsLoaded = false;
-
 /**
- * Marks the shelves stale, so the next visit to Explore shows the loading
- * spinner instead of quietly swapping in the rebuilt batch. Called by the
- * interests editor (see home/settings.js) — without it, adding your first
- * interest and coming back here would still show the "no interests yet"
- * prompt until a reload (the re-check on tab entry would fetch the new
- * batch either way, but silently). Not an immediate fetch itself: interests
- * are only editable from Settings, so there's nothing on screen to update
- * yet.
+ * Re-fetches in the background, swapping the shelves in only if they changed.
+ *
+ * Called after the interest list is saved (see home/settings.js, which the
+ * onboarding wizard's genre step also goes through) and by that wizard just
+ * before it closes. Both are moments the cached batch became an answer to a
+ * question nobody asked — it is keyed to the interest list, so a changed list
+ * means the next read rebuilds it, and a rebuild is several live YouTube
+ * searches. Doing it here means that cost is paid while the user is still
+ * somewhere else, rather than by whoever opens Explore next and has to sit in
+ * front of a spinner for it.
  */
-export function invalidateRecommendations() {
-  recommendationsLoaded = false;
+export function reloadRecommendations() {
+  return loadRecommendations();
 }
 
 /**
@@ -291,7 +326,7 @@ export function invalidateRecommendations() {
  * again" rather than the tab carrying a second, competing refresh of its own.
  */
 export async function refreshRecommendations() {
-  await loadRecommendations({ force: true });
+  await loadRecommendations({ force: true, placeholder: true });
 }
 
 export function setupRecommendations() {
@@ -299,20 +334,21 @@ export function setupRecommendations() {
   if (!body) return;
 
   // Fetched as soon as the app loads, not deferred until Explore is opened —
-  // the shelves are ready to show the first time someone switches to the
-  // tab instead of making that switch pay for the YouTube round trip. Quiet:
-  // nothing is on screen yet either way, so there's nothing to show a
-  // spinner over, and a toast for a boot-time hiccup nobody asked to see
-  // would just be noise.
-  loadRecommendations({ quiet: true });
+  // the shelves are ready to show the first time someone switches to the tab
+  // instead of making that switch pay for the YouTube round trip. The
+  // placeholder goes into a panel that is almost always the hidden tab; it is
+  // there for the one case where it isn't (a #explore deep link on a cold
+  // cache), so that tab has something to say for itself while the first batch
+  // is being built.
+  loadRecommendations({ placeholder: true });
 
   // Re-checked on every later switch to Explore too, so a profile that keeps
   // the tab around gets a fresh batch once its chosen interval elapses
-  // without needing a reload. Quiet once something has already rendered —
-  // only the very first check (racing the boot fetch above) shows the
-  // spinner.
+  // without needing a reload. Never with a placeholder, and never re-rendering
+  // an unchanged batch: entering the tab should show what's there, not blank
+  // it out and rebuild it in front of the person who just arrived.
   onTabActivated((tab) => {
-    if (tab === "explore") loadRecommendations({ quiet: recommendationsLoaded });
+    if (tab === "explore") loadRecommendations();
   });
 
   body.addEventListener("click", (event) => {

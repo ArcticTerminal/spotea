@@ -6,7 +6,7 @@ import app.routers.feeds as feeds_router
 import app.services.backfill as backfill_module
 import app.services.feed_add as feed_add_module
 from app.feed_sync import FeedFetchResult, apply_feed_data
-from app.models import Content, Feed
+from app.models import Content, Feed, User
 from app.youtube.extract import BackfillEntry
 from app.youtube.rss import FeedUnavailableError, InvalidFeedError, ParsedEntry, ParsedFeed
 from app.youtube.urls import channel_feed_url
@@ -532,3 +532,61 @@ def test_a_short_is_removed_when_its_duration_arrives_later(db_session):
     remaining = {row.video_id: row for row in db_session.query(Content).filter(Content.feed_id == feed.id)}
     assert set(remaining) == {"latedur0002"}
     assert remaining["latedur0002"].duration_seconds == 420
+
+
+# ------------------------------------------------------- GET /feeds/backfilling
+
+
+def test_backfilling_lists_only_this_profiles_running_scans(client, db_session):
+    """What Library's "Fetching uploads…" cards poll on.
+
+    A newly followed channel is usable the moment POST /feeds answers — its
+    RSS sync has already run — while its full history scan carries on in the
+    background for minutes. Nothing waits for that any more, so the grid has
+    to be able to ask what is still running, and it has to be scoped: another
+    profile's scan is none of this one's business.
+    """
+    mine = Feed(user_id=USER_ID, rss_url="https://example.com/mine", channel_title="Mine")
+    other_profile = User(name="Someone Else", account_id=1)
+    db_session.add_all([mine, other_profile])
+    db_session.commit()
+    theirs = Feed(
+        user_id=other_profile.id, rss_url="https://example.com/theirs", channel_title="Theirs"
+    )
+    db_session.add(theirs)
+    db_session.commit()
+
+    backfill_module.backfill_progress.set(mine.id, ("scanning", 3, 100))
+    backfill_module.backfill_progress.set(theirs.id, ("scanning", 3, 100))
+    try:
+        assert client.get("/feeds/backfilling").json() == [mine.id]
+
+        # A finished scan keeps its registry entry readable for a while (see
+        # progress.py), so "has an entry" is not "is running" — a card left
+        # saying "fetching" forever is exactly what confusing the two causes.
+        backfill_module.backfill_progress.set(mine.id, ("done", 100, 100))
+        assert client.get("/feeds/backfilling").json() == []
+    finally:
+        backfill_module.backfill_progress.discard(mine.id)
+        backfill_module.backfill_progress.discard(theirs.id)
+
+
+def test_library_marks_a_channel_whose_history_is_still_being_fetched(client, db_session):
+    """The whole reason the onboarding wizard stopped waiting: the wait moved
+    onto the card of the channel it belongs to, where it can be ignored."""
+    feed = Feed(
+        user_id=USER_ID, rss_url="https://example.com/preparing", channel_title="Still Filling In"
+    )
+    db_session.add(feed)
+    db_session.commit()
+
+    backfill_module.backfill_progress.set(feed.id, ("saving", 40, 900))
+    try:
+        body = client.get("/partials/library").text
+        assert 'data-preparing="true"' in body
+        assert "Fetching uploads" in body
+    finally:
+        backfill_module.backfill_progress.discard(feed.id)
+
+    body = client.get("/partials/library").text
+    assert "data-preparing" not in body, "the card kept saying it was fetching after the scan ended"

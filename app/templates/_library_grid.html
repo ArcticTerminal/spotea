@@ -47,7 +47,20 @@
       </a>
       {% for feed in feeds %}
       {% set video_count = channel_video_counts.get(feed.id, 0) %}
-      <a class="channel-card" href="/#channel/{{ feed.id }}" data-detail-kind="channel" data-detail-id="{{ feed.id }}">
+      {# A channel added minutes ago is still having its upload history
+         scanned in the background (services/backfill.py). It is already
+         openable and already has its recent uploads from the RSS sync, so
+         this replaces the count rather than blocking anything — and it is
+         why nothing else in the app waits for a backfill any more. The
+         data-preparing attribute is what home/library.js polls on. #}
+      {% set is_preparing = feed.id in preparing_feed_ids %}
+      <a
+        class="channel-card{{ ' is-preparing' if is_preparing }}"
+        href="/#channel/{{ feed.id }}"
+        data-detail-kind="channel"
+        data-detail-id="{{ feed.id }}"
+        {% if is_preparing %}data-preparing="true"{% endif %}
+      >
         {% if feed.avatar_url %}
         <img class="channel-card-avatar" src="{{ feed.avatar_url }}" alt="" loading="lazy" />
         {% else %}
@@ -55,7 +68,13 @@
         {% endif %}
         <span class="channel-card-info">
           <span class="channel-card-title" title="{{ feed.channel_title or feed.rss_url }}">{{ feed.channel_title or feed.rss_url }}</span>
+          {% if is_preparing %}
+          <span class="channel-card-count channel-card-preparing">
+            <span class="spinner"></span><span class="channel-card-preparing-text">Fetching uploads…</span>
+          </span>
+          {% else %}
           <span class="channel-card-count">{{ video_count }} video{{ '' if video_count == 1 else 's' }}</span>
+          {% endif %}
         </span>
       </a>
       {% endfor %}

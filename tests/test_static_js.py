@@ -264,3 +264,140 @@ def test_refresh_fragments_default_sweep_does_not_include_the_downloads_body() -
         "the on-demand downloads-body refresh (called on #open-downloads and "
         "from settings.js's in-modal actions) is gone"
     )
+
+
+def test_initial_tab_is_never_restored_from_local_storage() -> None:
+    """Opening the app fresh starts on Home.
+
+    The pre-paint script used to fall back to a localStorage copy of the last
+    tab whenever the URL carried no hash — which is every PWA launch, every
+    bookmark, and every reload done by profiles.js. Creating a profile from
+    Settings → Manage profiles therefore handed the brand-new profile the
+    Settings tab with the onboarding wizard sitting on top of it. The hash is
+    still written on every tab switch (home/tabs.js), so a reload or a deep
+    link keeps its tab; a fresh open with no hash is meant to mean Home.
+    """
+    index = Path("app/templates/index.html").read_text()
+    tabs = (JS_DIR / "home" / "tabs.js").read_text()
+
+    assert "spotea-active-tab" not in index, (
+        "index.html's pre-paint script reads the remembered tab again — a "
+        "fresh open no longer starts on Home"
+    )
+    assert "spotea-active-tab" not in tabs, "home/tabs.js is writing the remembered tab again"
+    # The word itself still appears in the comment explaining why it's gone.
+    assert "localStorage." not in tabs, "home/tabs.js is back to persisting the active tab"
+
+
+def test_profile_changes_reload_onto_home() -> None:
+    """Switching, creating, or deleting the current profile all reload, and
+    all of them have to land on Home: every panel is profile-scoped, and a
+    #channel/42 hash names a feed the incoming profile doesn't have."""
+    source = (JS_DIR / "home" / "profiles.js").read_text()
+    helper = _function_body(source.replace("function reloadAtHome", "export function reloadAtHome"), "reloadAtHome")
+
+    assert 'replaceState(null, "", "/#home")' in helper, (
+        "reloadAtHome no longer rewrites the URL before reloading — assigning "
+        "a URL that differs only in its fragment reloads nothing"
+    )
+    assert source.count("window.location.reload()") == 1, (
+        "a profile change reloads without going through reloadAtHome, so it "
+        "keeps whatever tab or detail hash the outgoing profile had"
+    )
+
+
+def test_onboarding_wizard_has_no_way_out_but_finishing() -> None:
+    """It's a required step: a profile that dismisses it is left with the
+    empty library and empty "For you" shelves it exists to prevent, and since
+    needs_onboarding goes false the moment one channel exists, one add was
+    enough to never be offered it again."""
+    index = Path("app/templates/index.html").read_text()
+    onboarding = (JS_DIR / "home" / "onboarding.js").read_text()
+
+    assert 'id="onboarding-close"' not in index, "the wizard has a close button again"
+    assert "{ dismissible: false }" in onboarding, (
+        "the wizard's overlay is dismissible again — backdrop clicks and "
+        "Escape close it"
+    )
+    assert "const REQUIRED_CHANNELS" in onboarding, "the channel gate on Finish is gone"
+
+
+def test_opening_explore_never_shows_a_loading_placeholder() -> None:
+    """The shelves are fetched in the background at boot and re-checked
+    quietly on every later visit. Entering the tab used to swap a spinner in
+    over them — worst right after onboarding, where the interest list had
+    just changed and the re-check was a full rebuild (several live YouTube
+    searches) with the user watching it. An unchanged batch isn't re-rendered
+    at all, since replacing every card with an identical copy flashes every
+    thumbnail for nothing."""
+    source = (JS_DIR / "home" / "explore.js").read_text()
+    setup = _function_body(source, "setupRecommendations")
+
+    activation = setup[setup.index("onTabActivated") :]
+    assert "loadRecommendations()" in activation and "placeholder" not in activation, (
+        "switching to Explore passes a placeholder again, so the tab is "
+        "something you wait on rather than something you enter"
+    )
+    assert "renderedPayload" in source, (
+        "the unchanged-batch check is gone — every re-check re-renders every "
+        "shelf, and every <img> in it, identically"
+    )
+
+
+def test_onboarding_add_reports_before_it_waits() -> None:
+    """"Add" says "Added" on the press, not after the round trip.
+
+    Adding a channel is an RSS sync plus a yt-dlp history backfill. Held
+    behind that, picking five channels was five waits stacked on each other,
+    and pressing Finish early meant watching the app redraw itself. The click
+    handler is therefore not async: it labels the row, counts it, and queues
+    the work.
+    """
+    source = (JS_DIR / "home" / "onboarding.js").read_text()
+
+    assert 'container.addEventListener("click", (event) => {' in source, (
+        "the channels step's click handler is async again — the label is back "
+        "to waiting on the request"
+    )
+    assert 'btn.textContent = "Added";' in source, "the optimistic label is gone"
+    assert "enqueue(" in source, "the add queue is gone"
+
+
+def test_onboarding_never_waits_for_a_history_scan() -> None:
+    """POST /feeds resolves the channel and applies its RSS feed before it
+    answers, so the channel's recent uploads are in the library at that
+    point. The one-time full-history scan behind it runs server-side and is
+    minutes long on a big channel (6,504 videos for one in the author's own
+    library) — the wizard used to hold a loading screen for it, for content
+    nothing on the first screen needs. Library's own card carries that wait
+    now."""
+    onboarding = (JS_DIR / "home" / "onboarding.js").read_text()
+    library = (JS_DIR / "home" / "library.js").read_text()
+    index = Path("app/templates/index.html").read_text()
+
+    assert "waitForHistory: false" in onboarding, (
+        "the wizard is waiting for channel history again"
+    )
+    assert "onboarding-step-preparing" not in index, (
+        "the wizard's wait-for-backfill screen is back"
+    )
+    assert "/feeds/backfilling" in library, (
+        "Library no longer checks which channels are still being fetched, so "
+        "its 'Fetching uploads…' cards can never turn back into counts"
+    )
+
+
+def test_onboarding_adds_run_one_at_a_time() -> None:
+    """Each add resolves a channel against a service that rate-limits an
+    unauthenticated residential IP, so the queue drains one job at a time —
+    the same thing the server's own bulk importer does. Five in flight at
+    once is the burst this exists to avoid."""
+    source = (JS_DIR / "home" / "onboarding.js").read_text()
+
+    assert source.count("await followChannel(") == 1, (
+        "more than one followChannel await in the wizard — the queue is no "
+        "longer the single path adds go through"
+    )
+    assert 'jobs.find((candidate) => candidate.status === "queued")' in source, (
+        "the queue no longer walks jobs one at a time"
+    )

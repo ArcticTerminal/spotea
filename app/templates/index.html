@@ -9,11 +9,19 @@
      comes off request.state, which Jinja2Templates exposes on every template
      without any router having to pass it (see app/middleware.py). #}
   <script nonce="{{ request.state.csp_nonce }}">
-    // Runs before the body paints, so the right tab (from the URL, falling
-    // back to the last one used) is already correct on first render —
-    // without this, the server always renders Library first and JS only
-    // corrects it after DOMContentLoaded, which flashes stale content for a
-    // frame on every reload.
+    // Runs before the body paints, so the right tab (the one named in the
+    // URL, or Home) is already correct on first render — without this, the
+    // server always renders Library first and JS only corrects it after
+    // DOMContentLoaded, which flashes stale content for a frame on every
+    // reload.
+    //
+    // Nothing is remembered across a fresh open: the hash is written on every
+    // tab switch (see home/tabs.js), so a reload or a deep link still lands
+    // where it should, while opening the app with no hash at all — a PWA
+    // launch, a bookmark, the reload after switching or creating a profile —
+    // always starts on Home. It used to fall back to a localStorage copy of
+    // the last tab instead, which meant creating a profile from Settings
+    // dropped you back into Settings with the onboarding wizard over it.
     //
     // A channel/playlist hash resolves to the "detail" panel instead — kept
     // out of VALID_TABS itself so those routes can't get treated as a
@@ -34,14 +42,7 @@
         DETAIL_PREFIXES.some(function (prefix) {
           return hash.indexOf(prefix) === 0;
         });
-      var fromStorage = localStorage.getItem("spotea-active-tab");
-      var tab = isDetail
-        ? "detail"
-        : VALID_TABS.indexOf(hash) !== -1
-          ? hash
-          : VALID_TABS.indexOf(fromStorage) !== -1
-            ? fromStorage
-            : "home";
+      var tab = isDetail ? "detail" : VALID_TABS.indexOf(hash) !== -1 ? hash : "home";
       document.documentElement.dataset.activeTab = tab;
       // Which tab button stays selected under the detail panel — the yt-*
       // routes belong to Explore, everything else to Library. Set here as
@@ -268,8 +269,12 @@
         {# Text swapped by home/onboarding.js as the wizard moves between
            steps — the kind picked on step one also changes what the chip
            step's question should be. #}
+        {# No close button, and no backdrop/Escape either (see core.js's
+           setupOverlay `dismissible: false`): this is a required step, and
+           the only way out of it is finishing it. Dismissing it left the
+           profile in the exact state it exists to prevent — an empty
+           library and empty "For you" shelves. #}
         <h2 id="onboarding-title">What do you want to listen to?</h2>
-        <button type="button" id="onboarding-close" class="modal-close" aria-label="Close">×</button>
       </div>
 
       <div id="onboarding-step-kind" class="onboarding-step">
@@ -373,8 +378,11 @@
           <ul id="onboarding-search-results" class="search-results"></ul>
         </div>
         <div class="modal-actions">
+          {# Filled by home/onboarding.js — how many channels are followed so
+             far against the handful the step asks for before Finish unlocks. #}
+          <p id="onboarding-channels-progress" class="muted onboarding-progress"></p>
           <button type="button" id="onboarding-open-bulk-import" class="btn-quiet">Import many at once</button>
-          <button type="button" id="onboarding-finish" class="btn-primary">Finish</button>
+          <button type="button" id="onboarding-finish" class="btn-primary" disabled>Finish</button>
         </div>
       </div>
     </div>

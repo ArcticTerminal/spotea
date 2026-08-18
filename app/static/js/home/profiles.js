@@ -38,6 +38,17 @@ let editingProfileId = null;
 // first time either one actually opens — see ensureProfilesLoaded.
 let profilesLoaded = false;
 
+// Every profile change below ends in a reload, and every one of them lands
+// on Home rather than on whatever the outgoing profile happened to have open:
+// all four panels are profile-scoped, and a #channel/42 hash in particular
+// names a feed the incoming profile doesn't have at all. replaceState before
+// reloading, because assigning a URL that differs from the current one only
+// in its fragment navigates nowhere and reloads nothing.
+function reloadAtHome() {
+  history.replaceState(null, "", "/#home");
+  window.location.reload();
+}
+
 async function fetchProfiles() {
   const { ok, data } = await api("/profiles");
   return ok ? data : [];
@@ -123,7 +134,7 @@ async function switchProfile(profileId) {
   // clear its own stale record — repeats that same failed attempt on every
   // reload after, forever.
   closePlayer();
-  window.location.reload();
+  reloadAtHome();
 }
 
 async function createProfile(name) {
@@ -133,8 +144,11 @@ async function createProfile(name) {
     errorMessage: "Could not create profile",
   });
   // The new profile auto-becomes active (see routers/profiles.py) — a reload
-  // is simplest, same "create and go" flow as adding a channel.
-  if (ok) window.location.reload();
+  // is simplest, same "create and go" flow as adding a channel. Landing on
+  // Home matters most here: this form lives in Settings → Manage profiles, so
+  // a plain reload used to hand a brand-new profile the Settings tab with the
+  // onboarding wizard sitting on top of it.
+  if (ok) reloadAtHome();
 }
 
 // Returns whether the rename went through, so the caller can decide whether
@@ -165,17 +179,36 @@ async function deleteProfile(profileId) {
   );
   if (!confirmed) return;
 
+  // Deleting a large profile is a real wait — every one of its content rows'
+  // files has to be checked against what other profiles still reference and
+  // unlinked before the rows go (see storage.delete_files_for_profile). With
+  // nothing said about it, the row just sat there under the pointer looking
+  // like the press hadn't registered.
+  const row = document.querySelector(
+    `#profiles-manage-list .profile-row[data-profile-id="${profileId}"]`
+  );
+  const actions = row?.querySelector(".profile-row-actions");
+  row?.classList.add("is-busy");
+  if (actions) {
+    actions.innerHTML = `<span class="spinner" role="status" aria-label="Deleting profile"></span>`;
+  }
+
   const { ok } = await api(`/profiles/${profileId}`, {
     method: "DELETE",
     errorMessage: "Could not delete profile",
   });
-  if (!ok) return;
+  // A failed delete puts the row back the way it was — the error itself has
+  // already been toasted by api().
+  if (!ok) {
+    await loadProfiles();
+    return;
+  }
 
   // Deleting the profile you're currently viewing needs a full reload so the
   // page doesn't keep showing now-deleted content until the next natural
   // navigation — deleting some other profile just needs the lists refreshed
   // in place.
-  if (cachedProfiles.find((p) => p.id === profileId)?.is_current) window.location.reload();
+  if (cachedProfiles.find((p) => p.id === profileId)?.is_current) reloadAtHome();
   else await loadProfiles();
 }
 

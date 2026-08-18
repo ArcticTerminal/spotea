@@ -517,11 +517,21 @@ followed channels plus four pinned virtual-playlist tiles), **Explore**
 plus the interest-based "For you" shelves below it),
 and **Settings** — `<section>` panels toggled via the `hidden` attribute
 driven by `html[data-active-tab]` (see style.css), not separate routes. An
-inline `<head>` script resolves the active tab (URL hash, falling back to
-`localStorage`) and sets it on `<html>` *before first paint*, so a reload
-never flashes the wrong tab; `home/tabs.js`'s `setupTabs()` just syncs
-button/URL state to match afterward. Tab switches use `history.replaceState`
-(not `pushState`) so cycling tabs doesn't spam back-button history.
+inline `<head>` script resolves the active tab (the URL hash, or Home) and
+sets it on `<html>` *before first paint*, so a reload never flashes the wrong
+tab; `home/tabs.js`'s `setupTabs()` just syncs button/URL state to match
+afterward. Tab switches use `history.replaceState` (not `pushState`) so
+cycling tabs doesn't spam back-button history — and that hash is the *only*
+place the current tab is kept. There used to be a `localStorage` copy behind
+it, which meant every open with no hash (a PWA launch, a bookmark, the reload
+`home/profiles.js` does after switching or creating a profile) reopened
+whatever tab was last used — including Settings, right after creating a
+profile from Settings → Manage profiles, with the onboarding wizard on top of
+it. A reload or a deep link still keeps its tab, because the hash is already
+correct; a fresh open starts on Home. The three profile changes that reload
+(`switch`, `create`, deleting the current one) `replaceState` to `/#home`
+first: every panel is profile-scoped, and a `#channel/42` hash in particular
+names a feed the incoming profile doesn't have.
 
 A fifth panel, **detail** (`data-active-tab="detail"`, `home/detail.js`),
 holds one channel or pinned playlist's track list — reached from a Library
@@ -665,7 +675,19 @@ rate-limits an unauthenticated residential IP (see §8). So:
   missing, expired or superseded batch reaches YouTube. Editing the interest
   list invalidates it implicitly — the signature no longer matches — so
   nothing has to remember to delete the row, and editing back to a previous
-  list still hits its cached batch.
+  list still hits its cached batch. Saving an edit also *pays* for the
+  rebuild straight away, in the background (`home/settings.js` →
+  `reloadRecommendations`), rather than leaving it for whoever opens Explore
+  next: it's the onboarding wizard's genre step that most often changes the
+  list, and without this the very next thing that profile did — opening
+  Explore — sat in front of a spinner for a full rebuild.
+- **The tab is never something you wait on.** The batch is fetched in the
+  background at boot and re-checked quietly on every later switch to Explore;
+  only the boot fetch and the app-wide Refresh ever render a loading line.
+  A re-check that comes back with the batch already on screen — the normal
+  case, since the server only rebuilds once the interval has elapsed —
+  renders nothing at all, because replacing every card with an identical copy
+  of itself flashes every thumbnail for no reason.
 - **It expires on the interval Settings already has**
   (`AppSettings.feed_refresh_interval_minutes`), not a cadence of its own.
   There is deliberately **no refresh button** on the shelves: recommendations
@@ -1285,9 +1307,50 @@ reaching for the header button mid-browse wants. "Manage profiles"
 (Settings) is the reverse — rename/delete/add, no switching. Renaming reuses
 the same "New profile name…" input as adding (its submit button relabels to
 "Save" while `editingProfileId` is set) rather than a separate inline
-editor. Deleting a profile removes its feeds/content (DB cascade) and its
-downloaded files (`delete_files_for_profile`, since files don't cascade with
-rows) — refused outright if it's the account's last remaining profile.
+editor. Deleting a profile removes its feeds/content and its downloaded
+files (`delete_files_for_profile`, since files don't cascade with rows) —
+refused outright if it's the account's last remaining profile.
+
+Both halves are written for a library, not for a handful of rows. The file
+cleanup asks the sharing question once — the set of paths and video ids the
+*surviving* profiles still reference — instead of once per row, and the two
+big collections go in one bulk `DELETE` each rather than through the ORM
+cascade loading every child into the session. Measured on a real 28,866-row
+profile: 13.4s and 28,954 queries before, 0.7s and 11 after. The row also
+shows a spinner in place of its actions while the request is in flight
+(`home/profiles.js`), which is what the wait used to have nothing of — the
+profile just sat there under the pointer looking untouched.
+
+**Onboarding wizard** (`home/onboarding.js`, `needs_onboarding` in
+`routers/pages.py`) — a required, non-dismissible full-screen step for a
+profile with neither an interest nor a followed channel: pick music or
+podcasts, pick a few genres, then follow at least five channels. Its one
+piece of real machinery is the add queue. "Add" reports **"Added" on the
+press** and drops the work into a queue that drains one job at a time behind
+the step while the user keeps picking; by the time five are chosen the first
+few are usually done. Holding the button on "Adding…" for the round trip
+instead meant five stacked waits, and pressing Finish early meant watching the
+app redraw itself afterwards. Adds are counted optimistically, so a failure
+takes its count back, puts its row's button back, and re-locks Finish. One job
+at a time rather than five in parallel for the same reason the server's bulk
+importer creates channels serially — each is a yt-dlp round trip against a
+service that rate-limits an unauthenticated residential IP.
+
+Nothing in this flow waits for a channel's **history scan**. `POST /feeds`
+resolves the channel and applies its RSS feed (~15 most recent uploads)
+before it answers, which is what puts content in the library; the one-time
+full-history backfill behind it is a server-side background task, minutes
+long on a large channel (6,504 videos for one in the author's own library),
+and nothing on the screen a new profile lands on needs it. So a job is done
+once the channel exists, Finish waits only on RSS syncs still in flight, and
+the scan reports itself where it belongs instead: Library's card for that
+channel shows "Fetching uploads…" in place of its video count
+(`preparing_feed_ids` in `page_context.library_context`, read off the
+in-memory `backfill_progress` registry). While such a card is on screen,
+`home/library.js` polls `GET /feeds/backfilling` and re-renders the grid once
+a scan it is still advertising has ended — a wait you can ignore, on the
+thing it is actually about, rather than a loading screen in front of someone
+who wants to start listening.
 
 **PWA** — `static/manifest.json` + `static/js/sw.js` make the app
 installable (Chrome/Android requires an active service worker with a fetch

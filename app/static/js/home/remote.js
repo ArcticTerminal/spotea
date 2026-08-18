@@ -161,8 +161,17 @@ const isActiveBackfillPhase = (phase) => phase === "scanning" || phase === "savi
 // Assumes showBackfillOverlay() is already up (callers show it when the add
 // starts, before the POST even resolves, so there's no gap where the screen
 // looks idle while the RSS sync — itself a couple of seconds — is in flight).
-async function waitForBackfill(feedId, title, { announce = true } = {}) {
-  setBackfillOverlayText(`${title} — Fetching channel history…`, "");
+async function waitForBackfill(feedId, title, { announce = true, showOverlay = true, onProgress } = {}) {
+  // Two ways to report the same thing. showOverlay drives the app-wide
+  // backfill overlay; onProgress hands the same phase/count to a caller with
+  // its own place to put it — the onboarding wizard, whose full-screen modal
+  // the overlay would be stacked underneath anyway, and which shows a row
+  // per channel rather than one line for the whole app.
+  const report = (phase, detail) => {
+    if (showOverlay) setBackfillOverlayText(`${title} — ${phase}`, detail);
+    onProgress?.({ phase, detail });
+  };
+  report("Fetching channel history…", "");
 
   const NEVER_STARTED_GRACE_MS = 4000;
   const MAX_WAIT_MS = 10 * 60 * 1000; // safety valve so a stuck check can't trap the user forever
@@ -175,7 +184,7 @@ async function waitForBackfill(feedId, title, { announce = true } = {}) {
       if (isActiveBackfillPhase(data.phase)) {
         sawActivity = true;
         const parts = backfillPhaseParts(data.phase, data.done, data.total);
-        setBackfillOverlayText(`${title} — ${parts.title}`, parts.detail);
+        report(parts.title, parts.detail);
       } else if (data.phase === "done") {
         break;
       } else if (!sawActivity && Date.now() - start > NEVER_STARTED_GRACE_MS) {
@@ -185,7 +194,7 @@ async function waitForBackfill(feedId, title, { announce = true } = {}) {
     await new Promise((r) => setTimeout(r, 400));
   }
 
-  hideBackfillOverlay();
+  if (showOverlay) hideBackfillOverlay();
   // The old page-navigation version of this got Library's grid for free (it
   // was a full reload away). Staying on the same document means asking for
   // it explicitly, so "back" from the new channel doesn't land on a Library
@@ -200,7 +209,31 @@ async function waitForBackfill(feedId, title, { announce = true } = {}) {
   if (announce) document.dispatchEvent(new CustomEvent(CHANNEL_FOLLOWED, { detail: { feedId, title } }));
 }
 
-export async function followChannel(channelUrl, button, { announce = true } = {}) {
+/**
+ * Follows a channel and waits out its history backfill. Resolves to
+ * { added, status }: `added` is whether the channel is now followed —
+ * true for a fresh follow, and also for a 409, which means some earlier
+ * action already added it — and `status` is the HTTP status for a caller
+ * that needs to tell those two apart or report a failure.
+ *
+ * `showOverlay: false` keeps the full-screen backfill overlay out of it, for
+ * a caller that has its own modal up; `onProgress` hands that caller the
+ * phase/count it would otherwise have shown there.
+ *
+ * `waitForHistory: false` returns as soon as the channel exists — that is,
+ * once POST /feeds has resolved it and applied its RSS feed, which is what
+ * puts its recent uploads in the library. The one-time full-history scan
+ * behind it keeps running server-side either way (it is a background task,
+ * not something the client holds open), and for a large channel it is
+ * minutes long. Nothing on the screen a new profile lands on needs it, so
+ * the onboarding wizard doesn't wait: Library's own card says the channel is
+ * still filling in (see page_context.library_context).
+ */
+export async function followChannel(
+  channelUrl,
+  button,
+  { announce = true, showOverlay = true, waitForHistory = true, onProgress } = {}
+) {
   const originalLabel = button?.textContent;
   if (button) {
     button.disabled = true;
@@ -209,7 +242,11 @@ export async function followChannel(channelUrl, button, { announce = true } = {}
   // Shown immediately, before the request even starts: add_feed's RSS sync
   // alone can take a couple of seconds, and leaving the screen looking idle
   // for that stretch reads as nothing happening yet.
-  showBackfillOverlay("Fetching RSS feed…", "");
+  if (showOverlay) showBackfillOverlay("Fetching RSS feed…", "");
+  // add_feed resolves the channel and syncs its RSS before it answers, which
+  // is seconds on its own — a caller watching onProgress would otherwise see
+  // nothing at all until the backfill starts.
+  onProgress?.({ phase: "Fetching RSS feed…", detail: "" });
 
   const { ok, status, data } = await api("/feeds", {
     method: "POST",
@@ -217,21 +254,41 @@ export async function followChannel(channelUrl, button, { announce = true } = {}
   });
 
   if (ok) {
-    if (data?.feed?.id != null) {
-      await waitForBackfill(data.feed.id, data.feed.channel_title || channelUrl, { announce });
+    if (data?.feed?.id == null) {
+      window.location.reload();
+      return { added: false, status };
     }
-    else window.location.reload();
-    return;
+    if (!waitForHistory) {
+      if (showOverlay) hideBackfillOverlay();
+      // The feed row and its RSS videos exist now, which is what Library and
+      // Home render from — and the grid needs re-rendering anyway to pick up
+      // the new card's "still fetching" state.
+      refreshFragments();
+      if (button) button.textContent = "Added";
+      return { added: true, status };
+    }
+    await waitForBackfill(data.feed.id, data.feed.channel_title || channelUrl, {
+      announce,
+      showOverlay,
+      onProgress,
+    });
+    // The button is the only report a caller that suppressed the overlay
+    // gets: without this its row sat on "Adding…" for as long as the modal
+    // stayed open, with nothing to say the add had landed. Left disabled —
+    // the channel is followed now, so there is nothing left to press.
+    if (button) button.textContent = "Added";
+    return { added: true, status };
   }
 
-  hideBackfillOverlay();
+  if (showOverlay) hideBackfillOverlay();
   if (status === 409) {
     if (button) button.textContent = "Already added";
-    return;
+    return { added: true, status };
   }
   if (button) {
     button.disabled = false;
     button.textContent = originalLabel;
   }
   if (status !== 0) showToast(data?.detail || "Could not add channel");
+  return { added: false, status };
 }

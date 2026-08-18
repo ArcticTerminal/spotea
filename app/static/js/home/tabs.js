@@ -6,8 +6,6 @@
 
 import { classifyHash } from "../core.js";
 
-const TAB_STORAGE_KEY = "spotea-active-tab";
-
 // Panels that only fill themselves in once they're actually looked at —
 // currently just Explore's recommendations, which can cost a live YouTube
 // round trip and so shouldn't be paid for by someone who never opens the
@@ -20,10 +18,9 @@ export function onTabActivated(callback) {
 }
 
 // Exported so home/detail.js can switch to the "detail" panel the same way a
-// tab click does — but it never carries "detail" itself into the URL or
-// localStorage (there's no #detail button to reselect, and the URL for a
-// detail view is a channel/playlist route detail.js owns, not this). Callers
-// that already know the URL is correct (initial sync, popstate) pass
+// tab click does — but it never carries "detail" itself into the URL (the URL
+// for a detail view is a channel/playlist route detail.js owns, not this).
+// Callers that already know the URL is correct (initial sync, popstate) pass
 // updateHistory: false so this doesn't stomp it with a redundant replaceState.
 export function activate(tabName, { updateHistory = true } = {}) {
   document.querySelectorAll(".tab-btn").forEach((btn) => {
@@ -35,9 +32,14 @@ export function activate(tabName, { updateHistory = true } = {}) {
   // CSS (see style.css) — this is what index.html's inline head script also
   // sets, so both the first paint and later clicks go through the same path.
   document.documentElement.dataset.activeTab = tabName;
-  if (tabName !== "detail") localStorage.setItem(TAB_STORAGE_KEY, tabName);
   // replaceState (not pushState) so cycling through tabs doesn't spam the
-  // back-button history — the URL just needs to be right for a refresh.
+  // back-button history — the URL just needs to be right for a refresh. This
+  // is also the only place the current tab is remembered: there used to be a
+  // localStorage copy behind it, which meant opening the app fresh (a PWA
+  // launch, or plain "/") reopened whatever tab was last used — including
+  // Settings, right after creating a profile from Settings. The hash already
+  // survives a reload, and a fresh open with no hash is meant to start on
+  // Home.
   if (updateHistory && tabName !== "detail") history.replaceState(null, "", `#${tabName}`);
   for (const callback of activationListeners) callback(tabName);
 }
@@ -61,8 +63,8 @@ export function setupTabs() {
     else if (info.type === "unknown") activate("home");
   });
 
-  // The inline head script already resolved the correct initial tab (URL
-  // hash, falling back to localStorage) and set it on <html> before first
+  // The inline head script already resolved the correct initial tab (the URL
+  // hash, or Home) and set it on <html> before first
   // paint — this just syncs the button/UI state to match, without rewriting
   // a URL that's already right (and, for a detail route, isn't this
   // module's to rewrite at all).
