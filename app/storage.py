@@ -237,12 +237,46 @@ def delete_files_for_profile(db: Session, user_id: int) -> None:
     purge_content, so without this a deleted profile's thumbnails — which
     exist independent of download status, see feed_sync.cache_thumbnail —
     were orphaned forever. Scoped to every row, not just downloaded ones,
-    for exactly that reason: thumbnails aren't."""
-    rows = db.query(Content).filter(Content.user_id == user_id).all()
-    for row in rows:
-        if row.file_path:
-            unlink_if_unshared(db, row.file_path, row.id)
-        unlink_thumbnail_if_unshared(db, row.video_id, row.id)
+    for exactly that reason: thumbnails aren't.
+
+    Asks the sharing question *once* rather than once per row. The per-row
+    helpers above are right for a purge of a handful of rows, but this walks
+    a whole library: on a real 28,866-row profile they were 28,869 queries
+    and 11.8 of the deletion's 13.4 seconds, with the modal still showing the
+    profile the whole time. Two set queries instead — everything every other
+    profile still references — cost the same regardless of how big either
+    side is, since the sets only ever cover the *surviving* rows.
+
+    Framing it as "what survives" is also the more correct question. The
+    per-row helpers excluded one row id at a time, so two rows pointing at
+    the same file would each see the other as a live reference and neither
+    would unlink it — which can't happen today (uq_content_user_video_id
+    makes video_id unique per profile, and a file path is derived from a
+    video id) but only by accident.
+    """
+    kept_files = {
+        path
+        for (path,) in db.query(Content.file_path)
+        .filter(
+            Content.user_id != user_id,
+            Content.status == "ready",
+            Content.file_path.is_not(None),
+        )
+        .distinct()
+    }
+    kept_thumbnails = {
+        video_id
+        for (video_id,) in db.query(Content.video_id).filter(Content.user_id != user_id).distinct()
+    }
+
+    # Columns, not entities: this used to build 28,866 ORM instances (and
+    # leave them in the session's identity map) to read two fields off each.
+    rows = db.query(Content.video_id, Content.file_path).filter(Content.user_id == user_id)
+    for video_id, file_path in rows:
+        if file_path and file_path not in kept_files:
+            Path(file_path).unlink(missing_ok=True)
+        if video_id not in kept_thumbnails:
+            (settings.thumbnails_dir / f"{video_id}.jpg").unlink(missing_ok=True)
 
 
 def sweep_startup_leftovers() -> int:

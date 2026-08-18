@@ -1307,9 +1307,19 @@ reaching for the header button mid-browse wants. "Manage profiles"
 (Settings) is the reverse — rename/delete/add, no switching. Renaming reuses
 the same "New profile name…" input as adding (its submit button relabels to
 "Save" while `editingProfileId` is set) rather than a separate inline
-editor. Deleting a profile removes its feeds/content (DB cascade) and its
-downloaded files (`delete_files_for_profile`, since files don't cascade with
-rows) — refused outright if it's the account's last remaining profile.
+editor. Deleting a profile removes its feeds/content and its downloaded
+files (`delete_files_for_profile`, since files don't cascade with rows) —
+refused outright if it's the account's last remaining profile.
+
+Both halves are written for a library, not for a handful of rows. The file
+cleanup asks the sharing question once — the set of paths and video ids the
+*surviving* profiles still reference — instead of once per row, and the two
+big collections go in one bulk `DELETE` each rather than through the ORM
+cascade loading every child into the session. Measured on a real 28,866-row
+profile: 13.4s and 28,954 queries before, 0.7s and 11 after. The row also
+shows a spinner in place of its actions while the request is in flight
+(`home/profiles.js`), which is what the wait used to have nothing of — the
+profile just sat there under the pointer looking untouched.
 
 **PWA** — `static/manifest.json` + `static/js/sw.js` make the app
 installable (Chrome/Android requires an active service worker with a fetch

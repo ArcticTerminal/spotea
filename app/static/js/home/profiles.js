@@ -179,11 +179,30 @@ async function deleteProfile(profileId) {
   );
   if (!confirmed) return;
 
+  // Deleting a large profile is a real wait — every one of its content rows'
+  // files has to be checked against what other profiles still reference and
+  // unlinked before the rows go (see storage.delete_files_for_profile). With
+  // nothing said about it, the row just sat there under the pointer looking
+  // like the press hadn't registered.
+  const row = document.querySelector(
+    `#profiles-manage-list .profile-row[data-profile-id="${profileId}"]`
+  );
+  const actions = row?.querySelector(".profile-row-actions");
+  row?.classList.add("is-busy");
+  if (actions) {
+    actions.innerHTML = `<span class="spinner" role="status" aria-label="Deleting profile"></span>`;
+  }
+
   const { ok } = await api(`/profiles/${profileId}`, {
     method: "DELETE",
     errorMessage: "Could not delete profile",
   });
-  if (!ok) return;
+  // A failed delete puts the row back the way it was — the error itself has
+  // already been toasted by api().
+  if (!ok) {
+    await loadProfiles();
+    return;
+  }
 
   // Deleting the profile you're currently viewing needs a full reload so the
   // page doesn't keep showing now-deleted content until the next natural

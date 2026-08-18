@@ -1399,6 +1399,13 @@ button.track-link {
   cursor: pointer;
 }
 
+/* While its delete is in flight: the row is no longer something to act on,
+   and its actions have been swapped for a spinner (see home/profiles.js). */
+.profile-row.is-busy {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
 .profile-row-main:disabled {
   cursor: default;
 }

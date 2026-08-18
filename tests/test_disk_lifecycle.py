@@ -12,9 +12,10 @@ import os
 from datetime import timedelta
 
 import pytest
+from sqlalchemy import event
 
 from app.config import settings
-from app.models import Content, Feed
+from app.models import Content, Feed, User
 from app.storage import (
     PREVIEW_RETENTION,
     STALE_EXPORT_AGE,
@@ -352,6 +353,73 @@ def test_delete_files_for_profile_still_removes_downloaded_audio(db_session, tmp
     delete_files_for_profile(db_session, USER_ID)
 
     assert not audio.exists()
+
+
+def test_delete_files_for_profile_keeps_what_another_profile_still_uses(db_session, tmp_path):
+    """Storage is keyed by video id alone, so two profiles that both follow an
+    overlapping channel share one physical file and one cached thumbnail.
+    Deleting either profile must leave both behind — this used to be asked
+    per row ("is any row other than *this* one pointing at it?") and is now
+    asked once for the whole profile ("what do the surviving rows still
+    reference?"), which has to come out the same way."""
+    other_profile = User(id=USER_ID + 50, name="Keeps Them", account_id=1)
+    db_session.add(other_profile)
+    feed = _feed(db_session, "https://example.com/profile-delete-shared")
+    other_feed = Feed(
+        user_id=other_profile.id,
+        rss_url="https://example.com/profile-delete-shared-other",
+        channel_title="Lifecycle Channel",
+    )
+    db_session.add(other_feed)
+    db_session.commit()
+
+    audio = tmp_path / "shareddel.m4a"
+    audio.write_bytes(b"x")
+    thumbnail = settings.thumbnails_dir / "shareddel001.jpg"
+    thumbnail.write_bytes(b"x")
+    for user_id, feed_id in ((USER_ID, feed.id), (other_profile.id, other_feed.id)):
+        db_session.add(
+            Content(
+                feed_id=feed_id, user_id=user_id, video_id="shareddel001", title="Shared",
+                status="ready", file_path=str(audio),
+            )
+        )
+    db_session.commit()
+
+    delete_files_for_profile(db_session, USER_ID)
+
+    assert audio.exists(), "unlinked a file the other profile is still playing"
+    assert thumbnail.exists(), "unlinked a thumbnail the other profile still shows"
+
+
+def test_delete_files_for_profile_cost_does_not_grow_with_the_library(db_session):
+    """It used to run two queries per content row. On the real 28,866-row
+    profile that was 28,869 queries and 11.8 seconds — with the profile still
+    sitting in the Manage profiles modal for all of it, since the request
+    hadn't come back. The sharing question is asked once now, so the query
+    count is flat and only the unlink syscalls scale."""
+    feed = _feed(db_session, "https://example.com/profile-delete-cost")
+    db_session.add_all(
+        Content(feed_id=feed.id, user_id=USER_ID, video_id=f"costrow{index:05d}", title="Row")
+        for index in range(50)
+    )
+    db_session.commit()
+
+    statements: list[str] = []
+
+    @event.listens_for(db_session.get_bind(), "before_cursor_execute")
+    def record(conn, cursor, statement, parameters, context, executemany):  # noqa: ANN001
+        statements.append(statement)
+
+    try:
+        delete_files_for_profile(db_session, USER_ID)
+    finally:
+        event.remove(db_session.get_bind(), "before_cursor_execute", record)
+
+    assert len(statements) <= 5, (
+        f"delete_files_for_profile is back to querying per row: {len(statements)} "
+        "statements for 50 rows"
+    )
 
 
 # ------------------------------------------------------------------ wired at startup
