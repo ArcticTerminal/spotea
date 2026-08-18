@@ -106,7 +106,7 @@ function renderInterests() {
 // the add.
 let pendingSave = Promise.resolve();
 
-function saveInterests(next, errorMessage) {
+export function saveInterests(next, errorMessage) {
   const previous = interests;
   // Rendered before the request is even sent so adding a chip feels instant;
   // reverted below if the save doesn't land.
@@ -137,6 +137,11 @@ function saveInterests(next, errorMessage) {
     // nobody asked.
     if (ok) invalidateRecommendations();
   });
+  // Returned so a caller that needs the save to have actually landed before
+  // doing anything else (the onboarding wizard's step 2, which searches for
+  // channel suggestions against these same interests) can await it — every
+  // existing caller here fires it and moves on, so this is additive.
+  return pendingSave;
 }
 
 export function setupInterests() {

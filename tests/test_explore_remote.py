@@ -68,6 +68,11 @@ def fake_channel(monkeypatch):
         )
 
     monkeypatch.setattr("app.services.remote_detail.fetch_channel_uploads", fetch)
+    # No avatar by default — remote_channel_context's own fallback fetch
+    # (fetch_channel_avatar) is a second live yt-dlp call, tested on its own
+    # below; every other test here would otherwise make a real network call
+    # the moment it opens a channel with no cached/passed-through avatar.
+    monkeypatch.setattr("app.services.remote_detail.fetch_channel_avatar", lambda channel_id: None)
     return requested
 
 
@@ -120,6 +125,63 @@ def test_a_remote_channel_offers_follow(client, fake_channel):
     assert "unfollow-channel-btn" not in text
     assert "Latest 2 uploads" in text
     assert fake_channel == [CHANNEL_ID]
+
+
+def test_a_never_followed_channel_uses_the_avatar_the_client_already_had(client, fake_channel):
+    """fetch_channel_uploads (see fake_channel) has no avatar of its own to
+    offer — the hero only gets one because the client passes through
+    whatever /avatar-proxy or /avatars URL was already rendered on the card
+    it opened this from (see routers/partials.py's remote_channel_fragment)."""
+    avatar_url = "/avatar-proxy?u=https%3A%2F%2Fyt3.ggpht.com%2Fabc%3Ds900"
+
+    text = client.get(f"/partials/detail/yt-channel/{CHANNEL_ID}", params={"avatar": avatar_url}).text
+
+    assert f'src="{avatar_url}"' in text
+
+
+def test_an_untrusted_avatar_param_is_ignored(client, fake_channel):
+    """avatar arrives as a raw query string param, so it has to be revalidated
+    as one of this app's own same-origin image routes before landing in an
+    <img src> — otherwise a tampered link could point the hero at anything."""
+    text = client.get(
+        f"/partials/detail/yt-channel/{CHANNEL_ID}", params={"avatar": "https://evil.example/tracker.png"}
+    ).text
+
+    assert "evil.example" not in text
+    assert '<span class="channel-hero-avatar"></span>' in text
+
+
+def test_a_cold_entry_falls_back_to_fetching_the_channels_own_avatar(client, fake_channel, monkeypatch):
+    """No avatar passed (a hard refresh, a deep link, browser back/forward —
+    nothing rendered a card to carry one through this time) and nothing
+    cached either: remote_channel_context reaches for fetch_channel_avatar's
+    own live fetch rather than rendering with none."""
+    from app.youtube.search import proxied_avatar_url
+
+    monkeypatch.setattr(
+        "app.services.remote_detail.fetch_channel_avatar",
+        lambda channel_id: "https://yt3.ggpht.com/abc=s900" if channel_id == CHANNEL_ID else None,
+    )
+
+    text = client.get(f"/partials/detail/yt-channel/{CHANNEL_ID}").text
+
+    assert f'src="{proxied_avatar_url("https://yt3.ggpht.com/abc=s900")}"' in text
+
+
+def test_the_fallback_avatar_fetch_is_skipped_when_one_was_already_passed(client, fake_channel, monkeypatch):
+    """The fallback is a second live yt-dlp call — not worth paying on the
+    common path, where the client already had a working avatar to forward."""
+
+    def fail_if_called(channel_id):
+        raise AssertionError("fetch_channel_avatar must not run when avatar_url already covers it")
+
+    monkeypatch.setattr("app.services.remote_detail.fetch_channel_avatar", fail_if_called)
+
+    avatar_url = "/avatar-proxy?u=https%3A%2F%2Fyt3.ggpht.com%2Fabc%3Ds900"
+    res = client.get(f"/partials/detail/yt-channel/{CHANNEL_ID}", params={"avatar": avatar_url})
+
+    assert res.status_code == 200
+    assert f'src="{avatar_url}"' in res.text
 
 
 def test_an_already_followed_channel_points_at_the_library_copy(client, db_session, fake_channel):
@@ -484,3 +546,36 @@ def test_channel_uploads_fill_in_the_channel_id_entries_omit(monkeypatch):
 
     assert [item.channel_id for item in uploads.items] == [CHANNEL_ID]
     assert uploads.title == "Duman"
+
+
+def test_fetch_channel_avatar_picks_the_avatar_uncropped_thumbnail(monkeypatch):
+    """The channel page's thumbnails list is mostly banner crops that outrank
+    the avatar on `preference` — id is the only reliable way to tell them
+    apart (verified against a real yt-dlp channel-page extraction)."""
+    monkeypatch.setattr(
+        yt_search,
+        "_extract_flat",
+        lambda url, limit: {
+            "thumbnails": [
+                {"id": "0", "preference": -10, "url": "https://yt3.googleusercontent.com/banner=w1060"},
+                {"id": "banner_uncropped", "preference": -5, "url": "https://yt3.googleusercontent.com/banner=s0"},
+                {
+                    "id": "avatar_uncropped",
+                    "preference": 1,
+                    "url": "https://yt3.googleusercontent.com/avatar=s900",
+                },
+            ]
+        },
+    )
+
+    avatar_url = yt_search.fetch_channel_avatar(CHANNEL_ID)
+
+    # Rewritten to ggpht.com, same as every other avatar URL this module
+    # hands back — see absolute_thumbnail_url.
+    assert avatar_url == "https://yt3.ggpht.com/avatar=s900"
+
+
+def test_fetch_channel_avatar_is_none_when_the_page_has_no_avatar_thumbnail(monkeypatch):
+    monkeypatch.setattr(yt_search, "_extract_flat", lambda url, limit: {"thumbnails": []})
+
+    assert yt_search.fetch_channel_avatar(CHANNEL_ID) is None

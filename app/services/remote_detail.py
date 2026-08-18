@@ -22,8 +22,21 @@ from sqlalchemy.orm import Session
 
 from app.images import cached_avatar_path
 from app.models import Feed
-from app.youtube.search import fetch_channel_uploads, fetch_playlist
+from app.youtube.search import fetch_channel_avatar, fetch_channel_uploads, fetch_playlist, proxied_avatar_url
 from app.youtube.urls import CHANNEL_PAGE_URL_TEMPLATE, channel_feed_url
+
+# What a caller-supplied avatar_url (see remote_channel_context) is allowed
+# to be: one of this app's own same-origin image routes, never an arbitrary
+# URL — the client only ever has one of these two to send in the first place
+# (see youtube/search.py's _cached_avatar_or_hotlink), so anything else means
+# a tampered query string, not a real avatar.
+_TRUSTED_AVATAR_URL_PREFIXES = ("/avatar-proxy?u=", "/avatars/")
+
+
+def _trusted_avatar_url(avatar_url: str | None) -> str | None:
+    if avatar_url and avatar_url.startswith(_TRUSTED_AVATAR_URL_PREFIXES):
+        return avatar_url
+    return None
 
 
 def _base_context(kind: str, remote_id: str, title: str, items: list) -> dict:
@@ -75,16 +88,32 @@ def remote_playlist_context(playlist_id: str) -> dict | None:
     return context
 
 
-def remote_channel_context(db: Session, user_id: int, channel_id: str) -> dict | None:
+def remote_channel_context(
+    db: Session, user_id: int, channel_id: str, avatar_url: str | None = None
+) -> dict | None:
     """A channel's latest uploads, for deciding whether to follow it.
 
     Also reports whether this profile *already* follows the channel — the
     hero's action is "Follow" if not, and a way back to the real (local)
     channel page if so, since the library copy is the more useful of the two.
+
+    `avatar_url` is whatever the client already had rendered on the card it
+    clicked through from (see routers/partials.py's remote_channel_fragment)
+    — cheaper than fetching one here, since fetch_channel_uploads' uploads-
+    playlist read carries no channel-level avatar of its own. Absent (a hard
+    refresh, a deep link, browser back/forward landing here with no card
+    behind it) or untrusted, and with no local copy either, this falls back
+    to fetch_channel_avatar's own live fetch rather than rendering with
+    none — a second yt-dlp call, so it's only paid on that cold-entry path.
     """
     uploads = fetch_channel_uploads(channel_id)
     if not uploads.items:
         return None
+
+    hero_image = cached_avatar_path(channel_id) or _trusted_avatar_url(avatar_url)
+    if hero_image is None:
+        fetched_avatar = fetch_channel_avatar(channel_id)
+        hero_image = proxied_avatar_url(fetched_avatar) if fetched_avatar else None
 
     followed = (
         db.query(Feed)
@@ -103,12 +132,7 @@ def remote_channel_context(db: Session, user_id: int, channel_id: str) -> dict |
         {
             "video_count": len(uploads.items),
             "count_label": f"Latest {len(uploads.items)} uploads",
-            # Only a channel already followed has a local avatar to reuse
-            # (see youtube/search.py's _cached_avatar_or_hotlink) — this
-            # route has no remote thumbnail_url to hotlink as a fallback the
-            # way a search result does, so a channel that's never been
-            # followed just renders with no avatar at all.
-            "hero_image": cached_avatar_path(channel_id),
+            "hero_image": hero_image,
             "hero_is_avatar": True,
             "channel_url": CHANNEL_PAGE_URL_TEMPLATE.format(channel_id=channel_id),
             "followed_feed_id": followed.id if followed else None,

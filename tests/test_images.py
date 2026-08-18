@@ -6,21 +6,35 @@ That makes a half-written file permanent, so the write has to be all-or-nothing.
 """
 
 import urllib.error
+from email.message import Message
 from types import SimpleNamespace
 
 import pytest
 
 from app import images
 from app.config import settings
-from app.images import _TEMP_SUFFIX, MAX_IMAGE_BYTES, _download_image, cached_avatar_path
+from app.images import (
+    _TEMP_SUFFIX,
+    MAX_IMAGE_BYTES,
+    _download_image,
+    cached_avatar_path,
+    fetch_image_bytes,
+)
 
 JPEG = b"\xff\xd8\xff" + b"\x00" * 512
 
 
+def _headers(content_type: str) -> Message:
+    msg = Message()
+    msg["Content-Type"] = content_type
+    return msg
+
+
 class _FakeResponse:
-    def __init__(self, body: bytes, read_sizes: list[int]):
+    def __init__(self, body: bytes, read_sizes: list[int], content_type: str = "image/jpeg"):
         self._body = body
         self._read_sizes = read_sizes
+        self.headers = _headers(content_type)
 
     def read(self, size: int = -1) -> bytes:
         self._read_sizes.append(size)
@@ -42,12 +56,12 @@ def network(monkeypatch):
     read_sizes: list[int] = []
     recorder = SimpleNamespace(calls=calls, read_sizes=read_sizes)
 
-    def install(outcome):
+    def install(outcome, content_type: str = "image/jpeg"):
         def fake_urlopen(request, timeout=None):
             calls.append((request, timeout))
             if isinstance(outcome, Exception):
                 raise outcome
-            return _FakeResponse(outcome, read_sizes)
+            return _FakeResponse(outcome, read_sizes, content_type)
 
         monkeypatch.setattr(images.urllib.request, "urlopen", fake_urlopen)
         return recorder
@@ -150,6 +164,47 @@ def test_a_failed_rename_cleans_up_its_temp_file(network, tmp_path, monkeypatch)
 
     assert _download_image(tmp_path, "vid00000001.jpg", "https://i.ytimg.com/x.jpg", "/thumbnails") is None
     assert list(tmp_path.iterdir()) == []
+
+
+def test_fetch_image_bytes_returns_the_body_and_content_type(network):
+    network(JPEG, content_type="image/jpeg")
+
+    result = fetch_image_bytes("https://yt3.ggpht.com/abc")
+
+    assert result == (JPEG, "image/jpeg")
+
+
+def test_fetch_image_bytes_writes_nothing_to_disk(network, tmp_path, monkeypatch):
+    """The whole point over _download_image: a channel nobody's followed
+    doesn't earn a permanent local copy (see /avatar-proxy in app/main.py)."""
+    network(JPEG)
+    monkeypatch.chdir(tmp_path)
+
+    fetch_image_bytes("https://yt3.ggpht.com/abc")
+
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_fetch_image_bytes_rejects_a_non_image_content_type(network):
+    """The upstream host is allowlisted (see app.main's _AVATAR_PROXY_ALLOWED_
+    HOSTS) but still not trusted to actually serve an image — an error page
+    or redirect target shouldn't be forwarded as if it were one."""
+    network(b"<html>not an image</html>", content_type="text/html")
+
+    assert fetch_image_bytes("https://yt3.ggpht.com/abc") is None
+
+
+def test_fetch_image_bytes_rejects_an_oversized_response(network):
+    recorder = network(b"x" * (MAX_IMAGE_BYTES + 1))
+
+    assert fetch_image_bytes("https://yt3.ggpht.com/abc") is None
+    assert recorder.read_sizes == [MAX_IMAGE_BYTES + 1]
+
+
+def test_fetch_image_bytes_returns_none_on_a_failed_fetch(network):
+    network(urllib.error.URLError("no route to host"))
+
+    assert fetch_image_bytes("https://yt3.ggpht.com/abc") is None
 
 
 def test_cached_avatar_path_reports_only_what_is_on_disk():

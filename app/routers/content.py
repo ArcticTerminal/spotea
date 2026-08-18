@@ -183,9 +183,9 @@ def clear_recently_played(
     profile: User = Depends(get_current_profile), db: Session = Depends(get_db)
 ) -> dict[str, int]:
     # Deliberately leaves play_count alone — this clears the *history* shown
-    # on the Recently Played shelf, not the play-frequency signal the "On
-    # Repeat" smart playlist depends on. Resetting both would make clearing
-    # your history also erase what you actually listen to a lot.
+    # on the Recently Played shelf, not the play-frequency signal play_count
+    # tracks (see models.py). Resetting both would make clearing your
+    # history also erase what you actually listen to a lot.
     cleared = (
         db.query(Content)
         .filter(Content.user_id == profile.id, Content.last_played_at.isnot(None))

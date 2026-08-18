@@ -11,7 +11,7 @@ to catch "the page 500s", not to assert layout.
 
 from datetime import datetime, timedelta
 
-from app.models import Content, Feed
+from app.models import Content, Feed, User
 from app.timeutil import utcnow
 
 USER_ID = 1
@@ -101,6 +101,36 @@ def test_home_renders_for_an_empty_library(client):
 
     assert res.status_code == 200
     assert "add a channel in the Explore tab" in res.text
+
+
+def test_needs_onboarding_for_a_fresh_profile_with_neither_interests_nor_a_feed(client):
+    """Drives home/onboarding.js's auto-open — a profile with nothing for
+    Explore's recommendations or the library to work from should see the
+    wizard. The fixture profile starts with no interests and no feeds, same
+    as test_home_renders_for_an_empty_library above."""
+    body = client.get("/").text
+
+    assert 'data-needs-onboarding="true"' in body
+
+
+def test_needs_onboarding_false_once_a_feed_is_followed(client, db_session):
+    """Having something followed is enough on its own — the wizard isn't
+    meant to reappear just because interests specifically are still empty."""
+    _seed(db_session)
+
+    body = client.get("/").text
+
+    assert 'data-needs-onboarding="false"' in body
+
+
+def test_needs_onboarding_false_once_interests_are_set(client, db_session):
+    profile = db_session.get(User, USER_ID)
+    profile.interests = "Jazz"
+    db_session.commit()
+
+    body = client.get("/").text
+
+    assert 'data-needs-onboarding="false"' in body
 
 
 def test_channel_avatars_are_lazy_loaded(client, db_session):

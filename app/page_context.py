@@ -197,36 +197,18 @@ def storage_summary_context(db: Session, user_id: int) -> dict:
     return {"usage": usage_summary(db, user_id)}
 
 
-# kind -> (filter_value, title, empty_message) for the four pinned virtual
-# playlists (Library) plus the three smart playlists (Explore — see
-# smart_playlists_context below; "Saved Mix" is Explore's fourth card but
-# reuses "saved" verbatim rather than being its own kind). filter_value is
-# what _content_query (content_query.py) actually dispatches on — the
-# original fourth tuple element here was a duplicate of that same filter,
-# spelled out a second time as a lambda, and had no reader left once
-# count_content replaced every hand-rolled video_count query.
+# kind -> (filter_value, title, empty_message) for Library's four pinned
+# virtual playlists. filter_value is what _content_query (content_query.py)
+# actually dispatches on — the original fourth tuple element here was a
+# duplicate of that same filter, spelled out a second time as a lambda, and
+# had no reader left once count_content replaced every hand-rolled
+# video_count query.
 PLAYLIST_KINDS: dict[str, tuple] = {
     "favorites": ("__favorites__", "Favorites", "No favorites yet."),
     "saved": ("__saved__", "Saved for later", "Nothing saved yet."),
     "new-uploads": ("__new_uploads__", "New Uploads", "No new uploads yet."),
     "recently-played": ("__played__", "Recently Played", "Nothing played yet."),
-    "on-repeat": ("__on_repeat__", "On Repeat", "Nothing on repeat yet."),
-    "recently-added": ("__recently_added__", "Recently Added", "Nothing added recently."),
-    "forgotten-favorites": (
-        "__forgotten_favorites__",
-        "Forgotten Favorites",
-        "No forgotten favorites — nice.",
-    ),
 }
-
-# Mirrors home/detail.js's and index.html's EXPLORE_OWNED_LOCAL_KINDS: which
-# of PLAYLIST_KINDS' local (non-remote) entries belong to Explore rather than
-# Library, so playlist_detail_context can hand the detail panel the same
-# back_label="Explore" that remote_detail.py already sets for yt-channel/
-# yt-playlist. "saved" is deliberately excluded — its detail view is Library's
-# own "Saved for later" list, not an Explore-owned one (see PLAYLIST_KINDS'
-# comment on why "Saved Mix" isn't a distinct kind).
-EXPLORE_OWNED_LOCAL_KINDS = ("on-repeat", "recently-added", "forgotten-favorites")
 
 
 def playlist_filter(kind: str) -> str | None:
@@ -243,10 +225,9 @@ def playlist_filter(kind: str) -> str | None:
 
 
 def playlist_detail_context(db: Session, user_id: int, kind: str, page: int) -> dict | None:
-    """One of Library's four pinned virtual playlists or Explore's three
-    smart playlists (see PLAYLIST_KINDS), rendered through the same
-    track-list/pagination markup a channel page uses. Returns None for an
-    unknown kind so the caller can 404."""
+    """One of Library's four pinned virtual playlists (see PLAYLIST_KINDS),
+    rendered through the same track-list/pagination markup a channel page
+    uses. Returns None for an unknown kind so the caller can 404."""
     config = PLAYLIST_KINDS.get(kind)
     if config is None:
         return None
@@ -255,7 +236,7 @@ def playlist_detail_context(db: Session, user_id: int, kind: str, page: int) -> 
     video_count = count_content(db, user_id, filter=filter_value)
     items, page, total_pages = query_content_page(db, user_id, page=page, filter=filter_value)
 
-    context = {
+    return {
         "kind": kind,
         "feed": None,
         "title": title,
@@ -271,56 +252,6 @@ def playlist_detail_context(db: Session, user_id: int, kind: str, page: int) -> 
         # own (ctrl-click, a JS-disabled fallback).
         "base_url": f"/#{kind}",
     }
-    if kind in EXPLORE_OWNED_LOCAL_KINDS:
-        context["back_label"] = "Explore"
-    return context
-
-
-# Which of PLAYLIST_KINDS' entries Explore's smart-playlist shelf shows, and
-# in what order. "saved" is Library's own kind (see PLAYLIST_KINDS' own
-# comment on why "Saved Mix" isn't a distinct one) — its card gets a
-# different title below, since "Saved for later" reads like a Library label
-# here, not a suggestion.
-_SMART_PLAYLIST_KINDS = ("on-repeat", "recently-added", "forgotten-favorites", "saved")
-_SMART_PLAYLIST_TITLES = {"saved": "Saved Mix"}
-
-
-def smart_playlists_context(db: Session, user_id: int) -> dict:
-    """Explore's smart-playlist shelf — On Repeat, Recently Added, Forgotten
-    Favorites, and Saved Mix, each a card linking to the same detail view
-    its Library-side counterpart (where one exists) uses.
-
-    Server-rendered at page load rather than fetched separately or kept in
-    refreshFragments()'s sweep, unlike Explore's interest-based "For you"
-    shelves: this is local DB data, not a YouTube round trip, so there's no
-    request to defer — and reordering "On Repeat" after every single play
-    isn't worth the fragment machinery that would take (see
-    project_audit_remaining_work.md's Parti 9 for the finding this
-    implements). A stale-until-next-page-load shelf is the accepted
-    tradeoff.
-
-    An empty smart playlist's card is left out entirely — same "an empty
-    shelf is worse than no shelf" rule explore.js's recShelfHtml already
-    applies to the interest-based shelves.
-    """
-    cards = []
-    for kind in _SMART_PLAYLIST_KINDS:
-        filter_value, title, _empty_message = PLAYLIST_KINDS[kind]
-        count = count_content(db, user_id, filter=filter_value)
-        if not count:
-            continue
-        first_page, _page, _total_pages = query_content_page(
-            db, user_id, filter=filter_value, page_size=1
-        )
-        cards.append(
-            {
-                "kind": kind,
-                "title": _SMART_PLAYLIST_TITLES.get(kind, title),
-                "count": count,
-                "thumbnail_url": first_page[0].thumbnail_url if first_page else None,
-            }
-        )
-    return {"smart_playlists": cards}
 
 
 def channel_detail_context(db: Session, user_id: int, feed_id: int, page: int) -> dict | None:

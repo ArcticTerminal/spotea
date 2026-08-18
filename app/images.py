@@ -59,6 +59,26 @@ def _download_image(directory: Path, filename: str, image_url: str, url_prefix: 
     return f"{url_prefix}/{dest.name}"
 
 
+def fetch_image_bytes(image_url: str) -> tuple[bytes, str] | None:
+    """A remote image's bytes and content-type, fetched once and handed back
+    in memory rather than written to disk — see routers using this for why
+    (proxying an avatar that's never been followed/searched-for before, so it
+    doesn't earn a permanent local copy the way download_avatar's callers do,
+    but still needs a same-origin response to dodge Chrome's ORB — see
+    download_avatar's docstring)."""
+    try:
+        req = urllib.request.Request(image_url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=FETCH_TIMEOUT_SECONDS) as resp:
+            body = resp.read(MAX_IMAGE_BYTES + 1)
+            content_type = resp.headers.get_content_type()
+    except (urllib.error.URLError, OSError, TimeoutError):
+        return None
+
+    if not body or len(body) > MAX_IMAGE_BYTES or not content_type.startswith("image/"):
+        return None
+    return body, content_type
+
+
 def download_avatar(channel_id: str, avatar_url: str) -> str | None:
     """Fetch a channel avatar's bytes once and save them locally, returning a
     same-origin path to re-serve it from. Hotlinking Google's image CDN

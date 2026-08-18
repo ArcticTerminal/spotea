@@ -2,7 +2,9 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
+from app.content_query import followed_feeds
 from app.deps import get_current_profile, get_db, require_login
+from app.genres import MUSIC_GENRES
 from app.interests import parse_interests
 from app.models import User
 from app.page_context import (
@@ -11,7 +13,6 @@ from app.page_context import (
     home_shelf_items,
     library_context,
     queue_thumbnail_caching,
-    smart_playlists_context,
 )
 from app.templating import templates
 
@@ -35,6 +36,7 @@ def home(
     disagree about what it contains."""
     home = home_context(db, profile.id)
     queue_thumbnail_caching(background_tasks, home_shelf_items(home))
+    interests = parse_interests(profile.interests)
 
     return templates.TemplateResponse(
         request,
@@ -55,11 +57,21 @@ def home(
             # and filling them in afterwards flashes an empty editor on every
             # load. Explore's recommendations are the opposite case — they can
             # cost a YouTube round trip, so they stay a deliberate fetch.
-            "interests": parse_interests(profile.interests),
+            "interests": interests,
+            # Drives the onboarding wizard's auto-open (see home/onboarding.js):
+            # a profile with neither an interest nor a followed channel has
+            # nothing for Explore's recommendations or the library to work
+            # from, so it's shown again on every such load rather than tracked
+            # with its own "seen it" flag — closing it without adding either
+            # is treated the same as never having seen it.
+            "needs_onboarding": not interests and followed_feeds(db, user_id=profile.id).first() is None,
+            # The onboarding wizard's step-1 genre chips — one Python list
+            # both this template loop and services/genre_artists.py's
+            # MusicBrainz seeding key off of, so the two can't drift apart.
+            "music_genres": MUSIC_GENRES,
             **home,
             **library_context(db, profile.id),
             **downloads_context(db, profile.id),
-            **smart_playlists_context(db, profile.id),
         },
     )
 

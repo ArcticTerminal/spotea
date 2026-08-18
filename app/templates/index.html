@@ -26,19 +26,7 @@
     // resolves to, not a tab switch of its own.
     (function () {
       var VALID_TABS = ["home", "library", "explore", "settings"];
-      var PLAYLIST_KINDS = [
-        "favorites",
-        "saved",
-        "new-uploads",
-        "recently-played",
-        "on-repeat",
-        "recently-added",
-        "forgotten-favorites",
-      ];
-      // Explore-owned even though they're not remote (yt-*) — see
-      // home/detail.js's EXPLORE_OWNED_LOCAL_KINDS for why "saved" (Explore's
-      // "Saved Mix" card) isn't included here: it reuses Library's own list.
-      var EXPLORE_OWNED_LOCAL_KINDS = ["on-repeat", "recently-added", "forgotten-favorites"];
+      var PLAYLIST_KINDS = ["favorites", "saved", "new-uploads", "recently-played"];
       var DETAIL_PREFIXES = ["channel/", "yt-channel/", "yt-playlist/"];
       var hash = location.hash.slice(1).split("?")[0];
       var isDetail =
@@ -60,10 +48,7 @@
       // well as in home/detail.js so a deep link doesn't paint with no tab
       // selected for a frame.
       if (isDetail) {
-        document.documentElement.dataset.detailHome =
-          hash.indexOf("yt-") === 0 || EXPLORE_OWNED_LOCAL_KINDS.indexOf(hash) !== -1
-            ? "explore"
-            : "library";
+        document.documentElement.dataset.detailHome = hash.indexOf("yt-") === 0 ? "explore" : "library";
       }
     })();
   </script>
@@ -174,20 +159,19 @@
         <div id="explore-browse-panel">
           {# "For you": channels/songs/playlists searched from the interests
              this profile listed in Settings. Filled entirely by
-             home/explore.js — unlike the interest chips, this content can
-             cost a live YouTube round trip, so it's a deliberate fetch the
-             first time Explore is opened rather than part of the page render.
+             home/explore.js — fetched in the background as soon as the app
+             loads (not part of the page render itself, since it can cost a
+             live YouTube round trip), so the shelves are already here by the
+             time this tab is opened.
 
-             No refresh control of its own: these shelves go stale on the same
-             interval Settings sets for feed refreshes, when the interest list
-             is edited, and when the app-wide Refresh button is pressed. #}
+             No refresh control of its own: these shelves are re-checked on
+             every visit to this tab, rebuilt once the interval Settings sets
+             for feed refreshes has elapsed, when the interest list is
+             edited, and when the app-wide Refresh button is pressed. #}
           <div class="shelf-header recommendations-header">
             <h2 class="shelf-title">For you</h2>
-            <span id="recommendations-meta" class="muted"></span>
           </div>
           <div id="recommendations-body"></div>
-
-          {% include "_smart_playlists_shelf.html" %}
         </div>
 
       </div>
@@ -272,6 +256,80 @@
       <div id="detail-panel"></div>
     </section>
   </main>
+
+  <div
+    id="onboarding-overlay"
+    class="modal-overlay"
+    hidden
+    data-needs-onboarding="{{ needs_onboarding | tojson }}"
+  >
+    <div class="modal modal-onboarding">
+      <div class="modal-header">
+        <h2>What kind of music are you into?</h2>
+        <button type="button" id="onboarding-close" class="modal-close" aria-label="Close">×</button>
+      </div>
+
+      <div id="onboarding-step-genres">
+        <p class="muted">
+          Pick a few genres — Explore's <strong>For you</strong> shelves and the channel
+          suggestions on the next step are searched from these. You can always add more
+          later from Settings.
+        </p>
+        {# Genre strings come from app/genres.py (MUSIC_GENRES), the same
+           list services/genre_artists.py seeds its MusicBrainz cache from —
+           a Jinja loop here instead of hardcoded buttons keeps the two
+           unable to drift apart. #}
+        <div class="genre-grid">
+          {% for genre in music_genres %}
+          <button type="button" class="genre-chip" data-genre="{{ genre }}">{{ genre }}</button>
+          {% endfor %}
+        </div>
+        <form id="onboarding-genre-form" class="interests-add-form">
+          <input
+            type="text"
+            id="onboarding-genre-input"
+            placeholder="Something else…"
+            maxlength="60"
+            autocomplete="off"
+            autocapitalize="off"
+            autocorrect="off"
+            aria-label="Add a genre"
+          />
+          <button type="submit" class="btn-quiet">Add</button>
+        </form>
+        <div class="modal-actions">
+          <button type="button" id="onboarding-genres-skip" class="btn-quiet">Skip</button>
+          <button type="button" id="onboarding-genres-next" class="btn-primary" disabled>Next</button>
+        </div>
+      </div>
+
+      <div id="onboarding-step-channels" hidden>
+        <p class="muted">
+          A few channels worth following, based on what you picked — or search for your own.
+        </p>
+
+        <ul id="onboarding-suggested-channels" class="search-results"></ul>
+
+        <div class="channel-search">
+          <input
+            type="text"
+            id="onboarding-search-input"
+            placeholder="Search for a channel…"
+            autocomplete="off"
+            autocapitalize="off"
+            autocorrect="off"
+            aria-label="Search channels"
+          />
+        </div>
+        <ul id="onboarding-search-results" class="search-results"></ul>
+
+        <div class="modal-actions">
+          <button type="button" id="onboarding-open-bulk-import" class="btn-quiet">Import many at once</button>
+          <button type="button" id="onboarding-finish" class="btn-primary">Finish</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <div id="bulk-import-overlay" class="modal-overlay" hidden>
     <div class="modal modal-bulk-import">

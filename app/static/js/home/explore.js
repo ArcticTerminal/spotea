@@ -22,8 +22,8 @@ function formatSubscribers(count) {
   return `${count} subscribers`;
 }
 
-function renderChannelResults(results) {
-  const list = document.getElementById("channel-search-results");
+export function renderChannelResults(results, containerId = "channel-search-results") {
+  const list = document.getElementById(containerId);
   if (!list) return;
 
   if (!results.length) {
@@ -44,7 +44,11 @@ function renderChannelResults(results) {
       // latest uploads, in the detail panel), the button follows it outright
       // for when you already know what you're adding.
       return `
-        <li class="search-result search-result-channel" data-channel-id="${escapeHtml(r.channel_id)}">
+        <li
+          class="search-result search-result-channel"
+          data-channel-id="${escapeHtml(r.channel_id)}"
+          data-thumbnail-url="${escapeHtml(r.thumbnail_url || "")}"
+        >
           ${thumb}
           <div class="search-result-info">
             <span class="search-result-title">${escapeHtml(r.title)}</span>
@@ -133,7 +137,11 @@ function recChannelCardHtml(channel) {
   // Same two targets as a channel search result: the card previews, the
   // button follows without looking first.
   return `
-    <article class="card rec-channel-card" data-channel-id="${escapeHtml(channel.channel_id)}">
+    <article
+      class="card rec-channel-card"
+      data-channel-id="${escapeHtml(channel.channel_id)}"
+      data-thumbnail-url="${escapeHtml(channel.thumbnail_url || "")}"
+    >
       ${avatar}
       <div class="card-body">
         <h3 class="card-title" title="${escapeHtml(channel.title)}">${escapeHtml(channel.title)}</h3>
@@ -200,29 +208,11 @@ function recShelfHtml(title, items, cardHtml) {
   `;
 }
 
-/** Server datetimes are naive UTC (see app/timeutil.py) — without the Z, JS
- *  would read them as local time and report a batch as hours off. */
-function parseUtc(iso) {
-  return new Date(/[Zz]|[+-]\d{2}:?\d{2}$/.test(iso) ? iso : `${iso}Z`);
-}
-
-function formatAge(iso) {
-  const minutes = Math.round((Date.now() - parseUtc(iso).getTime()) / 60000);
-  if (minutes < 2) return "just now";
-  if (minutes < 60) return `${minutes} minutes ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
-  const days = Math.round(hours / 24);
-  return `${days} day${days === 1 ? "" : "s"} ago`;
-}
-
 function renderRecommendations(data) {
   const body = document.getElementById("recommendations-body");
-  const meta = document.getElementById("recommendations-meta");
   if (!body) return;
 
   if (!data.interests.length) {
-    if (meta) meta.textContent = "";
     body.innerHTML = `
       <p class="muted">
         Tell Spotea what you're into — add a few interests in Settings and this fills up with
@@ -231,16 +221,6 @@ function renderRecommendations(data) {
       <button type="button" id="recommendations-open-settings" class="btn-primary">Add interests</button>
     `;
     return;
-  }
-
-  if (meta) {
-    // Which interests this batch came from, not the whole list — a run only
-    // searches a sample of them (see services/recommendations.py), and saying
-    // otherwise would make the shelves look like they ignored the rest.
-    const basedOn = data.interests_used.join(", ");
-    meta.textContent = data.generated_at
-      ? `${basedOn} · updated ${formatAge(data.generated_at)}`
-      : basedOn;
   }
 
   const { contents, longForm } = splitByDuration(data.videos);
@@ -259,11 +239,21 @@ function renderRecommendations(data) {
   wireScrollers();
 }
 
-async function loadRecommendations({ force = false } = {}) {
+/**
+ * `quiet` skips the loading placeholder — used for the boot fetch and for
+ * re-checking on later visits to Explore, where the shelves are already on
+ * screen and swapping in a spinner over them would just be a flicker for
+ * content that, most of the time, turns out unchanged (the GET route only
+ * rebuilds once the profile's chosen refresh interval has actually elapsed;
+ * see services/recommendations.py).
+ */
+async function loadRecommendations({ force = false, quiet = false } = {}) {
   const body = document.getElementById("recommendations-body");
   if (!body) return;
 
-  body.innerHTML = `<p class="search-loading"><span class="spinner"></span>Finding things you might like…</p>`;
+  if (!quiet) {
+    body.innerHTML = `<p class="search-loading"><span class="spinner"></span>Finding things you might like…</p>`;
+  }
 
   const { ok, data } = await api(force ? "/recommendations/refresh" : "/recommendations", {
     method: force ? "POST" : "GET",
@@ -271,43 +261,36 @@ async function loadRecommendations({ force = false } = {}) {
   });
 
   if (!ok) {
-    body.innerHTML = `<p class="muted">Couldn't reach YouTube for recommendations just now.</p>`;
+    if (!quiet) body.innerHTML = `<p class="muted">Couldn't reach YouTube for recommendations just now.</p>`;
     return;
   }
+  recommendationsLoaded = true;
   renderRecommendations(data);
 }
 
 let recommendationsLoaded = false;
 
-function loadRecommendationsOnce() {
-  if (recommendationsLoaded) return;
-  recommendationsLoaded = true;
-  loadRecommendations();
-}
-
 /**
- * Marks the shelves as needing a rebuild, so the next visit to Explore
- * fetches instead of leaving what's on screen. Called by the interests editor
- * (see home/settings.js) — without it, adding your first interest and coming
- * back here would still show the "no interests yet" prompt until a reload.
- * Not an immediate fetch: interests are only editable from Settings, so
- * there's nothing on screen to update yet.
+ * Marks the shelves stale, so the next visit to Explore shows the loading
+ * spinner instead of quietly swapping in the rebuilt batch. Called by the
+ * interests editor (see home/settings.js) — without it, adding your first
+ * interest and coming back here would still show the "no interests yet"
+ * prompt until a reload (the re-check on tab entry would fetch the new
+ * batch either way, but silently). Not an immediate fetch itself: interests
+ * are only editable from Settings, so there's nothing on screen to update
+ * yet.
  */
 export function invalidateRecommendations() {
   recommendationsLoaded = false;
 }
 
 /**
- * Rebuilds the shelves now, ignoring the cache. There is no button for this
- * in Explore: it's what the app-wide "Refresh feeds" control calls (wired in
- * pages/index.js), so one press means "go and look at everything again"
- * rather than the tab carrying a second, competing refresh of its own.
+ * Rebuilds the shelves now, ignoring the cache. There is no dedicated button
+ * for this in Explore: it's what the app-wide "Refresh feeds" control calls
+ * (wired in pages/index.js), so one press means "go and look at everything
+ * again" rather than the tab carrying a second, competing refresh of its own.
  */
 export async function refreshRecommendations() {
-  // Nothing rendered yet means nobody has opened Explore this session; the
-  // first visit will fetch anyway, and doing it here would spend a YouTube
-  // round trip on a tab that may never be looked at.
-  if (!recommendationsLoaded) return;
   await loadRecommendations({ force: true });
 }
 
@@ -315,15 +298,22 @@ export function setupRecommendations() {
   const body = document.getElementById("recommendations-body");
   if (!body) return;
 
-  // Deferred until Explore is actually opened: a cold or expired cache makes
-  // this a multi-second YouTube round trip, which nobody who never leaves
-  // Home should be paying for. onTabActivated fires on later switches; the
-  // check below covers a load that starts on Explore, since setupTabs() has
-  // already run its boot activation by the time this registers.
+  // Fetched as soon as the app loads, not deferred until Explore is opened —
+  // the shelves are ready to show the first time someone switches to the
+  // tab instead of making that switch pay for the YouTube round trip. Quiet:
+  // nothing is on screen yet either way, so there's nothing to show a
+  // spinner over, and a toast for a boot-time hiccup nobody asked to see
+  // would just be noise.
+  loadRecommendations({ quiet: true });
+
+  // Re-checked on every later switch to Explore too, so a profile that keeps
+  // the tab around gets a fresh batch once its chosen interval elapses
+  // without needing a reload. Quiet once something has already rendered —
+  // only the very first check (racing the boot fetch above) shows the
+  // spinner.
   onTabActivated((tab) => {
-    if (tab === "explore") loadRecommendationsOnce();
+    if (tab === "explore") loadRecommendations({ quiet: recommendationsLoaded });
   });
-  if (document.documentElement.dataset.activeTab === "explore") loadRecommendationsOnce();
 
   body.addEventListener("click", (event) => {
     if (event.target.closest("#recommendations-open-settings")) {
@@ -342,7 +332,7 @@ export function setupRecommendations() {
 
     const channelCard = event.target.closest(".rec-channel-card");
     if (channelCard) {
-      openDetail("yt-channel", channelCard.dataset.channelId);
+      openDetail("yt-channel", channelCard.dataset.channelId, { avatar: channelCard.dataset.thumbnailUrl || null });
       return;
     }
 
@@ -353,25 +343,6 @@ export function setupRecommendations() {
     if (!card) return;
     if (card.dataset.videoId) playRemoteVideo(card.dataset, card.querySelector(".rec-play"));
     else if (card.dataset.playlistId) openDetail("yt-playlist", card.dataset.playlistId);
-  });
-}
-
-/** The smart-playlist shelf (On Repeat / Recently Added / Forgotten
- *  Favorites / Saved Mix — see page_context.smart_playlists_context).
- *  Server-rendered directly into index.html, unlike the "For you" shelves
- *  above, so this only needs the delegated open-on-click wiring Library's
- *  own pinned-playlist tiles use (see library.js's setupLibraryChannelGrid)
- *  — no fetch, no render step. Delegated from the panel because it's inside
- *  index.html's server render, which never gets replaced wholesale the way
- *  a fragment swap would, but matching the established pattern here anyway
- *  keeps this file's click-handling uniform. */
-export function setupSmartPlaylistsShelf() {
-  document.getElementById("explore-browse-panel")?.addEventListener("click", (event) => {
-    if (event.ctrlKey || event.metaKey || event.shiftKey || event.button !== 0) return;
-    const card = event.target.closest(".smart-playlist-card");
-    if (!card) return;
-    event.preventDefault();
-    openDetail(card.dataset.detailKind, null);
   });
 }
 
@@ -436,7 +407,9 @@ export function setupExploreSearch() {
     }
 
     const row = event.target.closest(".search-result-channel");
-    if (row?.dataset.channelId) openDetail("yt-channel", row.dataset.channelId);
+    if (row?.dataset.channelId) {
+      openDetail("yt-channel", row.dataset.channelId, { avatar: row.dataset.thumbnailUrl || null });
+    }
   });
 
   videoResults.addEventListener("click", (event) => {

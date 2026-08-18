@@ -113,17 +113,27 @@ def _clean_tables(_init_schema):
     alongside users, not just users — otherwise the preserved profile row is
     left with a dangling account_id FK after the first test.
 
-    The preserved account row's own mutable columns are reset explicitly,
-    not just its child rows deleted — feed_refresh_interval_minutes lives on
-    this row now (see models.Account), and several tests PUT a non-default
-    value through Settings; without this reset that value would silently
-    carry into whatever test happens to run next, the same leak the
-    per-table deletes above exist to prevent everywhere else.
+    The preserved account and user rows' own mutable columns are reset
+    explicitly, not just their child rows deleted — feed_refresh_interval_minutes
+    lives on the account row (see models.Account), interests and
+    audio_quality on the user row (see models.User), and several tests PUT a
+    non-default value through Settings; without this reset that value would
+    silently carry into whatever test happens to run next, the same leak the
+    per-table deletes above exist to prevent everywhere else. Caught by
+    test_needs_onboarding_false_once_interests_are_set (test_pages.py)
+    leaving interests set on profile 1, which broke
+    test_no_interests_means_an_empty_batch_and_no_searches
+    (test_recommendations.py) further into the run.
     """
     yield
     with engine.begin() as conn:
         for table in reversed(Base.metadata.sorted_tables):
             if table.name == "users":
+                conn.execute(
+                    table.update()
+                    .where(table.c.id == DEFAULT_PROFILE_ID)
+                    .values(interests=None, audio_quality="high")
+                )
                 conn.execute(table.delete().where(table.c.id != DEFAULT_PROFILE_ID))
             elif table.name == "accounts":
                 conn.execute(
