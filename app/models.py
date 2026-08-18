@@ -98,6 +98,38 @@ class RecommendationCache(Base):
     user: Mapped["User"] = relationship(back_populates="recommendation_cache")
 
 
+class GenreArtist(Base):
+    """One real artist, tagged with one of the onboarding wizard's predefined
+    genres (see app/genres.py), whose MusicBrainz record links straight to a
+    YouTube channel — the onboarding wizard's channel-suggestion source
+    (see services/genre_artists.py), instead of a generic YouTube search on
+    the genre name (which mostly surfaces "Best Jazz Mix 2024" compilation
+    channels, not artists).
+
+    Not one row per genre (unlike RecommendationCache's one-blob-per-profile
+    shape): title/thumbnail_url/subscriber_count/resolved_at get filled in
+    independently, artist by artist, the first time any profile's onboarding
+    actually needs that genre — a shared JSON blob would need a read-modify-
+    write on every single one of those resolutions instead of a plain row
+    update. `resolved_at is None` means MusicBrainz has already supplied the
+    channel_id/channel_url but nobody has paid the YouTube round trip for
+    the display metadata yet.
+    """
+
+    __tablename__ = "genre_artists"
+    __table_args__ = (UniqueConstraint("genre", "channel_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    genre: Mapped[str] = mapped_column(String(60), index=True)
+    artist_name: Mapped[str] = mapped_column(String(200))
+    channel_id: Mapped[str] = mapped_column(String(64))
+    channel_url: Mapped[str] = mapped_column(String(500))
+    title: Mapped[str | None] = mapped_column(String(200), default=None)
+    thumbnail_url: Mapped[str | None] = mapped_column(String(500), default=None)
+    subscriber_count: Mapped[int | None] = mapped_column(default=None)
+    resolved_at: Mapped[datetime | None] = mapped_column(default=None)
+
+
 class Feed(Base):
     __tablename__ = "feeds"
     __table_args__ = (UniqueConstraint("user_id", "rss_url", name="uq_feed_user_rss_url"),)
@@ -214,15 +246,16 @@ class Content(Base):
     is_saved: Mapped[bool] = mapped_column(default=False)
     last_played_at: Mapped[datetime | None] = mapped_column(default=None)
     # Incremented alongside last_played_at (see routers/content.py's
-    # stream_content) — what the "On Repeat" smart playlist orders by,
-    # since last_played_at alone only says *when* something was last
-    # played, not how often. Approximate by design, not a precise listen
-    # counter: a single play can issue more than one range request as the
-    # browser buffers/seeks, and each one increments this — acceptable for
-    # ranking "played a lot" vs. "played once", not meant for exact counts.
-    # Deliberately untouched by Settings' "Clear recently played" (which
-    # only resets last_played_at) — clearing the history someone sees
-    # shouldn't also erase the signal a playlist like this depends on.
+    # stream_content) — a play-frequency counter, since last_played_at alone
+    # only says *when* something was last played, not how often.
+    # Approximate by design, not a precise listen counter: a single play can
+    # issue more than one range request as the browser buffers/seeks, and
+    # each one increments this — acceptable for ranking "played a lot" vs.
+    # "played once", not meant for exact counts. Deliberately untouched by
+    # Settings' "Clear recently played" (which only resets last_played_at).
+    # Not currently surfaced anywhere in the UI (the "On Repeat" smart
+    # playlist that read this was removed) — kept as a tracked signal in
+    # case it's worth building on later.
     play_count: Mapped[int] = mapped_column(default=0)
     # True for a just-added Explore row that hasn't been favorited or saved
     # yet (see routers/content.py's add_favorite/add_saved, which clear this

@@ -17,6 +17,7 @@ import yt_dlp
 from app.images import cached_avatar_path
 from app.youtube.extract import NETWORK_OPTS
 from app.youtube.urls import (
+    CHANNEL_PAGE_URL_TEMPLATE,
     CHANNEL_SEARCH_URL_TEMPLATE,
     PLAYLIST_ID_RE,
     PLAYLIST_SEARCH_URL_TEMPLATE,
@@ -164,26 +165,40 @@ def _video_result(entry: dict) -> VideoSearchResult | None:
     )
 
 
-def _cached_avatar_or_hotlink(channel_id: str, remote_url: str | None) -> str | None:
+def proxied_avatar_url(remote_url: str) -> str:
+    """A remote avatar URL, wrapped so the browser fetches it through this
+    app's own /avatar-proxy (app/main.py) instead of hotlinking Google's CDN
+    directly — see cached_avatar_or_hotlink below for why. Shared with
+    services/remote_detail.py, which has its own reason to reach for one
+    (fetch_channel_avatar's fallback fetch), rather than each building this
+    query string its own way."""
+    return f"/avatar-proxy?u={urllib.parse.quote(remote_url, safe='')}"
+
+
+def cached_avatar_or_hotlink(channel_id: str, remote_url: str | None) -> str | None:
     """A search result's avatar — reused from disk if this channel already
-    has one (already followed, or found in an earlier search), hotlinked
-    straight from YouTube otherwise. This used to download a fresh copy for
-    every result instead: measured live, 977 of 1060 avatar files on disk
-    (92%, 16.4 MB) were exactly that — orphans with no Feed row ever
-    pointing at them, because nothing anywhere ever deletes an avatar. Per
-    the locked decision, only a channel someone actually follows earns a
+    has one (already followed, or found in an earlier search), proxied
+    through this app's own /avatar-proxy otherwise. This used to download a
+    fresh copy for every result instead: measured live, 977 of 1060 avatar
+    files on disk (92%, 16.4 MB) were exactly that — orphans with no Feed row
+    ever pointing at them, because nothing anywhere ever deletes an avatar.
+    Per the locked decision, only a channel someone actually follows earns a
     local copy now (see feed_sync.fetch_feed_data); Explore search reuses
-    what exists without creating more. `remote_url` already went through
-    absolute_thumbnail_url's yt3.ggpht.com rewrite (see _best_thumbnail_url),
-    which is what makes hotlinking it viable at all — the alternative,
-    yt3.googleusercontent.com, gets blocked by Chrome's Opaque Response
-    Blocking when hotlinked. That rewrite doesn't eliminate ORB for every
-    case, so some never-followed channels may still render with no avatar —
-    a knowingly accepted tradeoff, not a bug.
+    what exists without creating more. Also reused by services/genre_artists.py
+    for the same reason on a channel found via MusicBrainz rather than search.
+
+    Used to hand back `remote_url` for the browser to hotlink directly, but
+    Chrome's Opaque Response Blocking rejected a meaningful share of those
+    even after absolute_thumbnail_url's yt3.ggpht.com rewrite (see
+    _best_thumbnail_url) — the same problem a followed channel's local-copy
+    fetch (app/images.py) dodges by fetching server-side instead of trusting
+    the browser to load Google's URL. /avatar-proxy (app/main.py) is that
+    same fix without a permanent local copy, which a channel nobody's
+    followed yet doesn't earn.
     """
     if not remote_url:
         return None
-    return cached_avatar_path(channel_id) or remote_url
+    return cached_avatar_path(channel_id) or proxied_avatar_url(remote_url)
 
 
 def search_channels(query: str) -> list[ChannelSearchResult]:
@@ -199,7 +214,7 @@ def search_channels(query: str) -> list[ChannelSearchResult]:
             ChannelSearchResult(
                 channel_id=channel_id,
                 title=entry.get("title") or entry.get("channel") or channel_id,
-                thumbnail_url=_cached_avatar_or_hotlink(channel_id, remote_thumbnail_url),
+                thumbnail_url=cached_avatar_or_hotlink(channel_id, remote_thumbnail_url),
                 subscriber_count=entry.get("channel_follower_count"),
                 channel_url=entry.get("channel_url")
                 or entry.get("url")
@@ -321,3 +336,30 @@ def fetch_channel_uploads(channel_id: str) -> ChannelUploads:
         subscriber_count=info.get("channel_follower_count"),
         items=items,
     )
+
+
+def fetch_channel_avatar(channel_id: str) -> str | None:
+    """A channel's own avatar, straight from its channel page rather than its
+    uploads playlist — fetch_channel_uploads' UULF read carries no avatar at
+    all (verified live: its top-level thumbnails are the *first video's*
+    thumbnail, not the channel's), which is why a never-followed, never-
+    searched-for channel opened cold (a hard refresh, a deep link, a browser
+    back/forward) used to always render with none.
+
+    remote_channel_context (services/remote_detail.py) reaches for this only
+    as a last resort — after a local copy and the avatar the client's own
+    card already had to offer both come up empty — since it's a second live
+    yt-dlp call the common "opened from a card" path has no need to pay for.
+
+    The channel page's own thumbnails carry the avatar under a stable
+    "avatar_uncropped" id (unlike the banner entries alongside it, which
+    outrank it on `preference` but aren't the avatar); everything else in
+    that list — googleusercontent.com like the rest of this module's avatar
+    URLs — needs the same yt3.ggpht.com rewrite the search-result path
+    applies, or Chrome's ORB rejects it hotlinked same as any other.
+    """
+    info = _extract_flat(CHANNEL_PAGE_URL_TEMPLATE.format(channel_id=channel_id), limit=1)
+    avatar = next(
+        (t for t in info.get("thumbnails") or [] if t.get("id") == "avatar_uncropped"), None
+    )
+    return absolute_thumbnail_url(avatar["url"]) if avatar else None

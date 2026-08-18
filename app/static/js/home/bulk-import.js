@@ -40,7 +40,10 @@ function renderResults(results) {
 }
 
 export function setupBulkImportOverlay() {
-  setupOverlay("bulk-import-overlay", "bulk-import-close", ["open-bulk-import"]);
+  setupOverlay("bulk-import-overlay", "bulk-import-close", [
+    "open-bulk-import",
+    "onboarding-open-bulk-import",
+  ]);
 }
 
 export function setupBulkImport() {

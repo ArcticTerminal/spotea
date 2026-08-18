@@ -161,7 +161,7 @@ const isActiveBackfillPhase = (phase) => phase === "scanning" || phase === "savi
 // Assumes showBackfillOverlay() is already up (callers show it when the add
 // starts, before the POST even resolves, so there's no gap where the screen
 // looks idle while the RSS sync — itself a couple of seconds — is in flight).
-async function waitForBackfill(feedId, title) {
+async function waitForBackfill(feedId, title, { announce = true } = {}) {
   setBackfillOverlayText(`${title} — Fetching channel history…`, "");
 
   const NEVER_STARTED_GRACE_MS = 4000;
@@ -191,10 +191,16 @@ async function waitForBackfill(feedId, title) {
   // it explicitly, so "back" from the new channel doesn't land on a Library
   // tab that still looks like the channel was never added.
   refreshFragments();
-  document.dispatchEvent(new CustomEvent(CHANNEL_FOLLOWED, { detail: { feedId, title } }));
+  // Skippable: home/detail.js's CHANNEL_FOLLOWED listener navigates to the
+  // channel's real page, which is exactly what a search result or a
+  // preview's Follow button wants but not what the onboarding wizard's
+  // "Add" wants — that's a modal you're meant to stay inside while adding
+  // several channels in a row, not something a follow should silently
+  // navigate you out from under.
+  if (announce) document.dispatchEvent(new CustomEvent(CHANNEL_FOLLOWED, { detail: { feedId, title } }));
 }
 
-export async function followChannel(channelUrl, button) {
+export async function followChannel(channelUrl, button, { announce = true } = {}) {
   const originalLabel = button?.textContent;
   if (button) {
     button.disabled = true;
@@ -211,7 +217,9 @@ export async function followChannel(channelUrl, button) {
   });
 
   if (ok) {
-    if (data?.feed?.id != null) await waitForBackfill(data.feed.id, data.feed.channel_title || channelUrl);
+    if (data?.feed?.id != null) {
+      await waitForBackfill(data.feed.id, data.feed.channel_title || channelUrl, { announce });
+    }
     else window.location.reload();
     return;
   }

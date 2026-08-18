@@ -108,6 +108,36 @@ def test_service_worker_ignores_cross_origin_requests() -> None:
     )
 
 
+def test_service_worker_api_prefixes_have_no_trailing_slash() -> None:
+    """A prefix with a trailing slash (e.g. "/settings/") never matches the
+    *bare* route ("/settings" has none of its own) — that exact bug shipped
+    once already and meant GET /settings, GET /profiles and GET
+    /recommendations were all getting cached instead of excluded, so a
+    profile switch or creation could serve a stale, different profile's
+    settings straight from the service worker cache. isApiPath's own
+    path === prefix || path.startsWith(`${prefix}/`) check only works if the
+    prefixes themselves stay bare."""
+    source = (JS_DIR / "sw.js").read_text()
+
+    match = re.search(r"const API_PREFIXES = \[(.*?)\];", source, re.DOTALL)
+    assert match, "sw.js's API_PREFIXES list moved or was renamed; this guard needs updating"
+    prefixes = re.findall(r'"([^"]+)"', match.group(1))
+    assert prefixes, "found API_PREFIXES but no string entries in it"
+
+    trailing_slash = [p for p in prefixes if p.endswith("/")]
+    assert not trailing_slash, f"these API_PREFIXES entries have a trailing slash: {trailing_slash}"
+
+    # The fetch handler has to actually call the boundary-aware matcher, not
+    # a raw path.startsWith(prefix) loop over the (now-bare) prefixes —
+    # otherwise a bare "/settings" would still slip past every prefix listed
+    # here for the opposite reason (no prefix is a strict startsWith match of
+    # an equal-length string).
+    assert "isApiPath(url.pathname)" in source, (
+        "sw.js's fetch handler no longer calls isApiPath — bare API routes "
+        "can get cached again"
+    )
+
+
 def test_setup_profiles_does_not_eagerly_fetch_the_profile_list() -> None:
     """GET /profiles used to run on every single page load to fill two
     overlays that start hidden and, on a typical visit, are never opened —
@@ -234,57 +264,3 @@ def test_refresh_fragments_default_sweep_does_not_include_the_downloads_body() -
         "the on-demand downloads-body refresh (called on #open-downloads and "
         "from settings.js's in-modal actions) is gone"
     )
-
-
-SMART_PLAYLIST_KINDS = ["on-repeat", "recently-added", "forgotten-favorites"]
-
-
-def test_new_playlist_kinds_are_wired_into_all_three_routing_locations() -> None:
-    """core.js's classifyHash, index.html's pre-paint script, and
-    home/detail.js's detailHome each hand-roll their own view of which hash
-    values are a "virtual playlist" — core.js's own comment on PLAYLIST_KINDS
-    calls out index.html as "the one place everything after that first paint
-    agrees with it". A kind added to one and not the others routes fine after
-    module load but mis-paints (or 404s) on the very first frame, or leaves
-    the wrong tab button selected under the detail panel."""
-    core_source = CORE_JS.read_text()
-    index_source = (Path("app/templates") / "index.html").read_text()
-    detail_source = (JS_DIR / "home" / "detail.js").read_text()
-
-    core_kinds_start = core_source.index("const PLAYLIST_KINDS")
-    core_kinds_block = core_source[core_kinds_start : core_source.index("];", core_kinds_start) + 2]
-    index_kinds_block = index_source[
-        index_source.index("var PLAYLIST_KINDS") : index_source.index("];", index_source.index("var PLAYLIST_KINDS"))
-        + 2
-    ]
-
-    for kind in SMART_PLAYLIST_KINDS:
-        assert f'"{kind}"' in core_kinds_block, f"{kind!r} missing from core.js's PLAYLIST_KINDS"
-        assert f'"{kind}"' in index_kinds_block, f"{kind!r} missing from index.html's pre-paint PLAYLIST_KINDS"
-        assert f'"{kind}"' in detail_source, f"{kind!r} missing from home/detail.js (EXPLORE_OWNED_LOCAL_KINDS)"
-
-    assert "EXPLORE_OWNED_LOCAL_KINDS" in detail_source
-    assert "EXPLORE_OWNED_LOCAL_KINDS" in index_source, (
-        "index.html's pre-paint script no longer has its own "
-        "EXPLORE_OWNED_LOCAL_KINDS copy — the detail panel's tab-button "
-        "selection will flash 'Library' for on-repeat/recently-added/"
-        "forgotten-favorites before home/detail.js corrects it after load"
-    )
-
-
-def test_smart_playlist_shelf_clicks_open_the_detail_panel() -> None:
-    """The "Made for you" cards (_smart_playlists_shelf.html) are plain <a
-    href="/#kind"> tags with a data-detail-kind attribute rather than
-    yt-video-card's usual click handling, so they need their own delegated
-    listener — without it, a click falls through to a real navigation
-    (full-page reload) instead of the SPA detail panel."""
-    source = (JS_DIR / "home" / "explore.js").read_text()
-    body = _function_body(source, "setupSmartPlaylistsShelf")
-
-    assert 'closest(".smart-playlist-card")' in body
-    assert "event.preventDefault()" in body, (
-        "setupSmartPlaylistsShelf no longer prevents the default navigation "
-        "— clicking a smart-playlist card will hard-reload instead of "
-        "opening the SPA detail panel"
-    )
-    assert "openDetail(card.dataset.detailKind, null)" in body

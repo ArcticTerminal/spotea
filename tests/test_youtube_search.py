@@ -4,8 +4,9 @@ Measured live before this: 977 of 1060 avatar files on disk (92%, 16.4 MB)
 were orphans — search_channels downloaded a fresh copy for every result,
 and nothing anywhere ever deleted one. Per the locked decision, only a
 channel someone actually follows gets a local copy now (see
-feed_sync.fetch_feed_data); search reuses what's already there or hotlinks
-the remote URL directly.
+feed_sync.fetch_feed_data); search reuses what's already there or routes the
+remote URL through /avatar-proxy (see app/main.py) instead of handing it to
+the browser to hotlink directly.
 """
 
 from app.youtube import search as yt_search
@@ -26,10 +27,10 @@ def _entry(channel_id=CHANNEL_ID, **overrides):
     return entry
 
 
-def test_a_never_cached_channel_is_hotlinked_not_downloaded(monkeypatch):
+def test_a_never_cached_channel_is_proxied_not_downloaded(monkeypatch):
     """The core behaviour change: no download call happens at all — search
-    results for a channel nobody follows get the remote (ORB-safe-rewritten)
-    URL directly."""
+    results for a channel nobody follows get a same-origin /avatar-proxy URL
+    wrapping the remote one, not a permanent local copy."""
     monkeypatch.setattr(yt_search, "_search_entries", lambda url: [_entry()])
     monkeypatch.setattr(yt_search, "cached_avatar_path", lambda channel_id: None)
 
@@ -42,9 +43,12 @@ def test_a_never_cached_channel_is_hotlinked_not_downloaded(monkeypatch):
 
     assert len(results) == 1
     # Rewritten to ggpht.com (via absolute_thumbnail_url/_best_thumbnail_url)
-    # rather than the googleusercontent.com host Chrome's ORB blocks when
-    # hotlinked.
-    assert results[0].thumbnail_url == "https://yt3.ggpht.com/abc=s900-c-k-c0x00ffffff-no-rj"
+    # rather than the googleusercontent.com host, then wrapped in
+    # /avatar-proxy so the browser fetches it same-origin instead of hitting
+    # Chrome's ORB hotlinking Google's CDN directly.
+    assert results[0].thumbnail_url == (
+        "/avatar-proxy?u=https%3A%2F%2Fyt3.ggpht.com%2Fabc%3Ds900-c-k-c0x00ffffff-no-rj"
+    )
 
 
 def test_an_already_cached_channel_reuses_its_local_avatar(monkeypatch):

@@ -33,16 +33,6 @@ def new_upload_cutoff() -> datetime:
     return utcnow() - NEW_UPLOAD_MAX_AGE
 
 
-# How far back the "Recently Added" smart playlist reaches — everything in
-# the library has an added_at, so without a window this would just be the
-# whole library sorted by it, which the default (no-filter) view already is.
-RECENTLY_ADDED_MAX_AGE = timedelta(days=30)
-
-
-def recently_added_cutoff() -> datetime:
-    return utcnow() - RECENTLY_ADDED_MAX_AGE
-
-
 def new_upload_filter() -> ColumnElement[bool]:
     """What "New Uploads" means, in one place: RSS-sourced, recent, and from
     a channel still followed.
@@ -141,9 +131,6 @@ def _content_query(
         "__saved__",
         "__played__",
         "__new_uploads__",
-        "__on_repeat__",
-        "__recently_added__",
-        "__forgotten_favorites__",
     )
     if needs_feed_join:
         query = query.join(Feed)
@@ -156,15 +143,6 @@ def _content_query(
         query = query.filter(Content.last_played_at.isnot(None))
     elif filter == "__new_uploads__":
         query = query.filter(new_upload_filter())
-    elif filter == "__on_repeat__":
-        query = query.filter(Content.play_count > 0)
-    elif filter == "__recently_added__":
-        query = query.filter(Content.added_at >= recently_added_cutoff())
-    elif filter == "__forgotten_favorites__":
-        # Favorited, but never actually played — "forgotten" in the sense
-        # that matters for a smart playlist, not "favorited a while ago"
-        # (there's no favorited-at timestamp to measure that from).
-        query = query.filter(Content.is_favorite.is_(True), Content.last_played_at.is_(None))
     elif filter.startswith(CHANNEL_FILTER_PREFIX):
         channel_title = filter[len(CHANNEL_FILTER_PREFIX) :]
         query = query.filter(Feed.channel_title == channel_title)
@@ -175,12 +153,10 @@ def _content_query(
         pattern = f"%{filter}%"
         query = query.filter(or_(Feed.channel_title.ilike(pattern), Content.title.ilike(pattern)))
 
-    # Most filters sort by publish date; three read differently enough that
-    # publish date wouldn't make sense as "the" order for them.
+    # Most filters sort by publish date; __played__ reads differently enough
+    # that publish date wouldn't make sense as its order.
     order_column = {
         "__played__": Content.last_played_at,  # most recently played, not published
-        "__on_repeat__": Content.play_count,  # most played, not published
-        "__recently_added__": Content.added_at,  # most recently added, not published
     }.get(filter, Content.published_at)
     return query.order_by(order_column.desc())
 

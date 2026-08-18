@@ -15,7 +15,18 @@
 // Bumped again to v3 for the same reason: v2 intercepted cross-origin
 // requests, so its cache can hold opaque i.ytimg.com/yt3.ggpht.com entries
 // that the fetch handler no longer has any use for.
-const CACHE_NAME = "spotea-v3";
+//
+// Bumped again to v4: two separate gaps in API_PREFIXES let per-profile
+// data get cached that never should have been. First, its entries all
+// carried a trailing slash ("/settings/", "/profiles/", ...), which never
+// matches the *bare* route — "/settings" itself has no trailing slash, so
+// `path.startsWith("/settings/")` was always false for it and it fell
+// through into the *cached* branch below, the opposite of what this list
+// exists to prevent. Second, /recommendations, /partials/* and
+// /onboarding/* weren't listed at all. A v3 client could be holding a
+// cached /settings (or /recommendations, or a /partials/* fragment)
+// response from a profile other than whichever one is actually active now.
+const CACHE_NAME = "spotea-v4";
 
 // These routers (see app/routers/*.py) are all live API traffic, never
 // static assets — caching them is actively harmful, not just useless:
@@ -27,10 +38,35 @@ const CACHE_NAME = "spotea-v3";
 //     a since-deleted row, ...); nothing here checks response.ok before
 //     caching, so an error body can get cached and later replayed as if
 //     it were a real payload.
+//   - /partials/*, /recommendations, /settings and /onboarding/* are all
+//     per-profile data (fragment refreshes, "For you", the interests editor,
+//     onboarding's channel suggestions) — a stale cached copy served after a
+//     profile switch is indistinguishable from the *previous* profile's data
+//     leaking into the new one, which is exactly what a network hiccup while
+//     switching used to look like before this list covered them.
 // A transient network hiccup is enough to hit the catch() fallback below
-// and serve one of these stale/wrong bodies — to the <audio> tag, that's
-// indistinguishable from a real playback error.
-const API_PREFIXES = ["/content/", "/feeds/", "/profiles/", "/settings/", "/storage/"];
+// and serve one of these stale/wrong bodies.
+const API_PREFIXES = [
+  "/content",
+  "/feeds",
+  "/profiles",
+  "/settings",
+  "/storage",
+  "/partials",
+  "/recommendations",
+  "/onboarding",
+];
+
+// A prefix match that also requires a path boundary right after it — plain
+// startsWith("/settings") would be right for the bare route but would also
+// wrongly swallow some future, unrelated "/settingsfoo" route; requiring the
+// next character (if any) to be "/" keeps this exact without needing every
+// prefix listed twice (with and without a trailing slash), which is the bug
+// that let bare GETs like /settings and /profiles get cached in the first
+// place — those routes carry no trailing slash of their own.
+function isApiPath(path) {
+  return API_PREFIXES.some((prefix) => path === prefix || path.startsWith(`${prefix}/`));
+}
 
 self.addEventListener("install", () => {
   self.skipWaiting();
@@ -64,8 +100,7 @@ self.addEventListener("fetch", (event) => {
   // above), and remote artwork is neither.
   if (url.origin !== self.location.origin) return;
 
-  const path = url.pathname;
-  if (API_PREFIXES.some((prefix) => path.startsWith(prefix))) return;
+  if (isApiPath(url.pathname)) return;
 
   event.respondWith(
     fetch(event.request)

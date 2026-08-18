@@ -1,5 +1,6 @@
 import logging
 import os
+import urllib.parse
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
@@ -12,6 +13,7 @@ from app import scheduler
 from app.config import settings
 from app.database import Base, SessionLocal, engine
 from app.deps import NotAuthenticated, require_login
+from app.images import fetch_image_bytes
 from app.middleware import install as install_middleware
 from app.migrations import run_migrations
 from app.routers import auth as auth_router
@@ -19,6 +21,7 @@ from app.routers import content as content_router
 from app.routers import debug as debug_router
 from app.routers import explore as explore_router
 from app.routers import feeds as feeds_router
+from app.routers import onboarding as onboarding_router
 from app.routers import pages as pages_router
 from app.routers import partials as partials_router
 from app.routers import profiles as profiles_router
@@ -138,6 +141,7 @@ app.include_router(recommendations_router.router)
 app.include_router(profiles_router.router)
 app.include_router(debug_router.router)
 app.include_router(partials_router.router)
+app.include_router(onboarding_router.router)
 app.include_router(pages_router.router)
 
 
@@ -212,6 +216,43 @@ def get_avatar(filename: str) -> FileResponse:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
 
     return FileResponse(path, media_type="image/jpeg", headers=_IMAGE_CACHE_HEADERS)
+
+
+# Hosts youtube/search.py's absolute_thumbnail_url ever hands back for a
+# channel avatar — googleusercontent.com is the one it rewrites away from
+# (see that function), kept here too in case some path skips the rewrite.
+# Exact hostname match only: no endswith/substring check, which a URL like
+# https://evil.example/yt3.ggpht.com could otherwise slip past.
+_AVATAR_PROXY_ALLOWED_HOSTS = {"yt3.ggpht.com", "yt3.googleusercontent.com"}
+_AVATAR_PROXY_CACHE_HEADERS = {"Cache-Control": "private, max-age=86400"}
+
+
+@app.get("/avatar-proxy", dependencies=[Depends(require_login)])
+def avatar_proxy(u: str) -> Response:
+    """Streams a channel avatar YouTube's search results already handed
+    back — see youtube/search.py's _cached_avatar_or_hotlink — without
+    saving it to disk. A never-followed channel doesn't earn a permanent
+    local copy (see download_avatar's own docstring on why not: 92% of
+    avatar files on disk used to be exactly that, orphaned), but hotlinking
+    Google's CDN straight from the browser hits the same ORB problem
+    download_avatar exists to dodge. This is the same fix, without the
+    permanent copy: fetch once server-side per request, forward the bytes,
+    keep nothing.
+
+    `u` only ever reaches here as a URL this app generated itself (see
+    _cached_avatar_or_hotlink) — the host allowlist below is what keeps a
+    tampered query string from turning this into an open fetch of arbitrary
+    hosts on the server's behalf."""
+    host = urllib.parse.urlparse(u).hostname
+    if host not in _AVATAR_PROXY_ALLOWED_HOSTS:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST)
+
+    fetched = fetch_image_bytes(u)
+    if fetched is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+
+    body, content_type = fetched
+    return Response(content=body, media_type=content_type, headers=_AVATAR_PROXY_CACHE_HEADERS)
 
 
 @app.get("/thumbnails/{filename}", dependencies=[Depends(require_login)])

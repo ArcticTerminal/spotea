@@ -4,12 +4,7 @@
 import { setupSaveButtons } from "../content-actions.js";
 import { setupBulkImport, setupBulkImportOverlay } from "../home/bulk-import.js";
 import { handleInitialRoute, setupDetailPanel } from "../home/detail.js";
-import {
-  refreshRecommendations,
-  setupExploreSearch,
-  setupRecommendations,
-  setupSmartPlaylistsShelf,
-} from "../home/explore.js";
+import { refreshRecommendations, setupExploreSearch, setupRecommendations } from "../home/explore.js";
 import {
   setupHomeChannels,
   setupHorizontalScrollers,
@@ -18,6 +13,7 @@ import {
   setupMobileMenu,
   setupRefreshButton,
 } from "../home/library.js";
+import { setupOnboarding } from "../home/onboarding.js";
 import { resumeOverlayIfNeeded, setupPlayerOverlay } from "../home/overlay.js";
 import { openProfileSwitcher, setupProfiles } from "../home/profiles.js";
 import {
@@ -46,7 +42,6 @@ handleInitialRoute();
 setupSaveButtons();
 setupExploreSearch();
 setupRecommendations();
-setupSmartPlaylistsShelf();
 setupDownloadsOverlay();
 setupBulkImportOverlay();
 setupBulkImport();
@@ -63,3 +58,7 @@ setupHorizontalScrollers();
 setupRefreshButton(refreshRecommendations);
 setupMobileMenu(openProfileSwitcher, refreshRecommendations);
 setupProfiles();
+// Last: its steps call into setupInterests's saveInterests, explore.js's
+// channel search endpoint, and the bulk-import overlay's trigger id, all of
+// which need to already be wired by the time it can open.
+setupOnboarding();
