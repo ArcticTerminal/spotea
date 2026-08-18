@@ -2,7 +2,7 @@
 
 import { api, confirmDialog, escapeHtml, setupOverlay, showToast } from "../core.js";
 import { refreshDownloadsBody, refreshFragments } from "../fragments.js";
-import { invalidateRecommendations } from "./explore.js";
+import { reloadRecommendations } from "./explore.js";
 
 export function setupDownloadsOverlay() {
   setupOverlay("downloads-overlay", "downloads-close", ["open-downloads"]);
@@ -134,8 +134,12 @@ export function saveInterests(next, errorMessage) {
     renderInterests();
     // Explore's shelves were searched from the old list, and so was the
     // batch the server has cached — both are now answers to a question
-    // nobody asked.
-    if (ok) invalidateRecommendations();
+    // nobody asked. Rebuilt right here, in the background, rather than
+    // marked stale for whoever opens Explore next to wait on: the rebuild is
+    // several live YouTube searches, and this is the moment it can happen
+    // without anyone sitting in front of it. Not awaited — the chips above
+    // are what this save owes the user.
+    if (ok) reloadRecommendations();
   });
   // Returned so a caller that needs the save to have actually landed before
   // doing anything else (the onboarding wizard's step 2, which searches for

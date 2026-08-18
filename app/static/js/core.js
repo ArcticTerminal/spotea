@@ -251,8 +251,16 @@ document.addEventListener("keydown", (event) => {
  * backdrop click, or Escape close it. Returns { open, close } so a caller
  * can drive it from elsewhere too (the mobile menu opens the profile
  * switcher, for instance) or layer extra behaviour on closing.
+ *
+ * `dismissible: false` wires none of the three ways out — no close-button
+ * listener, no backdrop click, and no entry in the shared Escape handler
+ * above — leaving the overlay's own in-flow action as the only exit. The
+ * onboarding wizard is the one overlay that wants this: dismissing it drops
+ * the profile into an app with an empty library and empty Explore shelves,
+ * which is the state it exists to prevent. `close` is still returned, since
+ * that in-flow action is what calls it.
  */
-export function setupOverlay(overlayId, closeBtnId, triggerIds = []) {
+export function setupOverlay(overlayId, closeBtnId, triggerIds = [], { dismissible = true } = {}) {
   const overlay = document.getElementById(overlayId);
   if (!overlay) return null;
 
@@ -266,11 +274,13 @@ export function setupOverlay(overlayId, closeBtnId, triggerIds = []) {
   for (const triggerId of triggerIds) {
     document.getElementById(triggerId)?.addEventListener("click", open);
   }
-  document.getElementById(closeBtnId)?.addEventListener("click", close);
-  overlay.addEventListener("click", (event) => {
-    if (event.target === overlay) close();
-  });
-  openableOverlays.push(overlay);
+  if (dismissible) {
+    document.getElementById(closeBtnId)?.addEventListener("click", close);
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay) close();
+    });
+    openableOverlays.push(overlay);
+  }
 
   return { open, close };
 }

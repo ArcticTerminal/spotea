@@ -517,11 +517,21 @@ followed channels plus four pinned virtual-playlist tiles), **Explore**
 plus the interest-based "For you" shelves below it),
 and **Settings** — `<section>` panels toggled via the `hidden` attribute
 driven by `html[data-active-tab]` (see style.css), not separate routes. An
-inline `<head>` script resolves the active tab (URL hash, falling back to
-`localStorage`) and sets it on `<html>` *before first paint*, so a reload
-never flashes the wrong tab; `home/tabs.js`'s `setupTabs()` just syncs
-button/URL state to match afterward. Tab switches use `history.replaceState`
-(not `pushState`) so cycling tabs doesn't spam back-button history.
+inline `<head>` script resolves the active tab (the URL hash, or Home) and
+sets it on `<html>` *before first paint*, so a reload never flashes the wrong
+tab; `home/tabs.js`'s `setupTabs()` just syncs button/URL state to match
+afterward. Tab switches use `history.replaceState` (not `pushState`) so
+cycling tabs doesn't spam back-button history — and that hash is the *only*
+place the current tab is kept. There used to be a `localStorage` copy behind
+it, which meant every open with no hash (a PWA launch, a bookmark, the reload
+`home/profiles.js` does after switching or creating a profile) reopened
+whatever tab was last used — including Settings, right after creating a
+profile from Settings → Manage profiles, with the onboarding wizard on top of
+it. A reload or a deep link still keeps its tab, because the hash is already
+correct; a fresh open starts on Home. The three profile changes that reload
+(`switch`, `create`, deleting the current one) `replaceState` to `/#home`
+first: every panel is profile-scoped, and a `#channel/42` hash in particular
+names a feed the incoming profile doesn't have.
 
 A fifth panel, **detail** (`data-active-tab="detail"`, `home/detail.js`),
 holds one channel or pinned playlist's track list — reached from a Library
@@ -665,7 +675,19 @@ rate-limits an unauthenticated residential IP (see §8). So:
   missing, expired or superseded batch reaches YouTube. Editing the interest
   list invalidates it implicitly — the signature no longer matches — so
   nothing has to remember to delete the row, and editing back to a previous
-  list still hits its cached batch.
+  list still hits its cached batch. Saving an edit also *pays* for the
+  rebuild straight away, in the background (`home/settings.js` →
+  `reloadRecommendations`), rather than leaving it for whoever opens Explore
+  next: it's the onboarding wizard's genre step that most often changes the
+  list, and without this the very next thing that profile did — opening
+  Explore — sat in front of a spinner for a full rebuild.
+- **The tab is never something you wait on.** The batch is fetched in the
+  background at boot and re-checked quietly on every later switch to Explore;
+  only the boot fetch and the app-wide Refresh ever render a loading line.
+  A re-check that comes back with the batch already on screen — the normal
+  case, since the server only rebuilds once the interval has elapsed —
+  renders nothing at all, because replacing every card with an identical copy
+  of itself flashes every thumbnail for no reason.
 - **It expires on the interval Settings already has**
   (`AppSettings.feed_refresh_interval_minutes`), not a cadence of its own.
   There is deliberately **no refresh button** on the shelves: recommendations
