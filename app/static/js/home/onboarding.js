@@ -1,11 +1,17 @@
 // Shown once, right after registering, to a profile with neither an
 // interest nor a followed channel — everything Explore's "For you" shelves
 // and the library need to have anything worth showing (see needs_onboarding
-// in routers/pages.py). Two steps: pick a few genres (saved through the
-// same PUT /settings path Settings' own interests editor uses), then follow
-// a few channels — suggested from those genres, searched for directly, or
-// bulk-imported — all through endpoints and components that already exist
-// elsewhere in the app rather than anything built new for this.
+// in routers/pages.py). Three steps: pick what this profile is for (music
+// or podcasts — which decides the chip set and header question on the next
+// step), pick a few genres/topics (saved through the same PUT /settings
+// path Settings' own interests editor uses), then follow a few channels —
+// suggested from those picks, searched for directly, or bulk-imported —
+// all through endpoints and components that already exist elsewhere in the
+// app rather than anything built new for this. Both kinds share one
+// suggestion source: genre_artists caches music genres and podcast
+// categories in the same table (hand-curated seeds — see
+// scripts/seed_music_artists.py and scripts/seed_podcast_channels.py), so
+// the channels step doesn't care which kind was picked.
 //
 // No "seen it" flag: closing the overlay without adding either an interest
 // or a channel just means needs_onboarding is still true next login, and it
@@ -16,7 +22,16 @@ import { renderChannelResults } from "./explore.js";
 import { followChannel } from "./remote.js";
 import { saveInterests } from "./settings.js";
 
-const STEP_IDS = ["onboarding-step-genres", "onboarding-step-channels"];
+const STEP_IDS = ["onboarding-step-kind", "onboarding-step-genres", "onboarding-step-channels"];
+
+// The header's question, per step — the chip step's phrasing depends on
+// which kind was picked, so the title can't live statically in the template.
+const TITLES = {
+  kind: "What do you want to listen to?",
+  music: "What kind of music are you into?",
+  podcast: "What are you curious about?",
+  channels: "Follow a few channels",
+};
 
 function showStep(id) {
   for (const stepId of STEP_IDS) {
@@ -25,21 +40,40 @@ function showStep(id) {
   }
 }
 
+function setTitle(text) {
+  const title = document.getElementById("onboarding-title");
+  if (title) title.textContent = text;
+}
+
+// `onPick(kind)` fires with "music" or "podcast".
+function setupKindStep(onPick) {
+  const step = document.getElementById("onboarding-step-kind");
+  if (!step) return;
+  for (const card of step.querySelectorAll(".kind-card")) {
+    card.addEventListener("click", () => onPick(card.dataset.kind));
+  }
+}
+
 // `onDone(genres)` fires once interests are settled — an empty array for
-// Skip, whatever was picked/typed for Next (already saved by then).
-function setupGenreStep(onDone) {
+// Skip, whatever was picked/typed for Next (already saved by then). The
+// returned handle's `applyKind` swaps which chip set is visible before the
+// step is shown.
+function setupGenreStep(onDone, onBack) {
   const step = document.getElementById("onboarding-step-genres");
   const form = document.getElementById("onboarding-genre-form");
   const input = document.getElementById("onboarding-genre-input");
   const nextBtn = document.getElementById("onboarding-genres-next");
   const skipBtn = document.getElementById("onboarding-genres-skip");
-  if (!step || !form || !input || !nextBtn || !skipBtn) return;
+  const backBtn = document.getElementById("onboarding-genres-back");
+  if (!step || !form || !input || !nextBtn || !skipBtn || !backBtn) return null;
 
   // lowercase -> the exact spelling that gets saved/searched with, so typing
   // a duplicate of an already-selected chip (any casing) collapses into the
   // same entry instead of the free-text form producing a second one.
   const selected = new Map();
 
+  // Both kinds' chips — only one grid is ever visible, so a click can only
+  // come from the active kind's set.
   const chips = [...step.querySelectorAll(".genre-chip")];
 
   // Free-typed text matching a predefined chip (any casing) highlights that
@@ -74,6 +108,7 @@ function setupGenreStep(onDone) {
   });
 
   skipBtn.addEventListener("click", () => onDone([]));
+  backBtn.addEventListener("click", onBack);
 
   nextBtn.addEventListener("click", async () => {
     const genres = [...selected.values()];
@@ -84,6 +119,24 @@ function setupGenreStep(onDone) {
     nextBtn.textContent = "Next";
     onDone(genres);
   });
+
+  return {
+    // Also clears any previous picks — a selection carried across a kind
+    // switch would mean invisible chips from the other taxonomy silently
+    // riding along into "Next".
+    applyKind(kind) {
+      for (const grid of step.querySelectorAll("[data-kind-grid]")) {
+        grid.hidden = grid.dataset.kindGrid !== kind;
+      }
+      for (const copy of step.querySelectorAll("[data-kind-copy]")) {
+        copy.hidden = copy.dataset.kindCopy !== kind;
+      }
+      selected.clear();
+      for (const chip of chips) chip.classList.remove("is-selected");
+      nextBtn.disabled = true;
+      input.value = "";
+    },
+  };
 }
 
 // Returns a `loadSuggestions(genres)` function the genre step calls once it
@@ -126,11 +179,11 @@ function setupChannelStep() {
       return;
     }
     suggested.innerHTML = `<li class="search-loading"><span class="spinner"></span>Finding channels…</li>`;
-    // Real artists, not a generic "<genre> music" search — see
-    // services/genre_artists.py. A genre with nothing seeded for it (a
-    // free-typed one, or one MusicBrainz just didn't have artists for)
-    // comes back an empty list rather than an error; the search box below
-    // still covers it.
+    // Real artists/shows, not a generic "<genre> music" search — see
+    // services/genre_artists.py and scripts/seed_podcast_channels.py. An
+    // entry with nothing seeded for it (a free-typed one, or one the caches
+    // just don't cover) comes back an empty list rather than an error; the
+    // search box below still covers it.
     const { ok, data } = await api(
       `/onboarding/suggested-channels?genres=${encodeURIComponent(genres.join(","))}`
     );
@@ -145,9 +198,21 @@ export function setupOnboarding() {
 
   const handle = setupOverlay("onboarding-overlay", "onboarding-close", []);
   const loadSuggestions = setupChannelStep();
-  setupGenreStep((genres) => {
-    showStep("onboarding-step-channels");
-    loadSuggestions?.(genres);
+  const genreStep = setupGenreStep(
+    (genres) => {
+      setTitle(TITLES.channels);
+      showStep("onboarding-step-channels");
+      loadSuggestions?.(genres);
+    },
+    () => {
+      setTitle(TITLES.kind);
+      showStep("onboarding-step-kind");
+    }
+  );
+  setupKindStep((kind) => {
+    genreStep?.applyKind(kind);
+    setTitle(TITLES[kind] ?? TITLES.music);
+    showStep("onboarding-step-genres");
   });
   document.getElementById("onboarding-finish")?.addEventListener("click", () => handle?.close());
 

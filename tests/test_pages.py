@@ -123,6 +123,19 @@ def test_needs_onboarding_false_once_a_feed_is_followed(client, db_session):
     assert 'data-needs-onboarding="false"' in body
 
 
+def test_onboarding_renders_a_chip_grid_per_kind(client):
+    """The wizard's chip step carries one grid per kind (MUSIC_GENRES +
+    PODCAST_CATEGORIES, app/genres.py) — a dropped Jinja loop would silently
+    leave one kind of profile with an empty picker. The &amp;-escaped entries
+    double-check the loops render real list content, not just the wrappers."""
+    body = client.get("/").text
+
+    assert 'data-kind-grid="music"' in body
+    assert 'data-kind-grid="podcast"' in body
+    assert 'data-genre="Drum &amp; Bass"' in body
+    assert 'data-genre="True Crime"' in body
+
+
 def test_needs_onboarding_false_once_interests_are_set(client, db_session):
     profile = db_session.get(User, USER_ID)
     profile.interests = "Jazz"
