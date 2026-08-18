@@ -10,6 +10,7 @@ piece of that down.
 
 import os
 from datetime import timedelta
+from pathlib import Path
 
 import pytest
 from sqlalchemy import event
@@ -91,6 +92,33 @@ def test_sweep_orphans_keeps_audio_a_row_still_references(db_session):
     sweep_orphans(db_session)
 
     assert referenced.exists()
+
+
+def test_sweep_orphans_keeps_audio_a_row_spells_differently(db_session):
+    """The same file, named two ways.
+
+    Content.file_path is written from settings.storage_dir as it was
+    configured when the download happened, so a database written under
+    STORAGE_DIR="./data/storage" holds relative paths while a later run with
+    STORAGE_DIR="/app/data/storage" globs absolute ones. Comparing those as
+    strings finds nothing referenced — and this sweep, which runs on every
+    scheduler tick, then deletes the whole audio library. Reproduced against
+    the real code, and it is what emptied a live storage directory once.
+    """
+    feed = _feed(db_session, "https://example.com/orphan-audio-relative")
+    referenced = settings.storage_dir / "spelled0001.m4a"
+    referenced.write_bytes(b"x")
+    db_session.add(
+        Content(
+            feed_id=feed.id, user_id=USER_ID, video_id="spelled0001", title="Kept",
+            status="ready", file_path=os.path.relpath(referenced, Path.cwd()),
+        )
+    )
+    db_session.commit()
+
+    sweep_orphans(db_session)
+
+    assert referenced.exists(), "deleted a file a row references under another spelling"
 
 
 def test_sweep_orphans_removes_thumbnails_no_row_points_at(db_session):

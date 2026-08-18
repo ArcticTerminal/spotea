@@ -322,11 +322,27 @@ def sweep_orphans(db: Session) -> None:
     Deliberately does NOT touch .part files — see the module-level docstring
     on why those are swept once at startup instead, not from here.
     """
+    # Both sides resolved, not compared as the strings they happen to hold.
+    # Content.file_path is written from settings.storage_dir as configured at
+    # download time (see downloader.py), so the very same file is spelled
+    # "data/storage/x.m4a" under one STORAGE_DIR and "/app/data/storage/x.m4a"
+    # under another — and a plain string comparison then finds *nothing*
+    # referenced and deletes the entire audio library on the next scheduler
+    # tick. Not hypothetical: reproduced against this code, and it is what
+    # emptied a real storage directory when the app was pointed at an existing
+    # database with STORAGE_DIR spelled the other way (a throwaway test
+    # instance, a different .env, anything).
+    #
+    # This still assumes a relative row is relative to the process's cwd,
+    # which is the same assumption playback already makes — a run that gets
+    # that wrong can't find its files at all, so a sweep is not where that
+    # would first go wrong.
     referenced_audio = {
-        path for (path,) in db.query(Content.file_path).filter(Content.file_path.isnot(None))
+        Path(path).resolve()
+        for (path,) in db.query(Content.file_path).filter(Content.file_path.isnot(None))
     }
     for leftover in settings.storage_dir.glob(f"*.{settings.audio_format}"):
-        if str(leftover) not in referenced_audio:
+        if leftover.resolve() not in referenced_audio:
             leftover.unlink(missing_ok=True)
 
     referenced_video_ids = {video_id for (video_id,) in db.query(Content.video_id)}
