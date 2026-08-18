@@ -1326,18 +1326,31 @@ profile just sat there under the pointer looking untouched.
 profile with neither an interest nor a followed channel: pick music or
 podcasts, pick a few genres, then follow at least five channels. Its one
 piece of real machinery is the add queue. "Add" reports **"Added" on the
-press** and drops the work — resolve the channel, sync its RSS, backfill its
-upload history — into a queue that drains one job at a time behind the step
-while the user keeps picking; by the time five are chosen the first few are
-usually done. Holding the button on "Adding…" for the round trip instead
-meant five stacked waits, and pressing Finish early meant watching the app
-redraw itself afterwards. Adds are counted optimistically, so a failure takes
-its count back, puts its row's button back, and re-locks Finish. Finish waits
-only on what is genuinely still running, and only then does it show anything:
-a preparing step with a row per channel and its live backfill count. One job
+press** and drops the work into a queue that drains one job at a time behind
+the step while the user keeps picking; by the time five are chosen the first
+few are usually done. Holding the button on "Adding…" for the round trip
+instead meant five stacked waits, and pressing Finish early meant watching the
+app redraw itself afterwards. Adds are counted optimistically, so a failure
+takes its count back, puts its row's button back, and re-locks Finish. One job
 at a time rather than five in parallel for the same reason the server's bulk
 importer creates channels serially — each is a yt-dlp round trip against a
 service that rate-limits an unauthenticated residential IP.
+
+Nothing in this flow waits for a channel's **history scan**. `POST /feeds`
+resolves the channel and applies its RSS feed (~15 most recent uploads)
+before it answers, which is what puts content in the library; the one-time
+full-history backfill behind it is a server-side background task, minutes
+long on a large channel (6,504 videos for one in the author's own library),
+and nothing on the screen a new profile lands on needs it. So a job is done
+once the channel exists, Finish waits only on RSS syncs still in flight, and
+the scan reports itself where it belongs instead: Library's card for that
+channel shows "Fetching uploads…" in place of its video count
+(`preparing_feed_ids` in `page_context.library_context`, read off the
+in-memory `backfill_progress` registry). While such a card is on screen,
+`home/library.js` polls `GET /feeds/backfilling` and re-renders the grid once
+a scan it is still advertising has ended — a wait you can ignore, on the
+thing it is actually about, rather than a loading screen in front of someone
+who wants to start listening.
 
 **PWA** — `static/manifest.json` + `static/js/sw.js` make the app
 installable (Chrome/Android requires an active service worker with a fetch

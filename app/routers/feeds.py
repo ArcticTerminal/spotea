@@ -27,7 +27,7 @@ from app.schemas import (
     FeedOut,
     RefreshResult,
 )
-from app.services.backfill import backfill_progress, run_backfill_task
+from app.services.backfill import backfill_progress, backfilling_feed_ids, run_backfill_task
 from app.services.bulk_import import import_progress, run_bulk_import
 from app.services.feed_add import FeedAlreadyExistsError, add_feed_core
 from app.storage import purge_content
@@ -100,6 +100,25 @@ def get_bulk_import_status(job_id: str) -> BulkImportStatusOut:
         done=progress["done"],
         results=[BulkImportResultOut(**r) for r in results],
     )
+
+@router.get("/backfilling", response_model=list[int])
+def list_backfilling_feeds(
+    profile: User = Depends(get_current_profile), db: Session = Depends(get_db)
+) -> list[int]:
+    """This profile's feeds whose one-time history scan is running right now.
+
+    What Library's "Fetching uploads…" cards poll on, so they can turn
+    back into a video count once the scan behind them finishes (see
+    home/library.js). One call for the whole grid rather than one
+    backfill-status call per card, and it costs a dict lookup each — the
+    registry is in memory.
+
+    Declared above /{feed_id}/backfill-status only for readability; the two
+    paths can't collide.
+    """
+    feed_ids = [feed_id for (feed_id,) in db.query(Feed.id).filter(Feed.user_id == profile.id)]
+    return sorted(backfilling_feed_ids(feed_ids))
+
 
 @router.get("/{feed_id}/backfill-status", response_model=BackfillStatusOut)
 def get_backfill_status(

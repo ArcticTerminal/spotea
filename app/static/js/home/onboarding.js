@@ -30,27 +30,30 @@
 // channels meant five waits stacked on top of each other, and pressing
 // Finish early meant watching the app redraw itself afterwards.
 //
-// Only what is genuinely left over is ever waited on, and only in one place:
-// press Finish with work still running and the wizard shows what it's doing
-// (see the preparing step) until the queue drains. Everything it changes is
-// therefore settled before it closes — each add ends in a refreshFragments()
-// sweep, and Finish re-checks Explore's shelves too — and all of it happens
-// behind a full-screen modal, so the app the user is handed is already up to
-// date instead of visibly redrawing itself a second later.
+// A job is done once the channel exists — POST /feeds resolves it and applies
+// its RSS feed before answering, so its recent uploads are already in the
+// library at that point. The one-time full-history scan behind it is not
+// waited on by anyone: it runs server-side, it is minutes long for a big
+// channel, and nothing on the screen a new profile lands on needs it. Library
+// says which channels are still filling in, on their own cards (see
+// page_context.library_context) — the wait lives where it can be ignored
+// rather than in front of someone who just wants to start listening.
+//
+// Finish therefore waits only on RSS syncs still in flight, which is a second
+// or two and usually nothing at all. Everything it changes is still settled
+// before it closes — each add ends in a refreshFragments() sweep, and Finish
+// re-checks Explore's shelves too — and all of it happens behind a
+// full-screen modal, so the app the user is handed is already up to date
+// instead of visibly redrawing itself a second later.
 
-import { api, debounce, escapeHtml, setupOverlay, showToast } from "../core.js";
+import { api, debounce, setupOverlay, showToast } from "../core.js";
 import { refreshFragments } from "../fragments.js";
 import { BULK_IMPORT_FINISHED } from "./bulk-import.js";
 import { reloadRecommendations, renderChannelResults } from "./explore.js";
 import { followChannel } from "./remote.js";
 import { saveInterests } from "./settings.js";
 
-const STEP_IDS = [
-  "onboarding-step-kind",
-  "onboarding-step-genres",
-  "onboarding-step-channels",
-  "onboarding-step-preparing",
-];
+const STEP_IDS = ["onboarding-step-kind", "onboarding-step-genres", "onboarding-step-channels"];
 
 // How many channels the last step asks for before Finish unlocks. One is
 // enough to satisfy needs_onboarding but not enough to fill anything: Home's
@@ -66,7 +69,6 @@ const TITLES = {
   music: "What kind of music are you into?",
   podcast: "What are you curious about?",
   channels: "Follow a few channels",
-  preparing: "Getting your profile ready",
 };
 
 function showStep(id) {
@@ -183,33 +185,23 @@ function setupGenreStep(onDone, onBack) {
 // One job per channel the user pressed Add on, in the order they pressed
 // them. `status` walks queued -> working -> done | failed.
 //
-// They run one at a time rather than all at once: each is an RSS sync plus a
-// yt-dlp history backfill, and five of those in flight together is a request
-// burst against a service that rate-limits an unauthenticated residential IP
-// (see services/recommendations.py's request-budget note for the same
-// reasoning elsewhere). The server's own bulk importer creates channels one
-// at a time for exactly this reason. Sequential also makes the preparing
-// screen readable: a list that fills in top to bottom, not five spinners.
-function channelJob(channelUrl, title, button) {
-  return { channelUrl, title, button, status: "queued", phase: "", detail: "" };
+// They run one at a time rather than all at once: five channel resolutions in
+// flight together is a request burst against a service that rate-limits an
+// unauthenticated residential IP (see services/recommendations.py's
+// request-budget note for the same reasoning elsewhere), and the server's own
+// bulk importer creates channels serially for exactly this reason.
+function channelJob(channelUrl, button) {
+  return { channelUrl, button, status: "queued" };
 }
-
-const JOB_ICONS = {
-  done: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-check" /></svg>',
-  failed: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-close" /></svg>',
-  working: '<span class="spinner"></span>',
-  queued: "",
-};
 
 /**
  * The channels step: the Add queue, the counter, and the gate on Finish.
  *
- * Returns { loadSuggestions, refreshGate, hasPendingWork, renderProgress,
- * settled, followedCount }. The genre step calls `loadSuggestions(genres)`
- * once it hands off (suggestions can't be fetched until interests are
- * actually saved, so this step fetches nothing on its own); the rest is what
- * Finish needs to decide whether to show the preparing screen and what to do
- * once it drains.
+ * Returns { loadSuggestions, refreshGate, settled, failedCount,
+ * followedCount }. The genre step calls `loadSuggestions(genres)` once it
+ * hands off (suggestions can't be fetched until interests are actually saved,
+ * so this step fetches nothing on its own); the rest is what Finish needs to
+ * know once the queue has drained.
  */
 function setupChannelStep() {
   const container = document.getElementById("onboarding-step-channels");
@@ -218,7 +210,6 @@ function setupChannelStep() {
   const suggested = document.getElementById("onboarding-suggested-channels");
   const finishBtn = document.getElementById("onboarding-finish");
   const progress = document.getElementById("onboarding-channels-progress");
-  const preparingList = document.getElementById("onboarding-preparing-list");
   if (!container || !searchInput || !searchResults || !suggested) return null;
 
   // Counted optimistically, the moment Add is pressed — the gate is about
@@ -241,44 +232,22 @@ function setupChannelStep() {
     if (finishBtn) finishBtn.disabled = remaining > 0;
   }
 
-  // Only ever called while the preparing step is the visible one, so this
-  // doesn't rebuild a list nobody is looking at on every poll tick.
-  function renderProgress() {
-    if (!preparingList) return;
-    preparingList.innerHTML = jobs
-      .map((job) => {
-        const note = job.status === "working" ? job.detail || job.phase : "";
-        return `
-          <li class="prep-row is-${job.status}">
-            <span class="prep-icon">${JOB_ICONS[job.status]}</span>
-            <span class="prep-name">${escapeHtml(job.title)}</span>
-            <span class="prep-detail">${escapeHtml(note)}</span>
-          </li>
-        `;
-      })
-      .join("");
-  }
-
   async function runQueue() {
     draining = true;
     try {
       let job;
       while ((job = jobs.find((candidate) => candidate.status === "queued"))) {
         job.status = "working";
-        renderProgress();
 
         // No button handed over: this step owns the row's label (it said
         // "Added" back when the click happened), and followChannel's own
-        // labelling would fight it. announce/showOverlay off for the same
-        // reasons they always were here — see the click handler below.
+        // labelling would fight it. The three options are all about not
+        // making anyone wait or leave — see the click handler below and
+        // followChannel's own docs.
         const { added } = await followChannel(job.channelUrl, null, {
           announce: false,
           showOverlay: false,
-          onProgress: ({ phase, detail }) => {
-            job.phase = phase;
-            job.detail = detail;
-            renderProgress();
-          },
+          waitForHistory: false,
         });
 
         job.status = added ? "done" : "failed";
@@ -293,18 +262,16 @@ function setupChannelStep() {
           }
         }
         refreshGate();
-        renderProgress();
       }
     } finally {
       draining = false;
     }
   }
 
-  function enqueue(channelUrl, title, button) {
-    jobs.push(channelJob(channelUrl, title, button));
+  function enqueue(channelUrl, button) {
+    jobs.push(channelJob(channelUrl, button));
     followed += 1;
     refreshGate();
-    renderProgress();
     // A queue already draining picks the new job up on its next pass; only a
     // stopped one needs starting, and `drained` has to keep pointing at
     // whichever run is current so Finish can wait on it.
@@ -328,10 +295,7 @@ function setupChannelStep() {
     // is queued, and the user has no reason to stand in front of it.
     btn.disabled = true;
     btn.textContent = "Added";
-    const title =
-      btn.closest(".search-result")?.querySelector(".search-result-title")?.textContent?.trim() ||
-      "Channel";
-    enqueue(btn.dataset.channelUrl, title, btn);
+    enqueue(btn.dataset.channelUrl, btn);
   });
 
   // An import run started from this step's "Import many at once" counts the
@@ -372,8 +336,6 @@ function setupChannelStep() {
       if (ok) renderChannelResults(data, "onboarding-suggested-channels");
     },
     refreshGate,
-    renderProgress,
-    hasPendingWork: () => jobs.some((job) => job.status === "queued" || job.status === "working"),
     failedCount: () => jobs.filter((job) => job.status === "failed").length,
     followedCount: () => followed,
     settled: () => drained,
@@ -407,17 +369,13 @@ export function setupOnboarding() {
   const finishBtn = document.getElementById("onboarding-finish");
   finishBtn?.addEventListener("click", async () => {
     finishBtn.disabled = true;
+    finishBtn.textContent = "Finishing…";
 
-    // The only wait in the whole flow, and only for what is genuinely still
-    // running. Press Finish after the queue has drained — the common case,
-    // since it drains while channels are still being picked — and this step
-    // is never shown at all.
-    if (channelStep?.hasPendingWork()) {
-      setTitle(TITLES.preparing);
-      showStep("onboarding-step-preparing");
-      channelStep.renderProgress();
-      await channelStep.settled();
-    }
+    // The only wait left in the flow, and it is a short one: a job is done
+    // once its channel exists, and the queue has been draining since the
+    // first Add. Nothing here waits on a history scan — see the module
+    // comment above.
+    await channelStep?.settled();
 
     // Both of these are the app the user is about to be handed: Home's
     // shelves and Library's grid now that there are channels, and Explore's
@@ -434,8 +392,7 @@ export function setupOnboarding() {
     // was told it needed.
     if (channelStep && channelStep.followedCount() < REQUIRED_CHANNELS) {
       const failed = channelStep.failedCount();
-      setTitle(TITLES.channels);
-      showStep("onboarding-step-channels");
+      finishBtn.textContent = "Finish";
       channelStep.refreshGate();
       showToast(
         failed === 1 ? "One channel couldn't be added" : `${failed} channels couldn't be added`

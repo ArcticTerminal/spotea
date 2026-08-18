@@ -219,11 +219,20 @@ async function waitForBackfill(feedId, title, { announce = true, showOverlay = t
  * `showOverlay: false` keeps the full-screen backfill overlay out of it, for
  * a caller that has its own modal up; `onProgress` hands that caller the
  * phase/count it would otherwise have shown there.
+ *
+ * `waitForHistory: false` returns as soon as the channel exists — that is,
+ * once POST /feeds has resolved it and applied its RSS feed, which is what
+ * puts its recent uploads in the library. The one-time full-history scan
+ * behind it keeps running server-side either way (it is a background task,
+ * not something the client holds open), and for a large channel it is
+ * minutes long. Nothing on the screen a new profile lands on needs it, so
+ * the onboarding wizard doesn't wait: Library's own card says the channel is
+ * still filling in (see page_context.library_context).
  */
 export async function followChannel(
   channelUrl,
   button,
-  { announce = true, showOverlay = true, onProgress } = {}
+  { announce = true, showOverlay = true, waitForHistory = true, onProgress } = {}
 ) {
   const originalLabel = button?.textContent;
   if (button) {
@@ -248,6 +257,15 @@ export async function followChannel(
     if (data?.feed?.id == null) {
       window.location.reload();
       return { added: false, status };
+    }
+    if (!waitForHistory) {
+      if (showOverlay) hideBackfillOverlay();
+      // The feed row and its RSS videos exist now, which is what Library and
+      // Home render from — and the grid needs re-rendering anyway to pick up
+      // the new card's "still fetching" state.
+      refreshFragments();
+      if (button) button.textContent = "Added";
+      return { added: true, status };
     }
     await waitForBackfill(data.feed.id, data.feed.channel_title || channelUrl, {
       announce,

@@ -363,13 +363,35 @@ def test_onboarding_add_reports_before_it_waits() -> None:
     assert "enqueue(" in source, "the add queue is gone"
 
 
+def test_onboarding_never_waits_for_a_history_scan() -> None:
+    """POST /feeds resolves the channel and applies its RSS feed before it
+    answers, so the channel's recent uploads are in the library at that
+    point. The one-time full-history scan behind it runs server-side and is
+    minutes long on a big channel (6,504 videos for one in the author's own
+    library) — the wizard used to hold a loading screen for it, for content
+    nothing on the first screen needs. Library's own card carries that wait
+    now."""
+    onboarding = (JS_DIR / "home" / "onboarding.js").read_text()
+    library = (JS_DIR / "home" / "library.js").read_text()
+    index = Path("app/templates/index.html").read_text()
+
+    assert "waitForHistory: false" in onboarding, (
+        "the wizard is waiting for channel history again"
+    )
+    assert "onboarding-step-preparing" not in index, (
+        "the wizard's wait-for-backfill screen is back"
+    )
+    assert "/feeds/backfilling" in library, (
+        "Library no longer checks which channels are still being fetched, so "
+        "its 'Fetching uploads…' cards can never turn back into counts"
+    )
+
+
 def test_onboarding_adds_run_one_at_a_time() -> None:
-    """Each add is an RSS sync plus a backfill against a service that
-    rate-limits an unauthenticated residential IP, so the queue drains one
-    job at a time — the same thing the server's own bulk importer does. Five
-    in flight at once is the burst this exists to avoid, and it also makes
-    the preparing screen a list that fills top to bottom rather than five
-    spinners."""
+    """Each add resolves a channel against a service that rate-limits an
+    unauthenticated residential IP, so the queue drains one job at a time —
+    the same thing the server's own bulk importer does. Five in flight at
+    once is the burst this exists to avoid."""
     source = (JS_DIR / "home" / "onboarding.js").read_text()
 
     assert source.count("await followChannel(") == 1, (

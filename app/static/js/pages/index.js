@@ -11,6 +11,7 @@ import {
   setupLibraryChannelGrid,
   setupLibrarySearch,
   setupMobileMenu,
+  setupPreparingChannels,
   setupRefreshButton,
 } from "../home/library.js";
 import { setupOnboarding } from "../home/onboarding.js";
@@ -51,6 +52,7 @@ setupInterests();
 setupHomeChannels();
 setupLibraryChannelGrid();
 setupLibrarySearch();
+setupPreparingChannels();
 setupHorizontalScrollers();
 // The one Refresh control covers Explore's recommendations too — passed in
 // rather than imported inside library.js, which explore.js already imports
