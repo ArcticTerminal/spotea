@@ -981,6 +981,93 @@ html[data-active-tab="detail"] .tab-panel[data-tab-panel="detail"] {
   color: var(--accent);
 }
 
+/* The wait after Finish, when there is still channel history being fetched.
+   Deliberately top-aligned rather than vertically centred: the list grows
+   with however many channels were added, and a centred flex column clips
+   its own overflow at the top once the content is taller than the box. */
+.onboarding-preparing {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  padding-top: 2.5rem;
+  text-align: center;
+}
+
+.onboarding-preparing .muted {
+  max-width: 40ch;
+}
+
+.onboarding-preparing-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  text-align: left;
+}
+
+/* One row per channel the user pressed Add on, in that order — queued, then
+   working with its live count, then done or failed. */
+.prep-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.6rem 0.8rem;
+  background: var(--bg-base);
+  border: 1px solid var(--border-default);
+  border-radius: 10px;
+  font-size: 0.9rem;
+}
+
+.prep-row.is-queued {
+  opacity: 0.5;
+}
+
+/* Fixed width whatever it holds — a check, a cross, a spinner or nothing at
+   all — so the names below each other stay on one vertical line. */
+.prep-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.prep-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.prep-row.is-done .prep-icon {
+  color: var(--accent);
+}
+
+.prep-row.is-failed .prep-icon {
+  color: var(--danger);
+}
+
+.prep-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The live count ("120/340 videos"). Never wraps and never shrinks the name
+   away — same reasoning as the backfill overlay's own detail line. */
+.prep-detail {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 /* Suggested and searched channels below reuse .search-results /
    .search-result-channel as-is (see Explore's own channel search) — only
    the spacing between the two lists needs anything of its own. */

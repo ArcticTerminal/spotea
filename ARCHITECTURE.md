@@ -1321,6 +1321,24 @@ shows a spinner in place of its actions while the request is in flight
 (`home/profiles.js`), which is what the wait used to have nothing of — the
 profile just sat there under the pointer looking untouched.
 
+**Onboarding wizard** (`home/onboarding.js`, `needs_onboarding` in
+`routers/pages.py`) — a required, non-dismissible full-screen step for a
+profile with neither an interest nor a followed channel: pick music or
+podcasts, pick a few genres, then follow at least five channels. Its one
+piece of real machinery is the add queue. "Add" reports **"Added" on the
+press** and drops the work — resolve the channel, sync its RSS, backfill its
+upload history — into a queue that drains one job at a time behind the step
+while the user keeps picking; by the time five are chosen the first few are
+usually done. Holding the button on "Adding…" for the round trip instead
+meant five stacked waits, and pressing Finish early meant watching the app
+redraw itself afterwards. Adds are counted optimistically, so a failure takes
+its count back, puts its row's button back, and re-locks Finish. Finish waits
+only on what is genuinely still running, and only then does it show anything:
+a preparing step with a row per channel and its live backfill count. One job
+at a time rather than five in parallel for the same reason the server's bulk
+importer creates channels serially — each is a yt-dlp round trip against a
+service that rate-limits an unauthenticated residential IP.
+
 **PWA** — `static/manifest.json` + `static/js/sw.js` make the app
 installable (Chrome/Android requires an active service worker with a fetch
 handler before offering "Install app"), registered from every page (not

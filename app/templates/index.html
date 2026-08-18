@@ -356,6 +356,23 @@
         </div>
       </div>
 
+      {# The wait, once Finish is pressed and there is still channel history
+         being fetched. Its own step rather than the app-wide
+         #backfill-overlay: that one is stacked under this modal, and this
+         reports per channel rather than one line for the whole app. No
+         actions — there is nothing to press until the work it is showing is
+         done. #}
+      <div id="onboarding-step-preparing" class="onboarding-step" hidden>
+        <div class="onboarding-step-body onboarding-preparing">
+          <span class="spinner spinner-lg" role="status" aria-label="Preparing"></span>
+          <p class="muted">
+            Fetching each channel's uploads so your library has something in it when you
+            get there. This only happens once.
+          </p>
+          <ul id="onboarding-preparing-list" class="onboarding-preparing-list"></ul>
+        </div>
+      </div>
+
       <div id="onboarding-step-channels" class="onboarding-step" hidden>
         <div class="onboarding-step-body">
           <p class="muted">

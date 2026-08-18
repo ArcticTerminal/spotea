@@ -161,14 +161,17 @@ const isActiveBackfillPhase = (phase) => phase === "scanning" || phase === "savi
 // Assumes showBackfillOverlay() is already up (callers show it when the add
 // starts, before the POST even resolves, so there's no gap where the screen
 // looks idle while the RSS sync — itself a couple of seconds — is in flight).
-async function waitForBackfill(feedId, title, { announce = true, showOverlay = true } = {}) {
-  // With showOverlay off there is nothing on screen to write progress into —
-  // the caller (the onboarding wizard) reports on the row's own button
-  // instead, since the overlay would be stacked underneath its full-screen
-  // modal anyway and would only become visible if the user got out from
-  // under it mid-add.
-  const setText = showOverlay ? setBackfillOverlayText : () => {};
-  setText(`${title} — Fetching channel history…`, "");
+async function waitForBackfill(feedId, title, { announce = true, showOverlay = true, onProgress } = {}) {
+  // Two ways to report the same thing. showOverlay drives the app-wide
+  // backfill overlay; onProgress hands the same phase/count to a caller with
+  // its own place to put it — the onboarding wizard, whose full-screen modal
+  // the overlay would be stacked underneath anyway, and which shows a row
+  // per channel rather than one line for the whole app.
+  const report = (phase, detail) => {
+    if (showOverlay) setBackfillOverlayText(`${title} — ${phase}`, detail);
+    onProgress?.({ phase, detail });
+  };
+  report("Fetching channel history…", "");
 
   const NEVER_STARTED_GRACE_MS = 4000;
   const MAX_WAIT_MS = 10 * 60 * 1000; // safety valve so a stuck check can't trap the user forever
@@ -181,7 +184,7 @@ async function waitForBackfill(feedId, title, { announce = true, showOverlay = t
       if (isActiveBackfillPhase(data.phase)) {
         sawActivity = true;
         const parts = backfillPhaseParts(data.phase, data.done, data.total);
-        setText(`${title} — ${parts.title}`, parts.detail);
+        report(parts.title, parts.detail);
       } else if (data.phase === "done") {
         break;
       } else if (!sawActivity && Date.now() - start > NEVER_STARTED_GRACE_MS) {
@@ -207,15 +210,21 @@ async function waitForBackfill(feedId, title, { announce = true, showOverlay = t
 }
 
 /**
- * Follows a channel and waits out its history backfill. Resolves to whether
- * this call is what added it — false for an already-followed channel (409) or
- * a failure — which is what lets the onboarding wizard count how many
- * channels its own Add buttons have actually produced.
+ * Follows a channel and waits out its history backfill. Resolves to
+ * { added, status }: `added` is whether the channel is now followed —
+ * true for a fresh follow, and also for a 409, which means some earlier
+ * action already added it — and `status` is the HTTP status for a caller
+ * that needs to tell those two apart or report a failure.
  *
  * `showOverlay: false` keeps the full-screen backfill overlay out of it, for
- * a caller that has its own modal up and reports progress inside it.
+ * a caller that has its own modal up; `onProgress` hands that caller the
+ * phase/count it would otherwise have shown there.
  */
-export async function followChannel(channelUrl, button, { announce = true, showOverlay = true } = {}) {
+export async function followChannel(
+  channelUrl,
+  button,
+  { announce = true, showOverlay = true, onProgress } = {}
+) {
   const originalLabel = button?.textContent;
   if (button) {
     button.disabled = true;
@@ -225,6 +234,10 @@ export async function followChannel(channelUrl, button, { announce = true, showO
   // alone can take a couple of seconds, and leaving the screen looking idle
   // for that stretch reads as nothing happening yet.
   if (showOverlay) showBackfillOverlay("Fetching RSS feed…", "");
+  // add_feed resolves the channel and syncs its RSS before it answers, which
+  // is seconds on its own — a caller watching onProgress would otherwise see
+  // nothing at all until the backfill starts.
+  onProgress?.({ phase: "Fetching RSS feed…", detail: "" });
 
   const { ok, status, data } = await api("/feeds", {
     method: "POST",
@@ -234,29 +247,30 @@ export async function followChannel(channelUrl, button, { announce = true, showO
   if (ok) {
     if (data?.feed?.id == null) {
       window.location.reload();
-      return false;
+      return { added: false, status };
     }
     await waitForBackfill(data.feed.id, data.feed.channel_title || channelUrl, {
       announce,
       showOverlay,
+      onProgress,
     });
     // The button is the only report a caller that suppressed the overlay
     // gets: without this its row sat on "Adding…" for as long as the modal
     // stayed open, with nothing to say the add had landed. Left disabled —
     // the channel is followed now, so there is nothing left to press.
     if (button) button.textContent = "Added";
-    return true;
+    return { added: true, status };
   }
 
   if (showOverlay) hideBackfillOverlay();
   if (status === 409) {
     if (button) button.textContent = "Already added";
-    return false;
+    return { added: true, status };
   }
   if (button) {
     button.disabled = false;
     button.textContent = originalLabel;
   }
   if (status !== 0) showToast(data?.detail || "Could not add channel");
-  return false;
+  return { added: false, status };
 }

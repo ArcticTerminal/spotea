@@ -342,3 +342,40 @@ def test_opening_explore_never_shows_a_loading_placeholder() -> None:
         "the unchanged-batch check is gone — every re-check re-renders every "
         "shelf, and every <img> in it, identically"
     )
+
+
+def test_onboarding_add_reports_before_it_waits() -> None:
+    """"Add" says "Added" on the press, not after the round trip.
+
+    Adding a channel is an RSS sync plus a yt-dlp history backfill. Held
+    behind that, picking five channels was five waits stacked on each other,
+    and pressing Finish early meant watching the app redraw itself. The click
+    handler is therefore not async: it labels the row, counts it, and queues
+    the work.
+    """
+    source = (JS_DIR / "home" / "onboarding.js").read_text()
+
+    assert 'container.addEventListener("click", (event) => {' in source, (
+        "the channels step's click handler is async again — the label is back "
+        "to waiting on the request"
+    )
+    assert 'btn.textContent = "Added";' in source, "the optimistic label is gone"
+    assert "enqueue(" in source, "the add queue is gone"
+
+
+def test_onboarding_adds_run_one_at_a_time() -> None:
+    """Each add is an RSS sync plus a backfill against a service that
+    rate-limits an unauthenticated residential IP, so the queue drains one
+    job at a time — the same thing the server's own bulk importer does. Five
+    in flight at once is the burst this exists to avoid, and it also makes
+    the preparing screen a list that fills top to bottom rather than five
+    spinners."""
+    source = (JS_DIR / "home" / "onboarding.js").read_text()
+
+    assert source.count("await followChannel(") == 1, (
+        "more than one followChannel await in the wizard — the queue is no "
+        "longer the single path adds go through"
+    )
+    assert 'jobs.find((candidate) => candidate.status === "queued")' in source, (
+        "the queue no longer walks jobs one at a time"
+    )
