@@ -138,8 +138,12 @@ class VideoSearchResultOut(BaseModel):
     thumbnail_url: str | None
     duration_seconds: int | None
     channel_title: str | None
-    # See VideoSearchResult in youtube/search.py — reliable for playlist and
-    # channel listings, absent or unreliable for search results.
+    # See VideoSearchResult in youtube/search.py. Reliable for playlist and
+    # channel listings, and now for song search too — YouTube Music
+    # attributes every track to its artist's "Topic" channel, which is what
+    # makes the artist's name a link into their page (home/explore.js).
+    # Still absent or unreliable on the yt-dlp fallback search, so it stays
+    # optional and every consumer has to cope with None.
     channel_id: str | None = None
 
 

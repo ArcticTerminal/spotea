@@ -2385,6 +2385,34 @@ button.track-link {
   text-decoration: none;
 }
 
+/* The artist's name inside a song card or search row, as a way into their
+   page. Used from both surfaces, hence the neutral name and the `inherit`s:
+   it sits in .card-channel on one and in .search-result-subs on the other,
+   which are different sizes and different greys, and it should look like
+   whichever line it's in rather than introduce a third.
+
+   Deliberately not styled as a link. It's one word in a line of metadata
+   ("Sezen Aksu · 5:17") directly under the title, and a permanently
+   underlined, differently coloured word there competes with the title for
+   the eye. The underline arrives on hover and on keyboard focus, which is
+   when it's needed. */
+.artist-link {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: inherit;
+  cursor: pointer;
+}
+
+.artist-link:hover,
+.artist-link:focus-visible {
+  color: var(--text-primary);
+  text-decoration: underline;
+}
+
 .card-date {
   margin: 0;
   font-size: 0.75rem;

@@ -401,3 +401,35 @@ def test_onboarding_adds_run_one_at_a_time() -> None:
     assert 'jobs.find((candidate) => candidate.status === "queued")' in source, (
         "the queue no longer walks jobs one at a time"
     )
+
+
+def test_an_artist_name_is_only_a_link_when_there_is_an_artist_to_open() -> None:
+    """A song result carries the artist's channel id most of the time but not
+    always — the fallback yt-dlp search (routers/explore.py's
+    search_video_feeds) doesn't reliably report one on a flat entry. Rendering
+    the name as a button anyway gives a control that opens nothing, which is
+    worse than plain text."""
+    source = (JS_DIR / "home" / "explore.js").read_text()
+
+    body = source[source.index("function artistNameHtml(") :]
+    body = body[: body.index("\n}\n")]
+
+    assert "if (!name || !item.channel_id) return name;" in body, (
+        "artistNameHtml no longer falls back to plain text for a result with "
+        "no channel id — the name renders as a button that opens nothing"
+    )
+
+
+def test_the_artist_link_is_handled_before_the_card_it_sits_inside() -> None:
+    """The name sits inside a .rec-card, and that whole card is a play
+    target. Whichever branch runs first wins, so putting the artist check
+    after the card's would make clicking the artist start the song."""
+    source = (JS_DIR / "home" / "explore.js").read_text()
+
+    listener = source[source.index('body.addEventListener("click"') :]
+    listener = listener[: listener.index("\n  });")]
+
+    assert listener.index('closest(".artist-link")') < listener.index('closest(".rec-card")'), (
+        "the .rec-card branch is checked before .artist-link — clicking an "
+        "artist's name plays the song instead of opening their page"
+    )
