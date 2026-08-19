@@ -19,7 +19,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --no-cache-dir -r requirements-dev.txt
-          pip install --no-cache-dir yt-dlp bgutil-ytdlp-pot-provider
+          pip install --no-cache-dir yt-dlp bgutil-ytdlp-pot-provider ytmusicapi
 
       - name: Run tests
         run: python -m pytest

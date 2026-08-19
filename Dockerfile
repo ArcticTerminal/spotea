@@ -30,13 +30,17 @@ COPY app ./app
 
 # Deliberately after COPY app, and deliberately not in requirements.txt.
 # YouTube breaks extraction constantly and yt-dlp ships fixes within days, so
-# these two must not be pinned — but "not pinned" only means anything if the
+# these must not be pinned — but "not pinned" only means anything if the
 # layer actually re-runs. Behind the requirements.txt copy it never did: that
 # file changes maybe twice a year, so every `docker compose up --build`
 # reinstalled from cache and the image kept serving whatever yt-dlp happened
 # to be current the last time a dependency changed. Here, any edit to app/
 # busts it, which on this project is every rebuild.
-RUN pip install --no-cache-dir --upgrade yt-dlp bgutil-ytdlp-pot-provider
+#
+# ytmusicapi belongs in this layer for the same reason rather than a
+# different one: it talks to YouTube Music's private InnerTube endpoint (see
+# app/youtube/music.py), which changes on YouTube's schedule, not on ours.
+RUN pip install --no-cache-dir --upgrade yt-dlp bgutil-ytdlp-pot-provider ytmusicapi
 
 # yt-dlp caches its remote JS-challenge-solver component (see downloader.py's
 # remote_components=["ejs:github"]) and PO tokens under XDG_CACHE_HOME.
