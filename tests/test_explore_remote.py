@@ -9,6 +9,8 @@ under test is the id validation guarding the routes, the fact that
 whole listing into an ordered queue without a single network call.
 """
 
+from pathlib import Path
+
 import pytest
 
 from app.models import Content, Feed
@@ -197,12 +199,20 @@ def test_batch_handles_the_same_video_listed_twice(client, db_session):
     assert db_session.query(Content).count() == 1
 
 
-def test_batch_makes_no_network_calls(client, monkeypatch):
-    # The whole reason this can be one synchronous request over fifty tracks.
-    def explode(video_id):
-        raise AssertionError("batch must not resolve channels over the network")
-
-    monkeypatch.setattr("app.routers.explore.resolve_video_channel", explode)
+def test_batch_makes_no_network_calls(client):
+    """The whole reason this can be one synchronous request over fifty
+    tracks: every field it needs came back with the listing, so nothing
+    here reaches YouTube at all."""
+    source = Path("app/routers/explore.py").read_text()
+    network_imports = [
+        line
+        for line in source.splitlines()
+        if line.startswith(("from app.youtube.music", "from app.youtube.extract"))
+    ]
+    assert network_imports == ["from app.youtube.music import search_artists, search_songs"], (
+        "the add routes reach YouTube again — every field they need already "
+        f"came back with the listing. Found: {network_imports}"
+    )
 
     res = client.post("/feeds/videos/batch", json={"items": [_batch_item("aaaaaaaaaaa")]})
     assert res.status_code == 201

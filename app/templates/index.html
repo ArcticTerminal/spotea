@@ -228,13 +228,6 @@
             </select>
           </div>
 
-          <div class="settings-row">
-            <div class="settings-row-info">
-              <span class="settings-row-label">Import channels</span>
-              <span class="settings-row-desc">Paste a list of handles or URLs to follow several channels at once.</span>
-            </div>
-            <button type="button" id="open-bulk-import" class="btn-quiet">Import</button>
-          </div>
         </section>
 
         <section class="settings-group">
@@ -272,40 +265,6 @@
       <div id="detail-panel"></div>
     </section>
   </main>
-
-  <div id="bulk-import-overlay" class="modal-overlay" hidden>
-    <div class="modal modal-bulk-import">
-      <div class="modal-header">
-        <h2>Import channels</h2>
-        <button type="button" id="bulk-import-close" class="modal-close" aria-label="Close">×</button>
-      </div>
-
-      <div id="bulk-import-form-section">
-        <p class="muted">
-          One channel per line — a handle (<code>@handle</code>), a full channel URL, or a row
-          copied straight from a Google Takeout <code>subscriptions.csv</code> export.
-        </p>
-        <textarea
-          id="bulk-import-input"
-          class="bulk-import-input"
-          rows="8"
-          placeholder="@handle&#10;https://www.youtube.com/@anotherhandle"
-        ></textarea>
-        <div class="modal-actions">
-          <button type="button" id="bulk-import-start" class="btn-primary">Import</button>
-        </div>
-      </div>
-
-      <div id="bulk-import-progress-section" class="bulk-import-progress" hidden>
-        <p id="bulk-import-progress-text" class="muted"></p>
-        <ul id="bulk-import-results" class="bulk-import-results"></ul>
-        <div class="modal-actions">
-          <button type="button" id="bulk-import-again" class="btn-quiet" hidden>Import more</button>
-          <button type="button" id="bulk-import-reload" class="btn-primary" hidden>Refresh page</button>
-        </div>
-      </div>
-    </div>
-  </div>
 
   <div id="interests-overlay" class="modal-overlay" hidden>
     <div class="modal modal-interests">

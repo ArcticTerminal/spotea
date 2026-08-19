@@ -6,8 +6,6 @@ status codes, and deciding how each service call gets run (deferred to a
 background task for a single add, inline for bulk import).
 """
 
-import secrets
-
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -17,11 +15,6 @@ from app.deps import get_current_profile, get_db, require_login
 from app.feed_sync import refresh_feeds as sync_refresh_feeds
 from app.models import Content, Feed, User
 from app.schemas import (
-    BackfillStatusOut,
-    BulkImportCreate,
-    BulkImportResultOut,
-    BulkImportStartOut,
-    BulkImportStatusOut,
     FeedAddResult,
     FeedCreate,
     FeedOut,
@@ -33,7 +26,6 @@ from app.services.backfill import (
     mark_syncing,
     run_initial_sync_task,
 )
-from app.services.bulk_import import import_progress, run_bulk_import
 from app.services.feed_add import FeedAlreadyExistsError, add_feed_core
 from app.storage import purge_content
 from app.youtube.extract import ChannelResolutionError
@@ -50,15 +42,15 @@ def add_feed(
     db: Session = Depends(get_db),
 ) -> FeedAddResult:
     try:
-        feed, new_count, channel_id = add_feed_core(
+        feed, new_count, _channel_id = add_feed_core(
             db,
             payload.channel_url,
             profile.id,
             artist_browse_id=payload.artist_browse_id,
             # Answer as soon as the feed row exists. Everything after it —
-            # the RSS content, the durations, the avatar, the history scan —
-            # is what run_initial_sync does in the background, and what
-            # Library's card reports while it happens.
+            # the content, the durations, the avatar — is what
+            # run_initial_sync does in the background, and what Library's
+            # card reports while it happens.
             sync=False,
         )
     except FeedAlreadyExistsError as exc:
@@ -74,55 +66,14 @@ def add_feed(
     except InvalidFeedError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    # Whether this ends in a history scan is run_initial_sync's decision now,
-    # not this route's — it reads the saved feed, which is the only place that
-    # knows whether the server recognised an artist (see feed_add._as_artist_follow).
     # Marked here rather than inside the task, so the card the client is
     # about to render cannot beat it to the question — see mark_syncing.
     mark_syncing(feed.id)
-    background_tasks.add_task(run_initial_sync_task, feed.id, channel_id)
+    background_tasks.add_task(run_initial_sync_task, feed.id)
 
-    # Always 0: nothing has been fetched yet. Kept on the response because a
-    # bulk import's per-line result still means something by it, and no
-    # caller of this route reads it.
+    # Always 0: nothing has been fetched yet. Kept on the response for the
+    # shape's sake; no caller of this route reads it.
     return FeedAddResult(feed=FeedOut.model_validate(feed), new_content_count=new_count)
-
-@router.post("/import", response_model=BulkImportStartOut, status_code=status.HTTP_202_ACCEPTED)
-def start_bulk_import(
-    payload: BulkImportCreate,
-    background_tasks: BackgroundTasks,
-    profile: User = Depends(get_current_profile),
-) -> BulkImportStartOut:
-    lines = [line.strip() for line in payload.urls.splitlines() if line.strip()]
-    if not lines:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No channels given")
-
-    job_id = secrets.token_urlsafe(8)
-    progress = {"total": len(lines), "resolved": 0, "done": 0, "results": []}
-    import_progress.set(job_id, progress)
-    background_tasks.add_task(run_bulk_import, job_id, progress, lines, profile.id)
-    return BulkImportStartOut(job_id=job_id, total=len(lines))
-
-
-@router.get("/import/{job_id}/status", response_model=BulkImportStatusOut)
-def get_bulk_import_status(job_id: str) -> BulkImportStatusOut:
-    progress = import_progress.get(job_id)
-    if progress is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Import job not found")
-    # `progress` is the exact dict object run_bulk_import's background-task
-    # thread is still mutating — ProgressRegistry's lock only guards the
-    # registry's own bookkeeping (set/get/sweep), not a value handed back by
-    # get(). list(...) snapshots "results" once, up front, instead of the
-    # list comprehension below iterating the live list directly across
-    # however many BulkImportResultOut(**r) calls that takes — each one a
-    # window for the worker thread to append behind this request's back.
-    results = list(progress["results"])
-    return BulkImportStatusOut(
-        total=progress["total"],
-        resolved=progress["resolved"],
-        done=progress["done"],
-        results=[BulkImportResultOut(**r) for r in results],
-    )
 
 @router.get("/backfilling", response_model=list[int])
 def list_backfilling_feeds(
@@ -145,18 +96,6 @@ def list_backfilling_feeds(
     """
     feed_ids = [feed_id for (feed_id,) in db.query(Feed.id).filter(Feed.user_id == profile.id)]
     return sorted(backfilling_feed_ids(feed_ids))
-
-
-@router.get("/{feed_id}/backfill-status", response_model=BackfillStatusOut)
-def get_backfill_status(
-    feed_id: int, profile: User = Depends(get_current_profile), db: Session = Depends(get_db)
-) -> BackfillStatusOut:
-    feed = db.query(Feed).filter(Feed.id == feed_id, Feed.user_id == profile.id).first()
-    if not feed:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Feed not found")
-
-    phase, done, total = backfill_progress.get(feed_id, (None, 0, 0))
-    return BackfillStatusOut(feed_id=feed_id, phase=phase, done=done, total=total)
 
 
 @router.delete("/{feed_id}", status_code=status.HTTP_204_NO_CONTENT)

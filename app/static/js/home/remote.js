@@ -34,6 +34,7 @@ export async function playRemoteVideo(dataset, button) {
       body: {
         video_id: dataset.videoId,
         title: dataset.title,
+        channel_id: dataset.channelId,
         thumbnail_url: dataset.thumbnailUrl || null,
         duration_seconds: dataset.durationSeconds ? Number(dataset.durationSeconds) : null,
         channel_title: dataset.channelTitle || null,

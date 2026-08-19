@@ -9,7 +9,6 @@ import app.services.backfill as backfill_module
 import app.services.feed_add as feed_add_module
 from app.feed_sync import FeedFetchResult, apply_feed_data
 from app.models import Content, Feed, User
-from app.youtube.extract import BackfillEntry
 from app.youtube.music import ArtistProfile
 from app.youtube.rss import FeedUnavailableError, InvalidFeedError, ParsedEntry, ParsedFeed
 from app.youtube.urls import channel_feed_url, longform_feed_url
@@ -273,176 +272,6 @@ def test_adding_a_feed_that_really_is_the_wrong_url_is_still_a_bad_request(clien
     assert res.status_code == 400
 
 
-def test_run_backfill_marks_done_on_unexpected_failure(db_session, monkeypatch):
-    channel_id = "UCfailure0001"
-    feed = Feed(user_id=USER_ID, rss_url=channel_feed_url(channel_id), channel_title="Broken", followed=True)
-    db_session.add(feed)
-    db_session.commit()
-    db_session.refresh(feed)
-
-    monkeypatch.setattr(
-        backfill_module,
-        "fetch_channel_all_videos",
-        lambda channel_id, on_progress=None: [
-            BackfillEntry(video_id="backfill01", title="T", thumbnail_url=None, duration_seconds=None)
-        ],
-    )
-
-    def raise_on_commit():
-        raise RuntimeError("disk full")
-
-    monkeypatch.setattr(db_session, "commit", raise_on_commit)
-
-    backfill_module.run_backfill(feed.id, channel_id, db_session)
-
-    assert backfill_module.backfill_progress.get(feed.id)[0] == "done"
-
-
-def test_run_backfill_does_not_mark_entries_as_new_upload(db_session, monkeypatch):
-    channel_id = "UCbackfill0001"
-    feed = Feed(user_id=USER_ID, rss_url=channel_feed_url(channel_id), channel_title="History", followed=True)
-    db_session.add(feed)
-    db_session.commit()
-    db_session.refresh(feed)
-
-    monkeypatch.setattr(
-        backfill_module,
-        "fetch_channel_all_videos",
-        lambda channel_id, on_progress=None: [
-            BackfillEntry(video_id="oldvid0001", title="Old video", thumbnail_url=None, duration_seconds=None)
-        ],
-    )
-
-    backfill_module.run_backfill(feed.id, channel_id, db_session)
-
-    row = db_session.query(Content).filter(Content.video_id == "oldvid0001").first()
-    assert row is not None
-    assert row.is_new_upload is False
-
-
-def test_run_backfill_skips_likely_shorts(db_session, monkeypatch):
-    channel_id = "UCbackfillshorts"
-    feed = Feed(user_id=USER_ID, rss_url=channel_feed_url(channel_id), channel_title="History", followed=True)
-    db_session.add(feed)
-    db_session.commit()
-    db_session.refresh(feed)
-
-    monkeypatch.setattr(
-        backfill_module,
-        "fetch_channel_all_videos",
-        lambda channel_id, on_progress=None: [
-            BackfillEntry(video_id="shortvid02", title="A Short", thumbnail_url=None, duration_seconds=30),
-            BackfillEntry(video_id="longvid002", title="A regular video", thumbnail_url=None, duration_seconds=600),
-        ],
-    )
-
-    backfill_module.run_backfill(feed.id, channel_id, db_session)
-
-    remaining = {row.video_id for row in db_session.query(Content).filter(Content.feed_id == feed.id)}
-    assert remaining == {"longvid002"}
-
-
-def test_existing_ids_check_is_scoped_to_this_channels_candidates_not_the_whole_library(db_session, monkeypatch):
-    """Regression for O(channels x library): the existing-ids check used to
-    query every video_id the user has, regardless of channel — bulk-
-    importing 50 channels re-read the user's entire library 50 times.
-    Scoped to this backfill's own candidate ids instead. An unscoped and a
-    scoped query return the identical *result* here, so the only thing that
-    actually distinguishes them is how much they read — verified by
-    capturing the real SQL bind parameters rather than the return value."""
-    from sqlalchemy import event
-
-    from app.database import engine
-
-    channel_id = "UCbackfillscope"
-    feed = Feed(user_id=USER_ID, rss_url=channel_feed_url(channel_id), channel_title="Scope Test", followed=True)
-    db_session.add(feed)
-    db_session.commit()
-    db_session.refresh(feed)
-
-    # A pile of unrelated library content a candidate-scoped query has no
-    # reason to touch.
-    other_feed = Feed(user_id=USER_ID, rss_url="https://example.com/scope-unrelated", channel_title="Unrelated")
-    db_session.add(other_feed)
-    db_session.commit()
-    db_session.refresh(other_feed)
-    db_session.add_all(
-        Content(feed_id=other_feed.id, user_id=USER_ID, video_id=f"unrelated{i:04d}", title="x") for i in range(50)
-    )
-    db_session.commit()
-
-    monkeypatch.setattr(
-        backfill_module,
-        "fetch_channel_all_videos",
-        lambda channel_id, on_progress=None: [
-            BackfillEntry(video_id="scopecand01", title="T", thumbnail_url=None, duration_seconds=None)
-        ],
-    )
-
-    captured = []
-
-    def capture(conn, cursor, statement, parameters, context, executemany):
-        if "video_id in" in statement.lower():
-            captured.append(parameters)
-
-    event.listen(engine, "before_cursor_execute", capture)
-    try:
-        backfill_module.run_backfill(feed.id, channel_id, db_session)
-    finally:
-        event.remove(engine, "before_cursor_execute", capture)
-
-    assert captured, "expected a Content.video_id IN (...) query"
-    assert len(captured[0]) < 10, (
-        f"the existing-ids query bound {len(captured[0])} parameters — it read the whole "
-        "50-row unrelated library instead of just this channel's own candidate id"
-    )
-
-
-def test_progress_is_not_updated_on_every_single_saved_row(db_session, monkeypatch):
-    """Regression: each backfill_progress.set() call takes a lock and sweeps
-    the whole registry — cheap per call, but a channel with thousands of new
-    videos turned that into thousands of redundant cycles for a number the
-    polling UI only samples a few times a second. Verified by counting the
-    actual set() calls across a backfill with more rows than one throttle
-    window, and confirming the very last row still gets an accurate report."""
-    channel_id = "UCbackfillthrottle"
-    feed = Feed(user_id=USER_ID, rss_url=channel_feed_url(channel_id), channel_title="Throttle", followed=True)
-    db_session.add(feed)
-    db_session.commit()
-    db_session.refresh(feed)
-
-    row_count = backfill_module.PROGRESS_UPDATE_INTERVAL * 3 + 1
-    monkeypatch.setattr(
-        backfill_module,
-        "fetch_channel_all_videos",
-        lambda channel_id, on_progress=None: [
-            BackfillEntry(video_id=f"throttle{i:04d}", title="T", thumbnail_url=None, duration_seconds=None)
-            for i in range(row_count)
-        ],
-    )
-
-    calls = []
-    original_set = backfill_module.backfill_progress.set
-
-    def spy_set(key, value):
-        calls.append(value)
-        original_set(key, value)
-
-    monkeypatch.setattr(backfill_module.backfill_progress, "set", spy_set)
-
-    backfill_module.run_backfill(feed.id, channel_id, db_session)
-
-    saving_calls = [v for v in calls if v[0] == "saving"]
-    assert len(saving_calls) < row_count / 2, (
-        f"{len(saving_calls)} 'saving' progress updates for {row_count} rows — "
-        "still reporting on (close to) every row instead of throttling"
-    )
-    assert saving_calls[-1] == ("saving", row_count, row_count), (
-        "the final row must still report exact progress even when it doesn't "
-        "land on a throttle-interval boundary"
-    )
-
-
 def test_unfollowing_a_channel_with_no_engaged_content_deletes_it_entirely(client, db_session):
     feed, _content = _seed_feed_with_content(db_session)
 
@@ -537,17 +366,16 @@ def test_a_short_is_removed_when_its_duration_arrives_later(db_session):
     assert remaining["latedur0002"].duration_seconds == 420
 
 
-# ------------------------------------------------------- GET /feeds/backfilling
+# -------------------------------------------------------- GET /feeds/backfilling
 
 
 def test_backfilling_lists_only_this_profiles_running_scans(client, db_session):
     """What Library's "Fetching uploads…" cards poll on.
 
-    A newly followed channel is usable the moment POST /feeds answers — its
-    RSS sync has already run — while its full history scan carries on in the
-    background for minutes. Nothing waits for that any more, so the grid has
-    to be able to ask what is still running, and it has to be scoped: another
-    profile's scan is none of this one's business.
+    A newly followed artist's card appears the moment POST /feeds answers,
+    before anything has been fetched, so the grid has to be able to ask what
+    is still running — and it has to be scoped: another profile's sync is
+    none of this one's business.
     """
     mine = Feed(user_id=USER_ID, rss_url="https://example.com/mine", channel_title="Mine")
     other_profile = User(name="Someone Else", account_id=1)
@@ -559,31 +387,31 @@ def test_backfilling_lists_only_this_profiles_running_scans(client, db_session):
     db_session.add(theirs)
     db_session.commit()
 
-    backfill_module.backfill_progress.set(mine.id, ("scanning", 3, 100))
-    backfill_module.backfill_progress.set(theirs.id, ("scanning", 3, 100))
+    backfill_module.backfill_progress.set(mine.id, ("syncing", 0, 0))
+    backfill_module.backfill_progress.set(theirs.id, ("syncing", 0, 0))
     try:
         assert client.get("/feeds/backfilling").json() == [mine.id]
 
         # A finished scan keeps its registry entry readable for a while (see
         # progress.py), so "has an entry" is not "is running" — a card left
         # saying "fetching" forever is exactly what confusing the two causes.
-        backfill_module.backfill_progress.set(mine.id, ("done", 100, 100))
+        backfill_module.backfill_progress.set(mine.id, ("done", 0, 0))
         assert client.get("/feeds/backfilling").json() == []
     finally:
         backfill_module.backfill_progress.discard(mine.id)
         backfill_module.backfill_progress.discard(theirs.id)
 
 
-def test_library_marks_a_channel_whose_history_is_still_being_fetched(client, db_session):
-    """The whole reason the onboarding wizard stopped waiting: the wait moved
-    onto the card of the channel it belongs to, where it can be ignored."""
+def test_library_marks_a_feed_that_is_still_being_fetched(client, db_session):
+    """The reason nothing waits for the first sync: the wait moved onto the
+    card it belongs to, where it can be ignored."""
     feed = Feed(
         user_id=USER_ID, rss_url="https://example.com/preparing", channel_title="Still Filling In"
     )
     db_session.add(feed)
     db_session.commit()
 
-    backfill_module.backfill_progress.set(feed.id, ("saving", 40, 900))
+    backfill_module.backfill_progress.set(feed.id, ("syncing", 0, 0))
     try:
         body = client.get("/partials/library").text
         assert 'data-preparing="true"' in body
@@ -592,7 +420,7 @@ def test_library_marks_a_channel_whose_history_is_still_being_fetched(client, db
         backfill_module.backfill_progress.discard(feed.id)
 
     body = client.get("/partials/library").text
-    assert "data-preparing" not in body, "the card kept saying it was fetching after the scan ended"
+    assert "data-preparing" not in body, "the card kept saying it was fetching after the sync ended"
 
 
 # --------------------------------------------------------------------------
@@ -677,40 +505,6 @@ def _stub_initial_fetch(monkeypatch, spy=None):
     monkeypatch.setattr(backfill_module, "fetch_feed_data", fake_fetch_feed_data)
 
 
-def test_following_an_artist_skips_the_history_scan(db_session, monkeypatch):
-    """A Topic channel holds the artist's whole catalogue — 1,064 uploads
-    for Drake, measured. Scanning it would import all of it to answer a
-    request that only means "tell me when they release something".
-
-    The saved feed is what says so, and this is where it is read: the route
-    only schedules the background job now, and most artist follows arrive as
-    a plain channel URL with nothing in the payload to key off (see
-    feed_add._as_artist_follow)."""
-    scans: list[int] = []
-    feed = _syncing_feed(db_session, channel_title="Shirin David", artist_browse_id=ARTIST_BROWSE_ID)
-    _stub_initial_fetch(monkeypatch)
-    monkeypatch.setattr(
-        backfill_module, "run_backfill", lambda feed_id, channel_id, db: scans.append(feed_id)
-    )
-
-    backfill_module.run_initial_sync(feed.id, TOPIC_ID, db_session)
-
-    assert scans == []
-
-
-def test_following_a_channel_still_scans_its_history(db_session, monkeypatch):
-    scans: list[int] = []
-    feed = _syncing_feed(db_session)
-    _stub_initial_fetch(monkeypatch)
-    monkeypatch.setattr(
-        backfill_module, "run_backfill", lambda feed_id, channel_id, db: scans.append(feed_id)
-    )
-
-    backfill_module.run_initial_sync(feed.id, TOPIC_ID, db_session)
-
-    assert scans == [feed.id]
-
-
 def test_a_new_feed_says_it_is_filling_in_before_it_fetches_anything(db_session, monkeypatch):
     """The reason the sync could move off the request at all. Library renders
     a card the moment POST /feeds answers, and without this it would render
@@ -719,9 +513,8 @@ def test_a_new_feed_says_it_is_filling_in_before_it_fetches_anything(db_session,
     seen: list[set[int]] = []
     feed = _syncing_feed(db_session)
     _stub_initial_fetch(monkeypatch, spy=lambda: seen.append(backfill_module.backfilling_feed_ids([feed.id])))
-    monkeypatch.setattr(backfill_module, "run_backfill", lambda feed_id, channel_id, db: None)
 
-    backfill_module.run_initial_sync(feed.id, TOPIC_ID, db_session)
+    backfill_module.run_initial_sync(feed.id, db_session)
 
     assert seen == [{feed.id}]
 
@@ -737,7 +530,7 @@ def test_a_failed_initial_sync_does_not_leave_the_card_stuck(db_session, monkeyp
         lambda feed_id, rss_url, avatar_url: (_ for _ in ()).throw(RuntimeError("disk full")),
     )
 
-    backfill_module.run_initial_sync(feed.id, TOPIC_ID, db_session)
+    backfill_module.run_initial_sync(feed.id, db_session)
 
     assert backfill_module.backfilling_feed_ids([feed.id]) == set()
 
@@ -746,7 +539,7 @@ def test_adding_a_feed_answers_before_it_fetches_the_content(client, monkeypatch
     """POST /feeds used to run the whole sync inline — 1.32s of yt-dlp for
     the durations and 0.84s for the avatar, measured, per channel — which is
     what the onboarding wizard's Finish button was really waiting on."""
-    scheduled: list[tuple[int, str | None]] = []
+    scheduled: list[int] = []
     fetched: list[int] = []
     monkeypatch.setattr(
         feed_add_module, "fetch_feed", lambda url: ParsedFeed(channel_title="A Channel", entries=[])
@@ -759,14 +552,14 @@ def test_adding_a_feed_answers_before_it_fetches_the_content(client, monkeypatch
     monkeypatch.setattr(
         feeds_router,
         "run_initial_sync_task",
-        lambda feed_id, channel_id: scheduled.append((feed_id, channel_id)),
+        lambda feed_id: scheduled.append(feed_id),
     )
 
     res = client.post("/feeds", json={"channel_url": f"https://www.youtube.com/channel/{TOPIC_ID}"})
 
     assert res.status_code == 201
     assert fetched == []
-    assert scheduled == [(res.json()["feed"]["id"], TOPIC_ID)]
+    assert scheduled == [res.json()["feed"]["id"]]
 
 
 # --------------------------------------------------------------------------
@@ -934,7 +727,7 @@ def test_adding_an_artist_by_plain_channel_url_lands_as_an_artist_end_to_end(
     is run_initial_sync's, tested above."""
     _stub_topic_feed(monkeypatch)
     _stub_artist_lookup(monkeypatch, _artist())
-    monkeypatch.setattr(feeds_router, "run_initial_sync_task", lambda feed_id, channel_id: None)
+    monkeypatch.setattr(feeds_router, "run_initial_sync_task", lambda feed_id: None)
 
     res = client.post(
         "/feeds", json={"channel_url": f"https://www.youtube.com/channel/{OFFICIAL_ID}"}
@@ -955,7 +748,7 @@ def test_the_card_is_already_filling_in_when_the_response_lands(client, monkeypa
         feed_add_module, "fetch_feed", lambda url: ParsedFeed(channel_title="A Channel", entries=[])
     )
     # Never runs, standing in for a background task that hasn't started yet.
-    monkeypatch.setattr(feeds_router, "run_initial_sync_task", lambda feed_id, channel_id: None)
+    monkeypatch.setattr(feeds_router, "run_initial_sync_task", lambda feed_id: None)
 
     res = client.post("/feeds", json={"channel_url": f"https://www.youtube.com/channel/{TOPIC_ID}"})
 

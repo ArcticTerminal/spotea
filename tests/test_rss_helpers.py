@@ -131,9 +131,7 @@ def test_resolve_feed_url_passes_a_playlist_feed_through_untouched():
     "name, opts",
     [
         ("channel resolve", extract._CHANNEL_RESOLVE_OPTS),
-        ("video channel resolve", extract._VIDEO_CHANNEL_RESOLVE_OPTS),
         ("duration fetch", extract._DURATION_FETCH_OPTS),
-        ("backfill fetch", extract._BACKFILL_FETCH_OPTS),
     ],
 )
 def test_every_metadata_extraction_is_time_bounded(name, opts):

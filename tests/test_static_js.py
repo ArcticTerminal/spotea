@@ -419,12 +419,12 @@ def test_the_follow_event_carries_what_the_server_decided() -> None:
     assert "detail: { feedId, title, artistBrowseId }" in source
 
 def test_the_first_sync_counts_as_a_channel_still_filling_in() -> None:
-    """"syncing" is a phase like the two scan phases, on both sides: the
-    server puts a feed in it before fetching anything, and a client waiting
-    on a follow has to recognise it as activity or it gives up on the poll
-    (see NEVER_STARTED_GRACE_MS)."""
+    """"syncing" is the only phase there is, on both sides: the server puts
+    a feed in it before fetching anything, and a client waiting on a follow
+    has to recognise it as activity or it gives up on the poll (see
+    NEVER_STARTED_GRACE_MS)."""
     backfill = Path("app/services/backfill.py").read_text()
     remote = (JS_DIR / "home" / "remote.js").read_text()
 
-    assert 'ACTIVE_PHASES = frozenset({"syncing", "scanning", "saving"})' in backfill
+    assert 'ACTIVE_PHASES = frozenset({"syncing"})' in backfill
     assert 'phase === "syncing"' in remote

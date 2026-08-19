@@ -62,22 +62,11 @@ _CHANNEL_RESOLVE_OPTS = {
     "playlist_items": "0",
 }
 
-# Deliberately not flat: a flat search result's channel_id can be missing or
-# ambiguous for a video credited to multiple channels (e.g. a feature) — see
-# resolve_video_channel. This runs once, only on the single video the user picks.
-_VIDEO_CHANNEL_RESOLVE_OPTS = dict(NETWORK_OPTS)
-
 _DURATION_FETCH_OPTS = {
     **NETWORK_OPTS,
     "extract_flat": "in_playlist",
     "playlist_items": "1-50",
 }
-
-_BACKFILL_FETCH_OPTS = {
-    **NETWORK_OPTS,
-    "extract_flat": "in_playlist",
-}
-
 
 class ChannelResolutionError(Exception):
     pass
@@ -123,24 +112,6 @@ def resolve_feed_url(url: str) -> str:
     return channel_feed_url(channel_id)
 
 
-def resolve_video_channel(video_id: str) -> str | None:
-    """The authoritative channel_id for one specific video — a flat search
-    result's channel_id (see search.search_videos) can be missing or
-    ambiguous for a video credited to multiple channels (e.g. "feat."
-    collaborations), so adding a video to the library re-resolves it with a
-    real, non-flat lookup first. Only ever called once, on the video the
-    user picks."""
-    url = YOUTUBE_WATCH_URL.format(video_id=video_id)
-
-    try:
-        with yt_dlp.YoutubeDL(_VIDEO_CHANNEL_RESOLVE_OPTS) as ydl:
-            info = ydl.extract_info(url, download=False)
-    except yt_dlp.utils.DownloadError:
-        return None
-
-    return (info or {}).get("channel_id")
-
-
 def fetch_channel_avatar_url(channel_id: str) -> str | None:
     """Channel avatar (profile picture) — not in the RSS feed or any playlist
     extraction, so a separate lightweight fetch of the channel page itself is
@@ -183,102 +154,3 @@ def fetch_channel_video_durations(channel_id: str) -> dict[str, int]:
         if video_id and isinstance(duration, (int, float)):
             durations[video_id] = int(duration)
     return durations
-
-
-@dataclass
-class BackfillEntry:
-    video_id: str
-    title: str
-    thumbnail_url: str | None
-    duration_seconds: int | None
-
-
-_PAGE_LOG_RE = re.compile(r"page (\d+): Downloading API JSON")
-_ITEM_LOG_RE = re.compile(r"Downloading item (\d+) of (\d+)")
-
-# BackfillProgress: ("listing", page_number, 0) while yt-dlp is still paging
-# through the channel (this is the slow, network-bound part — each page is a
-# request), or ("counting", done, total) once the full item count is known
-# and it's just iterating over already-fetched data (fast).
-BackfillProgress = tuple[str, int, int]
-
-
-class _ScanProgressLogger:
-    """Feeds yt-dlp's own debug log lines — which already say "page 7:
-    Downloading API JSON" and "Downloading item 412 of 1037" — into an
-    on_progress callback. There's no public progress-hook API for playlist
-    listing (progress_hooks is download-only), so this is the only way to
-    get any signal during what can be a genuinely slow scan for a channel
-    with a very long history."""
-
-    def __init__(self, on_progress: Callable[[BackfillProgress], None]):
-        self._on_progress = on_progress
-
-    def debug(self, msg: str) -> None:
-        item_match = _ITEM_LOG_RE.search(msg)
-        if item_match:
-            self._on_progress(("counting", int(item_match.group(1)), int(item_match.group(2))))
-            return
-        page_match = _PAGE_LOG_RE.search(msg)
-        if page_match:
-            self._on_progress(("listing", int(page_match.group(1)), 0))
-
-    def info(self, msg: str) -> None:
-        pass
-
-    def warning(self, msg: str) -> None:
-        pass
-
-    def error(self, msg: str) -> None:
-        pass
-
-
-def fetch_channel_all_videos(
-    channel_id: str, on_progress: Callable[[BackfillProgress], None] | None = None
-) -> list[BackfillEntry]:
-    """Every long-form video in the channel's Videos tab, not just the ~15
-    most recent ones the RSS feed exposes. A single flat extraction covers
-    id, title, thumbnail and duration together, newest first, with Shorts
-    excluded — meant for a one-time backfill when a channel is first added,
-    not routine refreshes."""
-    opts = _BACKFILL_FETCH_OPTS
-    if on_progress:
-        opts = {**_BACKFILL_FETCH_OPTS, "logger": _ScanProgressLogger(on_progress)}
-
-    try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(longform_playlist_url(channel_id), download=False)
-    except yt_dlp.utils.DownloadError as exc:
-        raise ChannelResolutionError(f"Could not list channel videos: {exc}") from exc
-
-    entries: list[BackfillEntry] = []
-    for entry in (info or {}).get("entries") or []:
-        video_id = entry.get("id")
-        if not video_id or not VIDEO_ID_RE.match(video_id):
-            continue
-
-        # YouTube still counts a video toward the tab's item total after it's
-        # gone private, been deleted, or lost its channel to a terminated
-        # account — but the flat listing comes back with no title for that
-        # slot, which no real video (even a live premiere with no duration
-        # yet) is ever missing. Same signal search.py's _video_result uses;
-        # skip it here rather than backfilling it as "Untitled" content that
-        # can only ever end up stuck on "Download failed".
-        title = entry.get("title")
-        if not title:
-            continue
-
-        thumbnails = entry.get("thumbnails") or []
-        thumbnail_url = thumbnails[-1]["url"] if thumbnails else None
-        duration = entry.get("duration")
-
-        entries.append(
-            BackfillEntry(
-                video_id=video_id,
-                title=title,
-                thumbnail_url=thumbnail_url,
-                duration_seconds=int(duration) if isinstance(duration, (int, float)) else None,
-            )
-        )
-
-    return entries

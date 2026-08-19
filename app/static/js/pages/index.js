@@ -2,7 +2,6 @@
 // channel/playlist detail panel and player overlay drilled into from them.
 
 import { setupSaveButtons } from "../content-actions.js";
-import { setupBulkImport, setupBulkImportOverlay } from "../home/bulk-import.js";
 import { handleInitialRoute, setupDetailPanel } from "../home/detail.js";
 import { refreshRecommendations, setupExploreSearch, setupRecommendations } from "../home/explore.js";
 import {
@@ -43,8 +42,6 @@ setupSaveButtons();
 setupExploreSearch();
 setupRecommendations();
 setupDownloadsOverlay();
-setupBulkImportOverlay();
-setupBulkImport();
 setupStorage();
 setupSettings();
 setupInterests();

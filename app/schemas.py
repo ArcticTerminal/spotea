@@ -17,8 +17,6 @@ _PROFILE_NAME_MAX_LENGTH = 100  # User.name: String(100)
 _CONTENT_TITLE_MAX_LENGTH = 500  # Content.title: String(500)
 # Above any real subscriptions export (a few hundred channels); guards
 # against a pasted list turning into thousands of yt-dlp resolutions.
-_BULK_IMPORT_MAX_LINES = 500
-_BULK_IMPORT_MAX_LENGTH = _BULK_IMPORT_MAX_LINES * _URL_MAX_LENGTH
 
 
 class FeedCreate(BaseModel):
@@ -189,8 +187,18 @@ class RecommendationsOut(BaseModel):
 
 
 class VideoAddCreate(BaseModel):
+    """One track being turned into a playable row.
+
+    `channel_id` is the artist this track hangs off, sent by the client
+    rather than resolved here: every row Explore renders — a song search
+    result, a recommendation card, a track on an album or playlist page —
+    already carries it, because YouTube Music returns it alongside the track
+    (see music._artist_names). Resolving it server-side used to cost a
+    yt-dlp call per "listen" click."""
+
     video_id: str
     title: str = Field(min_length=1, max_length=_CONTENT_TITLE_MAX_LENGTH)
+    channel_id: str
     thumbnail_url: str | None = None
     duration_seconds: int | None = None
     channel_title: str | None = None
@@ -201,14 +209,9 @@ class VideoAddResult(BaseModel):
 
 
 class VideoBatchItem(VideoAddCreate):
-    """One track of a remote playlist/channel being turned into a playable
-    row. Unlike VideoAddCreate on its own, this carries the owning channel,
-    so nothing has to be resolved over the network — a *playlist page's*
-    per-entry `channel_id` is the real uploader, not the ambiguous guess a
-    flat *search* result gives (which is why add_single_video still resolves
-    its own)."""
-
-    channel_id: str
+    """One track of a remote listing being turned into a playable row. Same
+    shape as a single add — the batch exists to save round trips, not to
+    carry anything extra."""
 
 
 class VideoBatchCreate(BaseModel):
@@ -229,13 +232,6 @@ class FeedAddResult(BaseModel):
 
 class RefreshResult(BaseModel):
     new_content_count: int
-
-
-class BackfillStatusOut(BaseModel):
-    feed_id: int
-    phase: str | None = None
-    done: int = 0
-    total: int = 0
 
 
 class SettingsOut(BaseModel):
@@ -270,37 +266,3 @@ class ProfileUpdate(BaseModel):
     name: str = Field(min_length=1, max_length=_PROFILE_NAME_MAX_LENGTH)
 
 
-class BulkImportCreate(BaseModel):
-    urls: str = Field(min_length=1, max_length=_BULK_IMPORT_MAX_LENGTH)
-
-    @field_validator("urls")
-    @classmethod
-    def _cap_line_count(cls, value: str) -> str:
-        # The length cap above bounds total bytes; this bounds the thing that
-        # actually costs something — start_bulk_import splits on lines and
-        # resolves each one with its own yt-dlp lookup (see
-        # services/bulk_import.py), so 10,000 short pasted lines would pass
-        # the byte cap easily while still being 10,000 requests to YouTube.
-        line_count = value.count("\n") + 1
-        if line_count > _BULK_IMPORT_MAX_LINES:
-            raise ValueError(f"Paste at most {_BULK_IMPORT_MAX_LINES} lines at once")
-        return value
-
-
-class BulkImportStartOut(BaseModel):
-    job_id: str
-    total: int
-
-
-class BulkImportResultOut(BaseModel):
-    url: str
-    status: str
-    channel_title: str | None = None
-    error: str | None = None
-
-
-class BulkImportStatusOut(BaseModel):
-    total: int
-    resolved: int
-    done: int
-    results: list[BulkImportResultOut]

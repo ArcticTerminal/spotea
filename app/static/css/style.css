@@ -865,8 +865,7 @@ html[data-active-tab="detail"] .tab-panel[data-tab-panel="detail"] {
 .profiles-add-form input::placeholder,
 .interests-add-form input::placeholder,
 .library-search-input::placeholder,
-.login-card input::placeholder,
-.bulk-import-input::placeholder {
+.login-card input::placeholder {
   color: var(--text-muted);
 }
 
@@ -2294,13 +2293,6 @@ button.track-link {
   min-height: 0;
 }
 
-.modal-bulk-import {
-  max-width: 440px;
-  max-height: 80vh;
-  display: flex;
-  flex-direction: column;
-  overflow-y: auto;
-}
 
 .modal-header {
   display: flex;
@@ -2387,86 +2379,6 @@ button.track-link {
   cursor: default;
 }
 
-
-.bulk-import-input {
-  width: 100%;
-  resize: vertical;
-  padding: 0.6rem 0.75rem;
-  border-radius: 6px;
-  border: 1px solid var(--border-default);
-  background: var(--bg-input);
-  color: var(--text-primary);
-  font: inherit;
-  /* 16px — see .library-search-input's comment on iOS auto-zoom. */
-  font-size: 1rem;
-  margin-bottom: 1rem;
-}
-
-.bulk-import-input:focus {
-  outline: none;
-  border-color: var(--accent);
-}
-
-.bulk-import-progress {
-  flex: 1 1 auto;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.bulk-import-progress[hidden] {
-  display: none;
-}
-
-.bulk-import-results {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-  /* Without flex: 1 1 auto this list just grows with its content instead of
-     taking the modal's remaining space — with a long result list that pushes
-     the whole modal past its max-height instead of scrolling internally,
-     which is what spilled the list out past the modal's rounded border. */
-  flex: 1 1 auto;
-  overflow-y: auto;
-  min-height: 0;
-}
-
-.bulk-import-results li {
-  display: flex;
-  align-items: baseline;
-  gap: 0.5rem;
-  padding: 0.5rem 0.65rem;
-  background: var(--bg-base);
-  border-radius: 6px;
-  font-size: 0.82rem;
-}
-
-.bulk-import-status {
-  flex-shrink: 0;
-  font-weight: 700;
-}
-
-.bulk-import-status.is-added {
-  color: var(--accent);
-}
-
-.bulk-import-status.is-duplicate {
-  color: var(--text-muted);
-}
-
-.bulk-import-status.is-error {
-  color: var(--danger);
-}
-
-.bulk-import-line {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
 .modal button:focus-visible {
   outline: 2px solid var(--white);

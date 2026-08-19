@@ -24,7 +24,6 @@ from app.schemas import (
 )
 from app.storage import purge_content
 from app.timeutil import utcnow
-from app.youtube.extract import resolve_video_channel
 from app.youtube.music import search_artists, search_songs
 from app.youtube.urls import CHANNEL_ID_RE, channel_feed_url
 
@@ -119,11 +118,7 @@ def add_single_video(
     if existing_content:
         return VideoAddResult(content_id=existing_content.id)
 
-    channel_id = resolve_video_channel(payload.video_id)
-    if not channel_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Could not resolve this video")
-
-    feed = _get_or_create_placeholder_feed(db, channel_id, payload.channel_title, profile.id)
+    feed = _get_or_create_placeholder_feed(db, payload.channel_id, payload.channel_title, profile.id)
 
     content = Content(
         feed_id=feed.id,
