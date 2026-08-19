@@ -44,7 +44,7 @@ from app.auth import hash_password
 from app.config import settings
 from app.database import Base, SessionLocal, engine
 from app.main import app
-from app.models import Account, User
+from app.models import User
 from app.services import feed_add
 
 
@@ -71,33 +71,30 @@ def db_session() -> Session:
         yield session
 
 
-DEFAULT_ACCOUNT_ID = 1
-DEFAULT_PROFILE_ID = 1
-DEFAULT_ACCOUNT_EMAIL = "test@example.com"
-DEFAULT_ACCOUNT_PASSWORD = "test-password"
+DEFAULT_USER_ID = 1
+DEFAULT_USER_EMAIL = "test@example.com"
+DEFAULT_USER_PASSWORD = "test-password"
 
 
 @pytest.fixture(scope="session", autouse=True)
 def _init_schema():
-    """Runs the app's real startup path once (Base.metadata.create_all +
-    run_migrations) against the isolated test DB, the same way `client`
-    would, so `db_session`-only tests still get a real schema without
-    needing to spin up a TestClient themselves. Registration is no longer
-    automatic on startup (see main.py — that was a workaround for the old
-    shared-password model), so the bootstrap account/profile every other
-    test implicitly relies on (id 1 of each) is seeded here directly instead."""
+    """Runs the app's real startup path once (Base.metadata.create_all)
+    against the isolated test DB, the same way `client` would, so
+    `db_session`-only tests still get a real schema without needing to spin
+    up a TestClient themselves. Registration is not automatic on startup, so
+    the bootstrap user every other test implicitly relies on (id 1) is
+    seeded here directly instead."""
     with TestClient(app):
         pass
     with SessionLocal() as db:
-        if db.get(Account, DEFAULT_ACCOUNT_ID) is None:
-            account = Account(
-                id=DEFAULT_ACCOUNT_ID,
-                email=DEFAULT_ACCOUNT_EMAIL,
-                password_hash=hash_password(DEFAULT_ACCOUNT_PASSWORD),
+        if db.get(User, DEFAULT_USER_ID) is None:
+            db.add(
+                User(
+                    id=DEFAULT_USER_ID,
+                    email=DEFAULT_USER_EMAIL,
+                    password_hash=hash_password(DEFAULT_USER_PASSWORD),
+                )
             )
-            db.add(account)
-            db.flush()
-            db.add(User(id=DEFAULT_PROFILE_ID, account_id=DEFAULT_ACCOUNT_ID, name="Default"))
             db.commit()
     yield
 
@@ -105,23 +102,18 @@ def _init_schema():
 @pytest.fixture(autouse=True)
 def _clean_tables(_init_schema):
     """Runs after every test — deletes all rows except the bootstrap default
-    account/profile (every test implicitly relies on them existing, same as
-    the app itself always assumed of users.id==1 before real accounts
-    existed) so tests don't leak state into each other without paying to
-    recreate the DB file each time. Any extra account/profile a test created
-    is cleaned up here too, not just other tables — otherwise it'd silently
-    carry over into later tests' counts. accounts must be preserved
-    alongside users, not just users — otherwise the preserved profile row is
-    left with a dangling account_id FK after the first test.
+    user (every test implicitly relies on users.id==1 existing) so tests
+    don't leak state into each other without paying to recreate the DB file
+    each time. Any extra user a test created is cleaned up here too, not
+    just the other tables — otherwise it'd silently carry over into later
+    tests' counts.
 
-    The preserved account and user rows' own mutable columns are reset
-    explicitly, not just their child rows deleted — feed_refresh_interval_minutes
-    lives on the account row (see models.Account), interests and
-    audio_quality on the user row (see models.User), and several tests PUT a
-    non-default value through Settings; without this reset that value would
-    silently carry into whatever test happens to run next, the same leak the
-    per-table deletes above exist to prevent everywhere else. Caught by a
-    test that left interests set on profile 1, which broke
+    The preserved row's own mutable columns are reset explicitly, not just
+    its child rows deleted: several tests PUT a non-default interests /
+    audio_quality / refresh interval through Settings, and without this
+    reset that value would silently carry into whatever test runs next —
+    the same leak the per-table deletes exist to prevent everywhere else.
+    Caught by a test that left interests set, which broke
     test_no_interests_means_an_empty_batch_and_no_searches
     (test_recommendations.py) further into the run.
     """
@@ -131,17 +123,15 @@ def _clean_tables(_init_schema):
             if table.name == "users":
                 conn.execute(
                     table.update()
-                    .where(table.c.id == DEFAULT_PROFILE_ID)
-                    .values(interests=None, audio_quality="high")
+                    .where(table.c.id == DEFAULT_USER_ID)
+                    .values(
+                        interests=None,
+                        audio_quality="high",
+                        feed_refresh_interval_minutes=30,
+                        feeds_refreshed_at=None,
+                    )
                 )
-                conn.execute(table.delete().where(table.c.id != DEFAULT_PROFILE_ID))
-            elif table.name == "accounts":
-                conn.execute(
-                    table.update()
-                    .where(table.c.id == DEFAULT_ACCOUNT_ID)
-                    .values(feed_refresh_interval_minutes=30, feeds_refreshed_at=None)
-                )
-                conn.execute(table.delete().where(table.c.id != DEFAULT_ACCOUNT_ID))
+                conn.execute(table.delete().where(table.c.id != DEFAULT_USER_ID))
             else:
                 conn.execute(table.delete())
 
@@ -170,6 +160,6 @@ def client() -> TestClient:
     tests never need to think about auth. See test_auth.py for the
     unauthenticated case."""
     with TestClient(app) as c:
-        res = c.post("/login", data={"email": DEFAULT_ACCOUNT_EMAIL, "password": DEFAULT_ACCOUNT_PASSWORD})
+        res = c.post("/login", data={"email": DEFAULT_USER_EMAIL, "password": DEFAULT_USER_PASSWORD})
         assert res.status_code == 200
         yield c

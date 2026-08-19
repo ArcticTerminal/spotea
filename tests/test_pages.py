@@ -80,20 +80,6 @@ def test_home_renders_every_shelf_and_the_library_grid(client, db_session):
     assert "Page Test Channel" in body  # Library channel card + Home chip
 
 
-def test_home_renders_the_active_profiles_name(client):
-    """The topbar button and the mobile menu row both shipped with static
-    placeholder text ("Profile" / "Switch profile") that nothing ever
-    replaced — with more than one profile there was no way to tell which one
-    you were on. See routers/pages.py's home() and profiles.js's
-    renameProfile for the one path (renaming the current profile without a
-    reload) a server render alone doesn't keep in sync."""
-    res = client.get("/")
-
-    assert res.status_code == 200
-    assert '<span id="profile-switcher-name">Default</span>' in res.text
-    assert '<span id="mobile-menu-profile-name">Default</span>' in res.text
-
-
 def test_home_renders_for_an_empty_library(client):
     """The "no content yet" path is a different branch of index.html than
     the one every seeded test takes."""

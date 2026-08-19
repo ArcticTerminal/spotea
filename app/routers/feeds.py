@@ -11,7 +11,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.content_query import followed_feeds
-from app.deps import get_current_profile, get_db, require_login
+from app.deps import get_current_user, get_db, require_login
 from app.feed_sync import refresh_feeds as sync_refresh_feeds
 from app.models import Content, Feed, User
 from app.schemas import (
@@ -38,14 +38,14 @@ router = APIRouter(prefix="/feeds", tags=["feeds"], dependencies=[Depends(requir
 def add_feed(
     payload: FeedCreate,
     background_tasks: BackgroundTasks,
-    profile: User = Depends(get_current_profile),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> FeedAddResult:
     try:
         feed, new_count, _channel_id = add_feed_core(
             db,
             payload.channel_url,
-            profile.id,
+            user.id,
             artist_browse_id=payload.artist_browse_id,
             # Answer as soon as the feed row exists. Everything after it —
             # the content, the durations, the avatar — is what
@@ -77,9 +77,9 @@ def add_feed(
 
 @router.get("/backfilling", response_model=list[int])
 def list_backfilling_feeds(
-    profile: User = Depends(get_current_profile), db: Session = Depends(get_db)
+    user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ) -> list[int]:
-    """This profile's feeds still being filled in right now — their first
+    """The feeds still being filled in right now — their first
     RSS sync, or the one-time history scan behind it (see
     services/backfill.ACTIVE_PHASES).
 
@@ -94,13 +94,13 @@ def list_backfilling_feeds(
     Declared above /{feed_id}/backfill-status only for readability; the two
     paths can't collide.
     """
-    feed_ids = [feed_id for (feed_id,) in db.query(Feed.id).filter(Feed.user_id == profile.id)]
+    feed_ids = [feed_id for (feed_id,) in db.query(Feed.id).filter(Feed.user_id == user.id)]
     return sorted(backfilling_feed_ids(feed_ids))
 
 
 @router.delete("/{feed_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_feed(
-    feed_id: int, profile: User = Depends(get_current_profile), db: Session = Depends(get_db)
+    feed_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ) -> None:
     """Unfollowing isn't allowed to destroy what the user actually downloaded,
     played, favorited, or saved — only content nobody ever touched gets
@@ -112,7 +112,7 @@ def delete_feed(
     those filter on Feed.followed). Re-following the same channel later picks
     this same row back up via services/feed_add.py's create_feed_from_rss_url lookup
     instead of duplicating it."""
-    feed = db.query(Feed).filter(Feed.id == feed_id, Feed.user_id == profile.id).first()
+    feed = db.query(Feed).filter(Feed.id == feed_id, Feed.user_id == user.id).first()
     if not feed:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Feed not found")
 
@@ -141,7 +141,7 @@ def delete_feed(
 
 @router.post("/refresh", response_model=RefreshResult)
 def refresh_feeds(
-    profile: User = Depends(get_current_profile), db: Session = Depends(get_db)
+    user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ) -> RefreshResult:
-    feeds = followed_feeds(db, profile.id).all()
+    feeds = followed_feeds(db, user.id).all()
     return RefreshResult(new_content_count=sync_refresh_feeds(db, feeds))

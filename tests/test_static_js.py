@@ -138,22 +138,6 @@ def test_service_worker_api_prefixes_have_no_trailing_slash() -> None:
     )
 
 
-def test_setup_profiles_does_not_eagerly_fetch_the_profile_list() -> None:
-    """GET /profiles used to run on every single page load to fill two
-    overlays that start hidden and, on a typical visit, are never opened —
-    see home/profiles.js's ensureProfilesLoaded. This pins the regression: a
-    call to loadProfiles() directly inside setupProfiles (rather than behind
-    ensureProfilesLoaded, deferred until an overlay actually opens) would
-    silently restore the eager fetch."""
-    source = _function_body(
-        (JS_DIR / "home" / "profiles.js").read_text(), "setupProfiles"
-    )
-
-    assert "loadProfiles()" not in source, (
-        "setupProfiles calls loadProfiles() directly — the boot-time fetch is back"
-    )
-
-
 def test_report_playback_only_sends_the_unexpected_events() -> None:
     """4 beacons were measured per track played under the old blanket policy
     — "now-playing", "play-requested" and a successful "playing" for
@@ -275,22 +259,6 @@ def test_initial_tab_is_never_restored_from_local_storage() -> None:
     # The word itself still appears in the comment explaining why it's gone.
     assert "localStorage." not in tabs, "home/tabs.js is back to persisting the active tab"
 
-
-def test_profile_changes_reload_onto_home() -> None:
-    """Switching, creating, or deleting the current profile all reload, and
-    all of them have to land on Home: every panel is profile-scoped, and a
-    #channel/42 hash names a feed the incoming profile doesn't have."""
-    source = (JS_DIR / "home" / "profiles.js").read_text()
-    helper = _function_body(source.replace("function reloadAtHome", "export function reloadAtHome"), "reloadAtHome")
-
-    assert 'replaceState(null, "", "/#home")' in helper, (
-        "reloadAtHome no longer rewrites the URL before reloading — assigning "
-        "a URL that differs only in its fragment reloads nothing"
-    )
-    assert source.count("window.location.reload()") == 1, (
-        "a profile change reloads without going through reloadAtHome, so it "
-        "keeps whatever tab or detail hash the outgoing profile had"
-    )
 
 def test_opening_explore_never_shows_a_loading_placeholder() -> None:
     """The shelves are fetched in the background at boot and re-checked

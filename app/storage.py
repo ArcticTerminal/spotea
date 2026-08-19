@@ -153,60 +153,26 @@ def usage_summary(db: Session, user_id: int) -> UsageSummary:
     return UsageSummary(total_bytes=total_bytes, count=count)
 
 
-def unlink_thumbnail_if_unshared(db: Session, video_id: str, exclude_content_id: int) -> None:
-    """Same sharing check as unlink_if_unshared, for a cached thumbnail
-    instead of a downloaded audio file — a thumbnail is keyed by video_id
-    alone (see downloader.download_thumbnail), so it can legitimately be
-    shared by more than one profile's Content row for the same video (e.g.
-    two profiles both followed an overlapping channel, or one followed it
-    after the other already had it as an Explore preview). Only ever called
-    where a Content row is actually being deleted (unfollow purge, Explore
-    removal) — content.py's delete_content resets a row's download status in
-    place without deleting it, so it never needs this."""
-    still_referenced = (
-        db.query(Content.id)
-        .filter(Content.video_id == video_id, Content.id != exclude_content_id)
-        .first()
-    )
-    if still_referenced is None:
-        (settings.thumbnails_dir / f"{video_id}.jpg").unlink(missing_ok=True)
-
-
-def unlink_if_unshared(db: Session, file_path: str, exclude_content_id: int) -> None:
-    """Only remove the file if no other ready Content row (any profile) still
-    points at it. Storage is keyed by video_id alone, so the same physical
-    file can legitimately be shared by two profiles that both follow an
-    overlapping channel at the same quality — deleting it out from under the
-    other profile would silently break its playback."""
-    still_referenced = (
-        db.query(Content.id)
-        .filter(
-            Content.file_path == file_path,
-            Content.status == "ready",
-            Content.id != exclude_content_id,
-        )
-        .first()
-    )
-    if still_referenced is None:
-        Path(file_path).unlink(missing_ok=True)
-
-
 def purge_content(db: Session, content: Content) -> None:
-    """Delete a Content row and any files only it was keeping alive.
+    """Delete a Content row and the files it was keeping alive.
 
-    Both unlink helpers above are sharing-aware, so this is safe even when
-    another profile has its own row for the same video. Deliberately does
-    not commit: the unfollow path (routers/feeds.py's delete_feed) purges
-    many rows and commits once, and doing it per row would leave a
-    half-purged feed behind if one of them failed.
+    Both unlinks used to run a "is any other row still pointing at this?"
+    query first, because two profiles under one account could hold separate
+    rows for the same video and share the file on disk. With one library per
+    login there is no second row to protect, so the check went away with the
+    profiles that made it necessary.
+
+    Deliberately does not commit: the unfollow path (routers/feeds.py's
+    delete_feed) purges many rows and commits once, and doing it per row
+    would leave a half-purged feed behind if one of them failed.
 
     Note this is for rows that are genuinely going away — content.py's
     delete_content resets a row's download state in place and keeps the row,
     so it only unlinks the audio file.
     """
     if content.file_path:
-        unlink_if_unshared(db, content.file_path, content.id)
-    unlink_thumbnail_if_unshared(db, content.video_id, content.id)
+        Path(content.file_path).unlink(missing_ok=True)
+    (settings.thumbnails_dir / f"{content.video_id}.jpg").unlink(missing_ok=True)
     db.delete(content)
 
 
@@ -216,7 +182,7 @@ def clear_all(db: Session, user_id: int) -> int:
 
     for row in rows:
         if row.file_path:
-            unlink_if_unshared(db, row.file_path, row.id)
+            Path(row.file_path).unlink(missing_ok=True)
         row.status = "not_downloaded"
         row.file_path = None
         row.file_size_bytes = None
@@ -227,56 +193,6 @@ def clear_all(db: Session, user_id: int) -> int:
     sweep_orphans(db)
 
     return len(rows)
-
-
-def delete_files_for_profile(db: Session, user_id: int) -> None:
-    """Remove every file a profile's content rows keep alive — downloaded
-    audio and cached thumbnails alike — before the profile itself is
-    deleted. Has to run first: the ORM cascade that removes the Content rows
-    themselves (User.content, cascade="all, delete-orphan") never calls
-    purge_content, so without this a deleted profile's thumbnails — which
-    exist independent of download status, see feed_sync.cache_thumbnail —
-    were orphaned forever. Scoped to every row, not just downloaded ones,
-    for exactly that reason: thumbnails aren't.
-
-    Asks the sharing question *once* rather than once per row. The per-row
-    helpers above are right for a purge of a handful of rows, but this walks
-    a whole library: on a real 28,866-row profile they were 28,869 queries
-    and 11.8 of the deletion's 13.4 seconds, with the modal still showing the
-    profile the whole time. Two set queries instead — everything every other
-    profile still references — cost the same regardless of how big either
-    side is, since the sets only ever cover the *surviving* rows.
-
-    Framing it as "what survives" is also the more correct question. The
-    per-row helpers excluded one row id at a time, so two rows pointing at
-    the same file would each see the other as a live reference and neither
-    would unlink it — which can't happen today (uq_content_user_video_id
-    makes video_id unique per profile, and a file path is derived from a
-    video id) but only by accident.
-    """
-    kept_files = {
-        path
-        for (path,) in db.query(Content.file_path)
-        .filter(
-            Content.user_id != user_id,
-            Content.status == "ready",
-            Content.file_path.is_not(None),
-        )
-        .distinct()
-    }
-    kept_thumbnails = {
-        video_id
-        for (video_id,) in db.query(Content.video_id).filter(Content.user_id != user_id).distinct()
-    }
-
-    # Columns, not entities: this used to build 28,866 ORM instances (and
-    # leave them in the session's identity map) to read two fields off each.
-    rows = db.query(Content.video_id, Content.file_path).filter(Content.user_id == user_id)
-    for video_id, file_path in rows:
-        if file_path and file_path not in kept_files:
-            Path(file_path).unlink(missing_ok=True)
-        if video_id not in kept_thumbnails:
-            (settings.thumbnails_dir / f"{video_id}.jpg").unlink(missing_ok=True)
 
 
 def sweep_startup_leftovers() -> int:
@@ -308,13 +224,10 @@ STALE_EXPORT_AGE = timedelta(hours=1)
 def sweep_orphans(db: Session) -> None:
     """Deletes on-disk files nothing points at any more: downloaded audio,
     cached thumbnails, cached avatars, and abandoned export archives.
-    Directory-wide, not scoped to one profile — the same audio/thumbnail
-    file can legitimately be shared across profiles (see unlink_if_unshared),
-    so this only removes what NO row anywhere still references.
+    Directory-wide: it removes what no row anywhere still references.
 
-    Called from clear_all (so "Clear all" actually frees what it claims —
-    unfollowing a channel elsewhere can leave files this profile's own rows
-    never pointed at) and once per scheduler tick (see scheduler.py), which
+    Called from clear_all (so "Clear all" actually frees what it claims) and
+    once per scheduler tick (see scheduler.py), which
     is what catches orphans no single request causes on its own: a channel
     unfollowed without keeping anything, an avatar for a channel search
     turned up and nobody followed.

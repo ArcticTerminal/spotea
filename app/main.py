@@ -16,7 +16,6 @@ from app.database import Base, SessionLocal, engine
 from app.deps import NotAuthenticated, require_login
 from app.images import fetch_image_bytes
 from app.middleware import install as install_middleware
-from app.migrations import run_migrations
 from app.routers import auth as auth_router
 from app.routers import content as content_router
 from app.routers import debug as debug_router
@@ -24,7 +23,6 @@ from app.routers import explore as explore_router
 from app.routers import feeds as feeds_router
 from app.routers import pages as pages_router
 from app.routers import partials as partials_router
-from app.routers import profiles as profiles_router
 from app.routers import recommendations as recommendations_router
 from app.routers import settings as settings_router
 from app.routers import storage as storage_router
@@ -75,7 +73,6 @@ def _assert_single_worker() -> None:
 async def lifespan(app: FastAPI):
     _assert_single_worker()
     Base.metadata.create_all(bind=engine)
-    run_migrations(engine)
 
     # Exactly once, here, before anything else in the process has had a
     # chance to start a download — see storage.sweep_startup_leftovers for
@@ -138,7 +135,6 @@ app.include_router(content_router.router)
 app.include_router(storage_router.router)
 app.include_router(settings_router.router)
 app.include_router(recommendations_router.router)
-app.include_router(profiles_router.router)
 app.include_router(debug_router.router)
 app.include_router(partials_router.router)
 app.include_router(pages_router.router)
@@ -160,7 +156,7 @@ def health(response: Response) -> dict[str, object]:
 
     Deliberately cheap enough for a container healthcheck to poll: one
     `SELECT 1` and an in-process flag, touching no user data and doing no
-    per-profile work.
+    per-user work.
     """
     checks = {"database": _database_reachable(), "scheduler": scheduler.is_alive()}
     healthy = all(checks.values())
@@ -273,10 +269,8 @@ def avatar_proxy(u: str) -> Response:
     which already carries the grey circle used for a channel with no avatar
     at all — so a transparent pixel lands in exactly that placeholder
     instead of a broken icon, with no markup or onerror handler anywhere.
-    This matters most for the onboarding wizard, whose avatar URLs ship
-    committed in scripts/channel_profiles.py and go stale whenever a channel
-    changes its picture, but Explore's search results hit the same path any
-    time Google refuses a fetch."""
+    Explore's search results hit this path any time Google refuses a
+    fetch."""
     host = urllib.parse.urlparse(u).hostname
     if host not in _AVATAR_PROXY_ALLOWED_HOSTS:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST)

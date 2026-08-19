@@ -37,7 +37,7 @@ export function activate(tabName, { updateHistory = true } = {}) {
   // is also the only place the current tab is remembered: there used to be a
   // localStorage copy behind it, which meant opening the app fresh (a PWA
   // launch, or plain "/") reopened whatever tab was last used — including
-  // Settings, right after creating a profile from Settings. The hash already
+  // Settings, right after an action taken from Settings. The hash already
   // survives a reload, and a fresh open with no hash is meant to start on
   // Home.
   if (updateHistory && tabName !== "detail") history.replaceState(null, "", `#${tabName}`);

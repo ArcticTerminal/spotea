@@ -369,20 +369,20 @@ def test_a_short_is_removed_when_its_duration_arrives_later(db_session):
 # -------------------------------------------------------- GET /feeds/backfilling
 
 
-def test_backfilling_lists_only_this_profiles_running_scans(client, db_session):
+def test_backfilling_lists_only_this_users_running_syncs(client, db_session):
     """What Library's "Fetching uploads…" cards poll on.
 
     A newly followed artist's card appears the moment POST /feeds answers,
     before anything has been fetched, so the grid has to be able to ask what
-    is still running — and it has to be scoped: another profile's sync is
+    is still running — and it has to be scoped: another user's sync is
     none of this one's business.
     """
     mine = Feed(user_id=USER_ID, rss_url="https://example.com/mine", channel_title="Mine")
-    other_profile = User(name="Someone Else", account_id=1)
-    db_session.add_all([mine, other_profile])
+    other_user = User(email="someone-else@example.com", password_hash="x")
+    db_session.add_all([mine, other_user])
     db_session.commit()
     theirs = Feed(
-        user_id=other_profile.id, rss_url="https://example.com/theirs", channel_title="Theirs"
+        user_id=other_user.id, rss_url="https://example.com/theirs", channel_title="Theirs"
     )
     db_session.add(theirs)
     db_session.commit()

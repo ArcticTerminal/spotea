@@ -8,20 +8,12 @@ import pytest
 from pydantic import ValidationError
 
 from app.schemas import _CONTENT_TITLE_MAX_LENGTH as TITLE_MAX
-from app.schemas import _PROFILE_NAME_MAX_LENGTH as NAME_MAX
 from app.schemas import _URL_MAX_LENGTH as URL_MAX
-from app.schemas import (
-    FeedCreate,
-    ProfileCreate,
-    ProfileUpdate,
-    VideoAddCreate,
-)
+from app.schemas import FeedCreate, VideoAddCreate
 
 
 @pytest.mark.parametrize("model, field, limit", [
     (FeedCreate, "channel_url", URL_MAX),
-    (ProfileCreate, "name", NAME_MAX),
-    (ProfileUpdate, "name", NAME_MAX),
 ])
 def test_a_value_at_the_limit_is_accepted(model, field, limit):
     model(**{field: "x" * limit})
@@ -29,8 +21,6 @@ def test_a_value_at_the_limit_is_accepted(model, field, limit):
 
 @pytest.mark.parametrize("model, field, limit", [
     (FeedCreate, "channel_url", URL_MAX),
-    (ProfileCreate, "name", NAME_MAX),
-    (ProfileUpdate, "name", NAME_MAX),
 ])
 def test_one_character_past_the_limit_is_rejected(model, field, limit):
     with pytest.raises(ValidationError):
@@ -39,8 +29,6 @@ def test_one_character_past_the_limit_is_rejected(model, field, limit):
 
 @pytest.mark.parametrize("model, field", [
     (FeedCreate, "channel_url"),
-    (ProfileCreate, "name"),
-    (ProfileUpdate, "name"),
 ])
 def test_an_empty_value_is_rejected(model, field):
     with pytest.raises(ValidationError):

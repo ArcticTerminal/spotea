@@ -14,7 +14,6 @@ import {
   setupRefreshButton,
 } from "../home/library.js";
 import { resumeOverlayIfNeeded, setupPlayerOverlay } from "../home/overlay.js";
-import { openProfileSwitcher, setupProfiles } from "../home/profiles.js";
 import {
   setupDownloadsOverlay,
   setupInterests,
@@ -54,5 +53,4 @@ setupHorizontalScrollers();
 // rather than imported inside library.js, which explore.js already imports
 // from (see setupRefreshButton).
 setupRefreshButton(refreshRecommendations);
-setupMobileMenu(openProfileSwitcher, refreshRecommendations);
-setupProfiles();
+setupMobileMenu(refreshRecommendations);

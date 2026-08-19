@@ -9,62 +9,43 @@ from app.timeutil import utcnow
 CONTENT_STATUSES = ("not_downloaded", "downloading", "ready", "error")
 
 
-class Account(Base):
-    """The real, credentialed login — owns one or more `User` profiles
-    (household model: one account, several family-member profiles). Email is
-    always stored lowercased (normalized at the auth-router call sites), so
-    a plain unique constraint is enough without a case-insensitive collation."""
-
-    __tablename__ = "accounts"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    email: Mapped[str] = mapped_column(String(255), unique=True)
-    password_hash: Mapped[str] = mapped_column(String(255))
-    created_at: Mapped[datetime] = mapped_column(default=utcnow)
-    # Which profile to land on right after login — session-stored
-    # PROFILE_SESSION_KEY doesn't survive logout (the whole session is
-    # cleared), so without this a fresh login always fell back to the
-    # account's first profile regardless of which one was active before.
-    # Deliberately a plain int, not a relationship/ForeignKey: a real FK to
-    # users.id would make Account and User mutually reference each other,
-    # and Base.metadata.create_all() can't topologically order a table-
-    # creation cycle. Validity (still one of this account's own profiles) is
-    # checked at the application layer instead, in get_current_profile.
-    last_active_profile_id: Mapped[int | None] = mapped_column(default=None)
-    # How often the background scheduler refreshes this account's feeds — see
-    # scheduler.py. One account's choice covers every one of its profiles
-    # (household model: kids' and parents' profiles share one refresh
-    # cadence); a different account picks independently. Used to live as a
-    # single AppSettings row shared by the whole deployment, from before
-    # multiple real accounts existed.
-    feed_refresh_interval_minutes: Mapped[int] = mapped_column(default=30)
-    # When the scheduler last refreshed this account's feeds. None means
-    # never (a brand-new account, or one migrated from the old shared
-    # AppSettings row) — the scheduler treats that the same as "overdue",
-    # so a fresh account's first tick refreshes it immediately rather than
-    # waiting a full interval with nothing to compare against.
-    feeds_refreshed_at: Mapped[datetime | None] = mapped_column(default=None)
-
-    profiles: Mapped[list["User"]] = relationship(back_populates="account", cascade="all, delete-orphan")
-
-
 class User(Base):
+    """One login, one library.
+
+    Was two tables — an `Account` holding the credentials and one or more
+    `User` profiles under it, Netflix-style. The household model is gone
+    (one person, one library), so the credentials moved onto the row that
+    already owned the feeds and the content, and `accounts` went away.
+
+    Email is always stored lowercased (normalized at the auth-router call
+    sites), so a plain unique constraint is enough without a case-insensitive
+    collation.
+    """
+
     __tablename__ = "users"
     __table_args__ = (
         CheckConstraint("audio_quality IN ('high', 'low')", name="ck_user_audio_quality"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"))
-    name: Mapped[str] = mapped_column(String(100))
+    email: Mapped[str] = mapped_column(String(255), unique=True)
+    password_hash: Mapped[str] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
     audio_quality: Mapped[str] = mapped_column(String(10), default="high")
-    # Newline-separated free-text tags — genres, artists, topics — that
+    # Newline-separated free-text tags — genres, artists, moods — that
     # Explore's recommendations are built from. Parsed and written only
     # through app/interests.py, which owns the format (and the reason it
     # isn't a table of its own).
     interests: Mapped[str | None] = mapped_column(Text, default=None)
+    # How often the background scheduler refreshes this library — see
+    # scheduler.py.
+    feed_refresh_interval_minutes: Mapped[int] = mapped_column(default=30)
+    # When the scheduler last refreshed it. None means never, which the
+    # scheduler treats the same as "overdue" — so a fresh account's first
+    # tick refreshes it immediately rather than waiting a full interval with
+    # nothing to compare against.
+    feeds_refreshed_at: Mapped[datetime | None] = mapped_column(default=None)
 
-    account: Mapped["Account"] = relationship(back_populates="profiles")
     feeds: Mapped[list["Feed"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     content: Mapped[list["Content"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     recommendation_cache: Mapped["RecommendationCache | None"] = relationship(
@@ -73,12 +54,12 @@ class User(Base):
 
 
 class RecommendationCache(Base):
-    """One profile's last batch of interest-based Explore recommendations.
+    """The last batch of interest-based Explore recommendations.
 
     Cached in the database rather than recomputed per request because
     building a batch means several live YouTube searches — seconds of
     latency, and request volume this app has good reason to keep low (see
-    services/recommendations.py). One row per profile: a batch is only ever
+    services/recommendations.py). One row per user: a batch is only ever
     read and replaced whole, never merged, so there's nothing to gain from
     storing the individual results as rows.
 
@@ -146,15 +127,10 @@ class Content(Base):
         # and order by published_at, which the (user_id, published_at) index
         # above could only answer by walking every row the user has.
         Index("ix_content_user_feed_published", "user_id", "feed_id", "published_at"),
-        # Looked up by video_id alone — feed_sync.cache_thumbnail and
-        # storage.unlink_thumbnail_if_unshared, both of which run per rendered
-        # item and per purged row. The (user_id, video_id) unique constraint
-        # can't serve these: video_id is its second column.
+        # Looked up by video_id alone — feed_sync.cache_thumbnail, which
+        # runs per rendered item. The (user_id, video_id) unique constraint
+        # can't serve it: video_id is its second column.
         Index("ix_content_video_id", "video_id"),
-        # storage.unlink_if_unshared, once per file removed. Was a full table
-        # scan, which is what made clearing a large channel take tens of
-        # seconds.
-        Index("ix_content_file_path", "file_path", sqlite_where=text("file_path IS NOT NULL")),
         # The three pinned-playlist shelves and their counts. Partial, because
         # "played", "favorite" and "saved" are each a small slice of a library.
         Index(

@@ -1,13 +1,13 @@
 """Explore's browse shelves: songs, channels and playlists picked from the
-interests a profile listed in Settings, plus the charts and one mood shelf,
+interests listed in Settings, plus the charts and one mood shelf,
 which belong to nobody in particular.
 
 There is no recommender model here and no user-behaviour signal — an interest
 is a free-text phrase, and a recommendation is what YouTube search returns for
-it. That's deliberate: Spotea knows what a profile follows and plays, but it
+it. That's deliberate: Spotea knows what you follow and play, but it
 has no way to turn that into *new* discovery on its own, whereas "tell me what
 you like" turns straight into a query. The charts and mood shelves are the
-answer to the other case: a profile that has said nothing about itself yet,
+answer to the other case: a library that has said nothing about itself yet,
 which until they existed had an empty Explore tab and a nag.
 
 The interesting part is therefore not the ranking, it's the request budget.
@@ -23,7 +23,7 @@ service that rate-limits an unauthenticated residential IP. So:
     recommendations go stale on that interval, when the interest list is
     edited, and when the app-wide Refresh button is pressed — the same three
     moments everything else on the page does;
-  * a run samples INTERESTS_PER_RUN of the profile's interests rather than
+  * a run samples INTERESTS_PER_RUN of the interests rather than
     searching all of them, which bounds the cost of a run regardless of how
     many interests are listed (and makes "Refresh" surface different corners
     of the list, which is the behaviour you want anyway);
@@ -58,8 +58,8 @@ from app.youtube.urls import extract_channel_id
 logger = logging.getLogger(__name__)
 
 # Floor on how old a batch can be before the next visit to Explore rebuilds
-# it. Not a constant of its own: callers pass the profile's account's
-# configured feed refresh interval (see Account.feed_refresh_interval_minutes),
+# it. Not a constant of its own: callers pass the user's
+# configured feed refresh interval (see User.feed_refresh_interval_minutes),
 # so "how often does this app go and look at YouTube again" stays one setting
 # rather than two. This is only the fallback for a caller that passes no ttl.
 DEFAULT_TTL = timedelta(minutes=30)
@@ -106,9 +106,8 @@ _SEARCHERS = {
 _IDENTITY_FIELDS = {"videos": "video_id", "channels": "channel_id", "playlists": "playlist_id"}
 
 # Serializes batch building process-wide. Not about data races (each run
-# writes only its own profile's row) — it's a second, cruder brake on how many
-# yt-dlp searches can be in flight at once, so two profiles refreshing
-# together can't double the burst _POOL_SIZE is sized for.
+# writes only its own row) — it's a second, cruder brake on how many
+# searches can be in flight at once.
 _build_lock = threading.Lock()
 
 
@@ -131,7 +130,7 @@ def _charts_shelves() -> dict:
     is what everyone in a country is listening to this week. Included in the
     batch rather than served from a route of its own so it shares the cache,
     the TTL and the refresh button that already exist for the shelves beside
-    it; the cost of that is one duplicated copy per profile, which is a few
+    it; the cost of that is one duplicated copy per user, which is a few
     kilobytes of JSON against a whole second endpoint."""
     charts = fetch_charts(settings.music_chart_country)
     return {
@@ -170,8 +169,8 @@ def _mood_shelf() -> dict:
     return {"mood": None}
 
 
-# Shelves built without reference to the profile's interests, so they fill in
-# even for a profile that has listed none.
+# Shelves built without reference to the interest list, so they fill in even
+# for a library that has listed none.
 _BROWSE_BUILDERS = (_charts_shelves, _mood_shelf)
 
 
@@ -208,7 +207,7 @@ def build_batch(interests: list[str]) -> dict:
     """Runs the searches for a fresh batch. Pure — no database, no caching —
     so the caching policy above stays in one place (get_recommendations).
 
-    A profile with no interests still gets a batch: the interest searches
+    A library with no interests still gets a batch: the interest searches
     are simply skipped and the charts and mood shelves are the whole of it.
     That is the case Explore used to have nothing at all to show.
     """
@@ -271,7 +270,7 @@ def _cached_batch(
         return None
 
 
-def _drop_already_in_library(db: Session, profile: User, batch: dict) -> dict:
+def _drop_already_in_library(db: Session, user: User, batch: dict) -> dict:
     """Recommending something already in the library adds nothing — a
     followed channel or an added video isn't new. Applied here, at read
     time, against every batch (freshly built or cached) rather than inside
@@ -282,19 +281,19 @@ def _drop_already_in_library(db: Session, profile: User, batch: dict) -> dict:
     Playlists aren't filtered — YouTube's search results don't expose enough
     to match one against the library reliably.
 
-    Observed live before this: a profile whose interests included "devops"
+    Observed live before this: an interest list including "devops"
     was recommended a channel it already followed.
 
     The charting-artists shelf is filtered on the same rule as the channels
     one: it is a list of channels to follow, and one already followed isn't.
     """
     owned_video_ids = {
-        video_id for (video_id,) in db.query(Content.video_id).filter(Content.user_id == profile.id)
+        video_id for (video_id,) in db.query(Content.video_id).filter(Content.user_id == user.id)
     }
     followed_channel_ids = {
         channel_id
         for (channel_id,) in (
-            db.query(Feed.rss_url).filter(Feed.user_id == profile.id, Feed.followed.is_(True))
+            db.query(Feed.rss_url).filter(Feed.user_id == user.id, Feed.followed.is_(True))
         )
         for channel_id in [extract_channel_id(channel_id)]
         if channel_id is not None
@@ -311,20 +310,20 @@ def _drop_already_in_library(db: Session, profile: User, batch: dict) -> dict:
 
 
 def get_recommendations(
-    db: Session, profile: User, *, ttl: timedelta = DEFAULT_TTL, force: bool = False
+    db: Session, user: User, *, ttl: timedelta = DEFAULT_TTL, force: bool = False
 ) -> tuple[dict, datetime]:
-    """One profile's current batch plus when it was built, rebuilding only if
+    """The current batch plus when it was built, rebuilding only if
     it's missing, older than `ttl`, built from different interests, or
     `force`d — then filtered against the current library (see
     _drop_already_in_library), always fresh regardless of whether the batch
     itself came from cache.
 
-    Every profile has a batch, including one with no interests listed: the
+    There is always a batch, including with no interests listed: the
     charts and mood shelves don't depend on any (see build_batch), so
     generated_at is never None.
     """
-    batch, generated_at = _get_or_build_batch(db, profile, ttl=ttl, force=force)
-    return _drop_already_in_library(db, profile, batch), generated_at
+    batch, generated_at = _get_or_build_batch(db, user, ttl=ttl, force=force)
+    return _drop_already_in_library(db, user, batch), generated_at
 
 
 def _cache_signature(interests: list[str]) -> str:
@@ -335,13 +334,13 @@ def _cache_signature(interests: list[str]) -> str:
 
 
 def _get_or_build_batch(
-    db: Session, profile: User, *, ttl: timedelta, force: bool
+    db: Session, user: User, *, ttl: timedelta, force: bool
 ) -> tuple[dict, datetime]:
     """The caching/locking half of get_recommendations, unfiltered — split
     out so the library filter above wraps every return path (three of them,
     below) from a single point instead of needing to be threaded through
     each one."""
-    interests = parse_interests(profile.interests)
+    interests = parse_interests(user.interests)
 
     # Read before the lock, so a refresh that waits behind another one can
     # still tell "built while I waited" from "already there when I arrived".
@@ -349,7 +348,7 @@ def _get_or_build_batch(
     signature = _cache_signature(interests)
     if not force:
         cached = _cached_batch(
-            profile.recommendation_cache, signature, not_before=started - ttl
+            user.recommendation_cache, signature, not_before=started - ttl
         )
         if cached:
             return cached
@@ -361,7 +360,7 @@ def _get_or_build_batch(
         # this session's older snapshot. Safe to roll back: nothing of this
         # request's own is pending at this point.
         db.rollback()
-        cache = db.get(RecommendationCache, profile.id)
+        cache = db.get(RecommendationCache, user.id)
         cached = _cached_batch(
             cache, signature, not_before=started if force else utcnow() - ttl
         )
@@ -373,7 +372,7 @@ def _get_or_build_batch(
         if cache is None:
             db.add(
                 RecommendationCache(
-                    user_id=profile.id,
+                    user_id=user.id,
                     interests_signature=signature,
                     payload=json.dumps(batch),
                     generated_at=generated_at,

@@ -116,14 +116,6 @@ def test_omitting_interests_leaves_them_alone(client):
     }
 
 
-def test_interests_are_per_profile(client, db_session):
-    client.put("/settings", json={"interests": ["jazz"]})
-
-    other = client.post("/profiles", json={"name": "Second"}).json()
-    client.post(f"/profiles/{other['id']}/switch")
-    assert client.get("/settings").json()["interests"] == []
-
-
 def test_interest_chips_are_rendered_into_the_settings_panel(client):
     client.put("/settings", json={"interests": ["türk rock"]})
     # Handed to home/settings.js as JSON on the element, not as markup — see

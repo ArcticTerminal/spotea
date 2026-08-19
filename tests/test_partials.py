@@ -14,15 +14,15 @@ from app.timeutil import utcnow
 
 USER_ID = 1
 
-# Must match conftest.py's own DEFAULT_ACCOUNT_ID — duplicated rather than
+# Must match conftest.py's own DEFAULT_USER_ID — duplicated rather than
 # imported, same as test_content_api.py and test_profiles_api.py do: importing
 # conftest as a module re-runs the env setup at its top, which points the
 # settings singleton at a second temp directory and trips its own isolation
 # guard.
-DEFAULT_ACCOUNT_ID = 1
+DEFAULT_USER_ID = 1
 
 
-def _other_profile_feed(db_session) -> Feed:
+def _other_user_feed(db_session) -> Feed:
     """A second profile with one channel, for the scoping tests below.
 
     A real `User` row rather than a made-up user_id: SQLite only enforces
@@ -30,13 +30,13 @@ def _other_profile_feed(db_session) -> Feed:
     app/database.py), so a feed pointing at a profile that doesn't exist is
     rejected rather than silently accepted.
     """
-    other_profile = User(name="Someone Else's Profile", account_id=DEFAULT_ACCOUNT_ID)
-    db_session.add(other_profile)
+    other_user = User(email="other3@example.com", password_hash="x")
+    db_session.add(other_user)
     db_session.commit()
-    db_session.refresh(other_profile)
+    db_session.refresh(other_user)
 
     feed = Feed(
-        user_id=other_profile.id,
+        user_id=other_user.id,
         rss_url="https://example.com/other",
         channel_title="Someone Else",
     )
@@ -363,7 +363,7 @@ def test_detail_fragments_require_login():
 
 def test_detail_fragments_are_scoped_to_the_current_profile(client, db_session):
     _seed(db_session)
-    other = _other_profile_feed(db_session)
+    other = _other_user_feed(db_session)
     db_session.add(
         Content(
             feed_id=other.id,
@@ -385,7 +385,7 @@ def test_fragments_are_scoped_to_the_current_profile(client, db_session):
     """Another profile's content must never leak into a fragment — the
     fragment endpoints resolve the profile the same way the page does."""
     _seed(db_session)
-    other = _other_profile_feed(db_session)
+    other = _other_user_feed(db_session)
     db_session.add(
         Content(
             feed_id=other.id,

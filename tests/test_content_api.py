@@ -4,9 +4,9 @@ from app.content_query import query_content_page
 from app.models import Content, Feed, User
 
 USER_ID = 1
-# Must match conftest.py's own DEFAULT_ACCOUNT_ID (duplicated rather than
+# Must match conftest.py's own DEFAULT_USER_ID (duplicated rather than
 # imported — see test_profiles_api.py for why).
-DEFAULT_ACCOUNT_ID = 1
+DEFAULT_USER_ID = 1
 
 
 def _seed(db_session, count=25):
@@ -67,18 +67,18 @@ def test_get_single_content_404_for_nonexistent_id(client, db_session):
 
 
 def test_get_single_content_404_for_another_users_content(client, db_session):
-    other_profile = User(name="Music", account_id=DEFAULT_ACCOUNT_ID)
-    db_session.add(other_profile)
+    other_user = User(email="other1@example.com", password_hash="x")
+    db_session.add(other_user)
     db_session.commit()
-    db_session.refresh(other_profile)
+    db_session.refresh(other_user)
 
-    other_feed = Feed(user_id=other_profile.id, rss_url="https://example.com/other", channel_title="Other")
+    other_feed = Feed(user_id=other_user.id, rss_url="https://example.com/other", channel_title="Other")
     db_session.add(other_feed)
     db_session.commit()
     db_session.refresh(other_feed)
 
     other_content = Content(
-        feed_id=other_feed.id, user_id=other_profile.id, video_id="otheruser01", title="Not yours"
+        feed_id=other_feed.id, user_id=other_user.id, video_id="otheruser01", title="Not yours"
     )
     db_session.add(other_content)
     db_session.commit()
@@ -122,13 +122,13 @@ def test_queue_endpoints_404_for_unknown_targets(client, db_session):
     assert client.get("/content/queue/playlist/bogus").status_code == 404
 
 
-def test_channel_queue_404s_for_another_profiles_channel(client, db_session):
-    other_profile = User(name="Music", account_id=DEFAULT_ACCOUNT_ID)
-    db_session.add(other_profile)
+def test_channel_queue_404s_for_another_users_channel(client, db_session):
+    other_user = User(email="other2@example.com", password_hash="x")
+    db_session.add(other_user)
     db_session.commit()
-    db_session.refresh(other_profile)
+    db_session.refresh(other_user)
 
-    other_feed = Feed(user_id=other_profile.id, rss_url="https://example.com/queue-other")
+    other_feed = Feed(user_id=other_user.id, rss_url="https://example.com/queue-other")
     db_session.add(other_feed)
     db_session.commit()
     db_session.refresh(other_feed)

@@ -57,39 +57,26 @@ def new_upload_filter() -> ColumnElement[bool]:
     )
 
 
-def followed_feeds(
-    db: Session, user_id: int | None = None, account_id: int | None = None
-) -> Query[Feed]:
+def followed_feeds(db: Session, user_id: int | None = None) -> Query[Feed]:
     """Feeds actually followed, newest first.
 
     followed=False rows are Explore placeholders auto-created to hold a
     single video (see routers/explore.py's _get_or_create_placeholder_feed)
-    or channels unfollowed while keeping some content (see delete_feed).
+    or artists unfollowed while keeping some content (see delete_feed).
     Either way they're invisible in Library and skipped by the background
-    refresh, so every "the user's channels" query has to exclude them —
+    refresh, so every "the user's artists" query has to exclude them —
     omitting the filter is what would silently turn "I grabbed one song"
-    into "I follow this channel now".
+    into "I follow this artist now".
 
-    Scoped one of three ways: everything (both filters omitted), one
-    profile's own (`user_id`, what a request handler scopes to), or one
-    whole account's across every one of its profiles (`account_id` — the
-    background scheduler refreshes per account now that the refresh
-    interval is per-Account rather than one shared setting; see
-    scheduler.py). `user_id` wins if both are somehow given.
+    `user_id` omitted means every user's, which is what the background
+    scheduler walks.
     """
     query = db.query(Feed).filter(Feed.followed.is_(True))
     if user_id is not None:
         query = query.filter(Feed.user_id == user_id)
-    elif account_id is not None:
-        query = query.join(User, Feed.user_id == User.id).filter(User.account_id == account_id)
     return query.order_by(Feed.added_at.desc())
 
 
-# Distinct from a plain free-text filter: this is an *exact* channel match
-# (picked from a suggestion, e.g. clicking a Home channel chip), so a video
-# from a different channel whose title happens to contain the channel's name
-# (e.g. a reaction video titled "... Linus Tech Tips ...") can't sneak in
-# the way it would under the substring title-or-channel search below.
 def _content_query(
     db: Session, user_id: int, filter: str = "", feed_id: int | None = None
 ) -> Query[Content]:

@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.content_query import followed_feeds
 from app.database import SessionLocal
 from app.feed_sync import refresh_feeds
-from app.models import Account
+from app.models import User
 from app.storage import sweep_orphans, sweep_stale_previews
 from app.timeutil import utcnow
 
@@ -24,57 +24,55 @@ _task: asyncio.Task | None = None
 # keeps trying at a rate that stays readable in the log.
 ERROR_BACKOFF_SECONDS = 60
 
-# How often the loop wakes to check which accounts are due. The cadence a
-# given account actually experiences is still whatever it chose in Settings
-# (Account.feed_refresh_interval_minutes) — this is just the clock that
-# choice is checked against, now that the interval is per-account rather
-# than one shared AppSettings row read once at the top of the old loop.
-# Short enough that even the shortest preset (15 minutes) is checked several
+# How often the loop wakes to check which users are due. The cadence a
+# given user actually experiences is still whatever it chose in Settings
+# (User.feed_refresh_interval_minutes) — this is just the clock that choice
+# is checked against. Short enough that even the shortest preset (15 minutes) is checked several
 # times within its own window, so a settings change takes effect within a
-# few minutes rather than needing an interrupt; long enough that an account
+# few minutes rather than needing an interrupt; long enough that a user
 # on the longest preset (2 hours) isn't polled for nothing 24 times before
 # it's ever due.
 TICK_SECONDS = 5 * 60
 
 
-def _due_accounts(db: Session) -> list[Account]:
-    """Accounts whose own interval has elapsed since their own last refresh.
+def _due_users(db: Session) -> list[User]:
+    """Users whose own interval has elapsed since their own last refresh.
 
-    A never-refreshed account (feeds_refreshed_at is None — brand new, or
-    freshly migrated off the old shared AppSettings row) is always due.
+    A never-refreshed user (feeds_refreshed_at is None — brand new) is
+    always due.
     """
     now = utcnow()
     due = []
-    for account in db.query(Account).all():
-        if account.feeds_refreshed_at is None:
-            due.append(account)
+    for user in db.query(User).all():
+        if user.feeds_refreshed_at is None:
+            due.append(user)
             continue
-        elapsed_minutes = (now - account.feeds_refreshed_at).total_seconds() / 60
-        if elapsed_minutes >= account.feed_refresh_interval_minutes:
-            due.append(account)
+        elapsed_minutes = (now - user.feeds_refreshed_at).total_seconds() / 60
+        if elapsed_minutes >= user.feed_refresh_interval_minutes:
+            due.append(user)
     return due
 
 
-def _refresh_due_accounts() -> None:
+def _refresh_due_users() -> None:
     with SessionLocal() as db:
-        for account in _due_accounts(db):
-            feeds = followed_feeds(db, account_id=account.id).all()
+        for user in _due_users(db):
+            feeds = followed_feeds(db, user_id=user.id).all()
             new_count = refresh_feeds(db, feeds)
-            account.feeds_refreshed_at = utcnow()
+            user.feeds_refreshed_at = utcnow()
             db.commit()
             if new_count:
                 logger.info(
-                    "Background refresh added %d new item(s) across %d feed(s) for account %d",
+                    "Background refresh added %d new item(s) across %d feed(s) for user %d",
                     new_count,
                     len(feeds),
-                    account.id,
+                    user.id,
                 )
 
 
 def _sweep_disk() -> None:
     """The other half of every tick — file and row cleanup that has nothing
-    to do with any one account, so it runs unconditionally rather than
-    gated on _due_accounts. See storage.py's module docstring for why these
+    to do with any one user, so it runs unconditionally rather than
+    gated on _due_users. See storage.py's module docstring for why these
     two (and not a ".part" sweep) are safe to run on this cadence."""
     with SessionLocal() as db:
         sweep_orphans(db)
@@ -83,9 +81,9 @@ def _sweep_disk() -> None:
 
 async def run_scheduler() -> None:
     """Runs for the lifetime of the app (started/stopped via start/stop
-    below), checking on TICK_SECONDS which accounts are due for their own
-    configured interval and refreshing just those — see _due_accounts and
-    Account.feed_refresh_interval_minutes — then sweeping disk/DB leftovers
+    below), checking on TICK_SECONDS which users are due for their own
+    configured interval and refreshing just those — see _due_users and
+    User.feed_refresh_interval_minutes — then sweeping disk/DB leftovers
     (see _sweep_disk) regardless of which, if any, accounts were due.
 
     The whole cycle is guarded, not just the refresh. It used to be only the
@@ -101,7 +99,7 @@ async def run_scheduler() -> None:
         # CancelledError is a BaseException, so `except Exception` below lets
         # a shutdown through untouched.
         try:
-            await asyncio.to_thread(_refresh_due_accounts)
+            await asyncio.to_thread(_refresh_due_users)
             await asyncio.to_thread(_sweep_disk)
         except Exception:
             logger.exception("Feed refresh cycle failed; retrying in %ds", ERROR_BACKOFF_SECONDS)

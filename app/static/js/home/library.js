@@ -194,11 +194,11 @@ export function setupRefreshButton(alsoRefresh) {
     ?.addEventListener("click", () => refreshFeeds(alsoRefresh));
 }
 
-// Below the mobile-menu-btn breakpoint (see style.css), the profile/refresh/
-// logout row collapses into this single hamburger dropdown instead — same
+// Below the mobile-menu-btn breakpoint (see style.css), the refresh/logout
+// row collapses into this single hamburger dropdown instead — same
 // underlying actions, just consolidated so the topbar doesn't have to fit
-// three separate controls (and any more added later) on one narrow line.
-export function setupMobileMenu(openProfileSwitcher, alsoRefresh) {
+// several separate controls on one narrow line.
+export function setupMobileMenu(alsoRefresh) {
   const btn = document.getElementById("mobile-menu-btn");
   const menu = document.getElementById("mobile-menu");
   if (!btn || !menu) return;
@@ -224,10 +224,5 @@ export function setupMobileMenu(openProfileSwitcher, alsoRefresh) {
   document.getElementById("mobile-menu-refresh")?.addEventListener("click", () => {
     setOpen(false);
     refreshFeeds(alsoRefresh);
-  });
-
-  document.getElementById("mobile-menu-profile")?.addEventListener("click", () => {
-    setOpen(false);
-    openProfileSwitcher();
   });
 }

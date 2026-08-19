@@ -178,8 +178,8 @@ def refresh_feeds(db: Session, feeds: list[Feed]) -> int:
     """Fetch and apply every given feed's latest RSS data — the fetch half
     fanned out across a thread pool, the DB half applied back sequentially
     on the caller's session. Shared by the on-demand /feeds/refresh endpoint
-    (profile-scoped) and the background scheduler (every feed across every
-    profile, no filter) — one feed's apply_feed_data failing must not abort
+    (user-scoped) and the background scheduler (every feed across every
+    user, no filter) — one feed's apply_feed_data failing must not abort
     every other feed's refresh in the same call, so each is isolated below
     rather than summed in one expression."""
     if not feeds:
@@ -202,7 +202,7 @@ def cache_thumbnail(video_id: str, thumbnail_url: str) -> None:
     """The actual work behind pages.py's queue_thumbnail_caching — fetches
     once and rewrites every Content row sharing this video_id (there can be
     more than one: the same video followed/played/favorited under more than
-    one profile). Meant to run as a FastAPI BackgroundTask, after the
+    one user). Meant to run as a FastAPI BackgroundTask, after the
     response that triggered it has already gone out with the original
     (still remote) URL — this call only ever affects the *next* render of
     this content, never the one that queued it."""

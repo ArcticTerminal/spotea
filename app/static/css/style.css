@@ -438,21 +438,8 @@ select {
   color: var(--text-secondary);
 }
 
-.btn-profile {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  max-width: 140px;
-}
-
-.btn-profile span:last-child {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* Below this, "Spotea" + a named profile pill + the refresh icon + "Log
-   out" don't reliably fit on one line — the exact tipping point depends on
+/* Below this, "Spotea" + the refresh icon + "Log out" don't reliably fit
+   on one line — the exact tipping point depends on
    the profile's name length and the platform font's actual glyph widths,
    which easily land under the ~390px a phone-sized viewport gives us.
    Collapsing them into a single hamburger menu sidesteps that entirely
@@ -843,11 +830,10 @@ html[data-active-tab="detail"] .tab-panel[data-tab-panel="detail"] {
 }
 
 /* Shared shape for every text input in the app — search (library, channel
-   search), the profile name field — so they all read as the same control.
+   search), the interest field — so they all read as the same control.
    Each selector below only adds what's actually different about it (width
    behavior, margin, flex). */
 .channel-search input,
-.profiles-add-form input,
 .interests-add-form input,
 .library-search-input {
   padding: 0.5rem 0.6rem;
@@ -862,7 +848,6 @@ html[data-active-tab="detail"] .tab-panel[data-tab-panel="detail"] {
 }
 
 .channel-search input::placeholder,
-.profiles-add-form input::placeholder,
 .interests-add-form input::placeholder,
 .library-search-input::placeholder,
 .login-card input::placeholder {
@@ -872,7 +857,6 @@ html[data-active-tab="detail"] .tab-panel[data-tab-panel="detail"] {
 /* Accent border instead of the browser's default focus ring, on every
    input above — no exceptions, so focus always reads the same way. */
 .channel-search input:focus,
-.profiles-add-form input:focus,
 .interests-add-form input:focus,
 .library-search-input:focus {
   outline: none;
@@ -1171,119 +1155,6 @@ button.track-link {
 .storage-item-meta {
   font-size: 0.72rem;
   color: var(--text-muted);
-}
-
-.modal-profiles {
-  max-width: 400px;
-  /* Caps the whole modal, not just the list, so the "New profile name…"
-     input at the bottom stays reachable above the on-screen keyboard on
-     mobile instead of the modal overflowing past the visible viewport. */
-  max-height: 80vh;
-  display: flex;
-  flex-direction: column;
-}
-
-.profiles-list {
-  list-style: none;
-  margin: 0 0 1rem;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-  flex: 1 1 auto;
-  overflow-y: auto;
-  min-height: 0;
-}
-
-.profile-row {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.3rem 0.75rem;
-  background: var(--bg-base);
-  border: 1px solid transparent;
-  border-radius: 6px;
-}
-
-/* Same "selected" treatment as the audio-quality options in Settings —
-   an accent border + tint — instead of a text badge. */
-.profile-row.is-current {
-  border-color: var(--accent);
-  background: var(--accent-tint);
-}
-
-.profile-row-main {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  background: none;
-  border: none;
-  color: var(--text-primary);
-  padding: 0.5rem 0;
-  text-align: left;
-  cursor: pointer;
-}
-
-/* While its delete is in flight: the row is no longer something to act on,
-   and its actions have been swapped for a spinner (see home/profiles.js). */
-.profile-row.is-busy {
-  opacity: 0.55;
-  pointer-events: none;
-}
-
-.profile-row-main:disabled {
-  cursor: default;
-}
-
-/* Same layout as .profile-row-main, minus the button semantics/cursor —
-   the manage list's rows aren't clickable-to-switch, just icon + name. */
-.profile-row-info {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  padding: 0.5rem 0;
-  color: var(--text-primary);
-}
-
-.profile-row-icon {
-  display: inline-flex;
-  color: var(--white);
-  flex-shrink: 0;
-}
-
-.profile-row-icon svg {
-  width: 18px;
-  height: 18px;
-}
-
-.profile-row-name {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.profile-row-actions {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-  flex-shrink: 0;
-}
-
-.profiles-switch-hint {
-  margin: 1rem 0 0;
-}
-
-.profiles-add-form {
-  display: flex;
-  gap: 0.5rem;
-}
-
-.profiles-add-form input {
-  flex: 1;
 }
 
 .storage-export,

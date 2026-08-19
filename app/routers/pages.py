@@ -2,7 +2,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
-from app.deps import get_current_profile, get_db, require_login
+from app.deps import get_current_user, get_db, require_login
 from app.interests import parse_interests
 from app.models import User
 from app.page_context import (
@@ -21,7 +21,7 @@ router = APIRouter(dependencies=[Depends(require_login)])
 def home(
     request: Request,
     background_tasks: BackgroundTasks,
-    profile: User = Depends(get_current_profile),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
     """index.html is the whole app — Home, Library, Explore and Settings are
@@ -32,28 +32,19 @@ def home(
     fragment endpoints (routers/partials.py) that re-render that same region
     later. The full page and a refresh of one part of it therefore can't
     disagree about what it contains."""
-    home = home_context(db, profile.id)
+    home = home_context(db, user.id)
     queue_thumbnail_caching(background_tasks, home_shelf_items(home))
-    interests = parse_interests(profile.interests)
+    interests = parse_interests(user.interests)
 
     return templates.TemplateResponse(
         request,
         "index.html",
         {
-            "audio_quality": profile.audio_quality,
-            # Which profile is active is otherwise invisible: the topbar
-            # button and mobile menu row both shipped with static placeholder
-            # text ("Profile" / "Switch profile") that nothing ever replaced.
-            # With more than one profile there was no way to tell which one
-            # you were on without opening the switcher itself. See
-            # profiles.js's renameProfile for the one case a reload doesn't
-            # already cover (renaming the profile you're currently on).
-            "profile_name": profile.name,
-            # Labels Settings' Account group, so the rows that reach past the
-            # active profile say whose login they belong to. The login is
-            # otherwise never shown anywhere in the app after registration.
-            "account_email": profile.account.email,
-            "feed_refresh_interval_minutes": profile.account.feed_refresh_interval_minutes,
+            "audio_quality": user.audio_quality,
+            # Labels the Settings panel — the login is otherwise never shown
+            # anywhere in the app after registration.
+            "account_email": user.email,
+            "feed_refresh_interval_minutes": user.feed_refresh_interval_minutes,
             # Server-rendered rather than fetched by home/settings.js on boot:
             # the interest chips are part of the Settings panel's first paint,
             # and filling them in afterwards flashes an empty editor on every
@@ -61,8 +52,8 @@ def home(
             # cost a YouTube round trip, so they stay a deliberate fetch.
             "interests": interests,
             **home,
-            **library_context(db, profile.id),
-            **downloads_context(db, profile.id),
+            **library_context(db, user.id),
+            **downloads_context(db, user.id),
         },
     )
 

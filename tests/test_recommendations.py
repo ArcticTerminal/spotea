@@ -431,31 +431,6 @@ def test_a_corrupt_cached_payload_is_treated_as_a_miss(client, db_session, fake_
     assert fake_search != []
 
 
-def test_each_profile_gets_its_own_batch(client, db_session, fake_search):
-    _set_interests(db_session, "jazz")
-    client.get("/recommendations")
-
-    other = client.post("/profiles", json={"name": "Second"}).json()
-    client.post(f"/profiles/{other['id']}/switch")
-    client.put("/settings", json={"interests": ["funk"]})
-
-    assert client.get("/recommendations").json()["interests_used"] == ["funk"]
-
-
-def test_deleting_a_profile_takes_its_cached_batch_with_it(client, db_session, fake_search):
-    other = client.post("/profiles", json={"name": "Second"}).json()
-    client.post(f"/profiles/{other['id']}/switch")
-    client.put("/settings", json={"interests": ["funk"]})
-    client.get("/recommendations")
-    assert db_session.get(RecommendationCache, other["id"]) is not None
-
-    client.post(f"/profiles/{USER_ID}/switch")
-    assert client.delete(f"/profiles/{other['id']}").status_code == 204
-
-    db_session.expire_all()
-    assert db_session.get(RecommendationCache, other["id"]) is None
-
-
 def test_recommendation_routes_require_login():
     from fastapi.testclient import TestClient
 

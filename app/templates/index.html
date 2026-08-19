@@ -18,10 +18,9 @@
     // Nothing is remembered across a fresh open: the hash is written on every
     // tab switch (see home/tabs.js), so a reload or a deep link still lands
     // where it should, while opening the app with no hash at all — a PWA
-    // launch, a bookmark, the reload after switching or creating a profile —
-    // always starts on Home. It used to fall back to a localStorage copy of
-    // the last tab instead, which meant creating a profile from Settings
-    // dropped you back into Settings with the onboarding wizard over it.
+    // launch, a bookmark — always starts on Home. It used to fall back to a
+    // localStorage copy of the last tab instead, which meant an action taken
+    // from Settings dropped you back into Settings on the next load.
     //
     // A channel/playlist hash resolves to the "detail" panel instead — kept
     // out of VALID_TABS itself so those routes can't get treated as a
@@ -69,12 +68,6 @@
           <button type="button" id="refresh-feeds-btn" class="btn-icon" aria-label="Refresh feeds" title="Refresh feeds">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-refresh" /></svg>
           </button>
-          <button type="button" id="profile-switcher-btn" class="btn-ghost btn-profile" aria-haspopup="dialog" aria-label="Switch profile" title="Switch profile">
-            <span class="profile-row-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-user" /></svg>
-            </span>
-            <span id="profile-switcher-name">{{ profile_name }}</span>
-          </button>
           <form method="post" action="/logout">
             <button type="submit" class="btn-ghost">Log out</button>
           </form>
@@ -87,12 +80,6 @@
           <button type="button" id="mobile-menu-refresh" class="mobile-menu-item" role="menuitem">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-refresh" /></svg>
             <span>Refresh feeds</span>
-          </button>
-          <button type="button" id="mobile-menu-profile" class="mobile-menu-item" role="menuitem" aria-label="Switch profile">
-            <span class="profile-row-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-user" /></svg>
-            </span>
-            <span id="mobile-menu-profile-name">{{ profile_name }}</span>
           </button>
           <form method="post" action="/logout" class="mobile-menu-form">
             <button type="submit" class="mobile-menu-item" role="menuitem">
@@ -159,7 +146,7 @@
 
         <div id="explore-browse-panel">
           {# "For you": channels/songs/playlists searched from the interests
-             this profile listed in Settings. Filled entirely by
+             the interests listed in Settings. Filled entirely by
              home/explore.js — fetched in the background as soon as the app
              loads (not part of the page render itself, since it can cost a
              live YouTube round trip), so the shelves are already here by the
@@ -180,15 +167,8 @@
 
     <section id="tab-settings" class="tab-panel" data-tab-panel="settings" hidden>
       <div class="channels-panel-inner">
-        {# Two groups, because the rows genuinely divide that way and nothing
-           on the panel used to say so: everything here is per-profile except
-           the profile roster itself and the refresh interval, which live on
-           the Account (see models.py — `User` is a profile, `Account` is the
-           login). Whose settings you are looking at was previously invisible,
-           so changing the interval on one profile silently changed it for the
-           whole household. #}
         <section class="settings-group">
-          <h2>This profile · <span id="settings-profile-name" class="settings-group-who">{{ profile_name }}</span></h2>
+          <h2>Account · <span class="settings-group-who">{{ account_email }}</span></h2>
 
           <div class="settings-row">
             <div class="settings-row-info">
@@ -214,9 +194,6 @@
             <button type="button" id="open-downloads" class="btn-quiet">Manage downloads</button>
           </div>
 
-          {# Per-profile and staying that way: the downloads it applies to are
-             themselves per-profile (Content.user_id), so one profile can be on
-             Data saver while another keeps High quality. #}
           <div class="settings-row">
             <div class="settings-row-info">
               <span class="settings-row-label">Download quality</span>
@@ -230,25 +207,10 @@
 
         </section>
 
-        <section class="settings-group">
-          <h2>Account · <span class="settings-group-who">{{ account_email }}</span></h2>
-
-          <div class="settings-row">
-            <div class="settings-row-info">
-              <span class="settings-row-label">Profiles</span>
-              <span class="settings-row-desc">Switch, rename, or remove a profile. Deleting one also removes its channels and downloads.</span>
-            </div>
-            <button type="button" id="open-profiles-settings" class="btn-quiet">Manage profiles</button>
-          </div>
-
-          {# The scope sentence is repeated in the row's own description rather
-             than left to the group heading: this is the one control where
-             account-wide is genuinely surprising — the interval sits next to
-             five per-profile rows and reads like another one. #}
           <div class="settings-row">
             <div class="settings-row-info">
               <span class="settings-row-label">Check for new videos</span>
-              <span class="settings-row-desc">How often followed channels are checked for new videos in the background. Applies to every profile on this account.</span>
+              <span class="settings-row-desc">How often followed artists are checked for new releases in the background.</span>
             </div>
             <select id="refresh-interval-select" class="settings-select" aria-label="Check for new videos">
               <option value="15" {{ 'selected' if feed_refresh_interval_minutes == 15 }}>Every 15 minutes</option>
@@ -318,38 +280,6 @@
       <div id="downloads-body">
         {% include "_downloads.html" %}
       </div>
-    </div>
-  </div>
-
-  <div id="profiles-overlay" class="modal-overlay" hidden>
-    <div class="modal modal-profiles">
-      <div class="modal-header">
-        <h2>Switch profile</h2>
-        <button type="button" id="profiles-close" class="modal-close" aria-label="Close">×</button>
-      </div>
-      <ul id="profiles-switch-list" class="profiles-list"></ul>
-      <p class="muted profiles-switch-hint">Want to add or rename a profile? Head to Settings.</p>
-    </div>
-  </div>
-
-  <div id="profiles-manage-overlay" class="modal-overlay" hidden>
-    <div class="modal modal-profiles">
-      <div class="modal-header">
-        <h2>Manage profiles</h2>
-        <button type="button" id="profiles-manage-close" class="modal-close" aria-label="Close">×</button>
-      </div>
-      <ul id="profiles-manage-list" class="profiles-list"></ul>
-      <form id="profiles-add-form" class="profiles-add-form">
-        <input
-          type="text"
-          id="profiles-add-input"
-          placeholder="New profile name…"
-          maxlength="100"
-          autocomplete="off"
-          required
-        />
-        <button type="submit" class="btn-primary">Add</button>
-      </form>
     </div>
   </div>
 

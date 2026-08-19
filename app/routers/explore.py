@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.deps import get_current_profile, get_db, require_login
+from app.deps import get_current_user, get_db, require_login
 from app.models import Content, Feed, User
 from app.schemas import (
     ChannelSearchResultOut,
@@ -97,7 +97,7 @@ def _get_or_create_placeholder_feed(
 @router.post("/videos", response_model=VideoAddResult, status_code=status.HTTP_201_CREATED)
 def add_single_video(
     payload: VideoAddCreate,
-    profile: User = Depends(get_current_profile),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> VideoAddResult:
     """Explore's "listen" action — adds exactly one video without following
@@ -112,17 +112,17 @@ def add_single_video(
     id and let the player match/replay whatever was already downloaded."""
     existing_content = (
         db.query(Content)
-        .filter(Content.user_id == profile.id, Content.video_id == payload.video_id)
+        .filter(Content.user_id == user.id, Content.video_id == payload.video_id)
         .first()
     )
     if existing_content:
         return VideoAddResult(content_id=existing_content.id)
 
-    feed = _get_or_create_placeholder_feed(db, payload.channel_id, payload.channel_title, profile.id)
+    feed = _get_or_create_placeholder_feed(db, payload.channel_id, payload.channel_title, user.id)
 
     content = Content(
         feed_id=feed.id,
-        user_id=profile.id,
+        user_id=user.id,
         video_id=payload.video_id,
         title=payload.title,
         # Stored as-is — see _run_backfill's comment above; the player page
@@ -163,7 +163,7 @@ def _preview_content(feed_id: int, user_id: int, item) -> Content:
 @router.post("/videos/batch", response_model=VideoBatchResult, status_code=status.HTTP_201_CREATED)
 def add_video_batch(
     payload: VideoBatchCreate,
-    profile: User = Depends(get_current_profile),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> VideoBatchResult:
     """Turns a whole remote playlist or channel listing into playable rows in
@@ -177,7 +177,7 @@ def add_video_batch(
     per-entry channel attribution is the real uploader, so there's nothing to
     resolve.
 
-    Rows that already exist for this profile (an earlier preview, or a real
+    Rows that already exist (an earlier preview, or a real
     upload from a followed channel) are reused rather than duplicated, the
     same way add_single_video treats them. Order in equals order out: the
     caller uses it directly as the play queue.
@@ -192,7 +192,7 @@ def add_video_batch(
     existing_content = {
         content.video_id: content
         for content in db.query(Content).filter(
-            Content.user_id == profile.id,
+            Content.user_id == user.id,
             Content.video_id.in_([item.video_id for item in items]),
         )
     }
@@ -200,7 +200,7 @@ def add_video_batch(
     feeds_by_rss_url = {
         feed.rss_url: feed
         for feed in db.query(Feed).filter(
-            Feed.user_id == profile.id, Feed.rss_url.in_(wanted_rss_urls)
+            Feed.user_id == user.id, Feed.rss_url.in_(wanted_rss_urls)
         )
     }
 
@@ -210,7 +210,7 @@ def add_video_batch(
             # Same placeholder-feed contract as _get_or_create_placeholder_feed
             # above; built inline here so the whole batch is one flush.
             feed = Feed(
-                user_id=profile.id,
+                user_id=user.id,
                 rss_url=rss_url,
                 channel_title=item.channel_title,
                 followed=False,
@@ -224,7 +224,7 @@ def add_video_batch(
         if item.video_id in existing_content or item.video_id in created:
             continue
         feed = feeds_by_rss_url[channel_feed_url(item.channel_id)]
-        content = _preview_content(feed.id, profile.id, item)
+        content = _preview_content(feed.id, user.id, item)
         db.add(content)
         created[item.video_id] = content
 
@@ -236,7 +236,7 @@ def add_video_batch(
 
 @router.delete("/videos/{content_id}", status_code=status.HTTP_204_NO_CONTENT)
 def remove_single_video(
-    content_id: int, profile: User = Depends(get_current_profile), db: Session = Depends(get_db)
+    content_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ) -> None:
     """Removes a video added via Explore outright (unlike DELETE
     /content/{id}, which only resets download status) — used both to dismiss
@@ -246,7 +246,7 @@ def remove_single_video(
     content = (
         db.query(Content)
         .join(Feed)
-        .filter(Content.id == content_id, Content.user_id == profile.id, Feed.followed.is_(False))
+        .filter(Content.id == content_id, Content.user_id == user.id, Feed.followed.is_(False))
         .first()
     )
     if not content:

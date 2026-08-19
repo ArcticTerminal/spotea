@@ -13,7 +13,6 @@ if TYPE_CHECKING:  # import cycle otherwise — models has no reason to know abo
 # MAX_INTEREST_LENGTH). Chosen to match the column each field ends up in
 # rather than picked arbitrarily, so a value that fits here always fits there.
 _URL_MAX_LENGTH = 2048  # generous browser-address-bar bound; no column caps it directly
-_PROFILE_NAME_MAX_LENGTH = 100  # User.name: String(100)
 _CONTENT_TITLE_MAX_LENGTH = 500  # Content.title: String(500)
 # Above any real subscriptions export (a few hundred channels); guards
 # against a pasted list turning into thousands of yt-dlp resolutions.
@@ -168,7 +167,7 @@ class RecommendationsOut(BaseModel):
     client renders a recommended song and a searched one identically, and
     "listen" on either goes through POST /feeds/videos."""
 
-    # Everything the profile listed, so Explore can say what it's working
+    # Everything the interest list holds, so Explore can say what it's working
     # from (and tell "no interests set" apart from "interests set, nothing
     # found") without a second request to /settings.
     interests: list[str]
@@ -180,7 +179,7 @@ class RecommendationsOut(BaseModel):
     channels: list[ChannelSearchResultOut]
     playlists: list[PlaylistSearchResultOut]
     # Below here: shelves that don't come from the interest list at all, so
-    # they're filled in even for a profile that has listed none.
+    # they're filled in even for a library that has listed none.
     charts: list[PlaylistSearchResultOut]
     chart_artists: list[ChannelSearchResultOut]
     mood: MoodShelfOut | None
@@ -248,21 +247,3 @@ class SettingsUpdate(BaseModel):
     # whole-list PUT means add, remove and reorder are one code path instead
     # of three endpoints.
     interests: list[str] | None = None
-
-
-class ProfileOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    name: str
-    is_current: bool
-
-
-class ProfileCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=_PROFILE_NAME_MAX_LENGTH)
-
-
-class ProfileUpdate(BaseModel):
-    name: str = Field(min_length=1, max_length=_PROFILE_NAME_MAX_LENGTH)
-
-
