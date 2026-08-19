@@ -108,7 +108,9 @@ def _followed_feed_id(db: Session, user_id: int, channel_id: str) -> int | None:
     return followed.id if followed else None
 
 
-def remote_artist_context(db: Session, user_id: int, browse_id: str) -> dict | None:
+def remote_artist_context(
+    db: Session, user_id: int, browse_id: str, avatar_url: str | None = None
+) -> dict | None:
     """An artist's page as YouTube Music knows it — their tracks, and a
     Follow that lands on the right channel.
 
@@ -122,16 +124,21 @@ def remote_artist_context(db: Session, user_id: int, browse_id: str) -> dict | N
     and follows the official channel, which is what someone pressing that
     button means.
 
-    Falls through to remote_channel_context when YouTube Music has no artist
-    under this id: the same id also arrives from ordinary channel results
-    (see routers/explore.py's fallback search), and a channel that isn't an
-    artist should still open rather than 404.
+    **This is what a channel result opens too**, not just an artist card,
+    which is why the fallback below matters as much as the happy path. An
+    artist whose YouTube channel is mostly vlogs — Shirin David is the case
+    that prompted this — has a channel listing where the music is buried,
+    and the same id opens a clean track list here (YouTube Music accepts the
+    official channel id as a browse id; see fetch_artist). So the id is
+    tried as an artist first, and anything that isn't one — a podcast, a
+    tech channel, an artist page with nothing playable on it — falls through
+    to the plain channel listing it would have shown anyway. The cost of
+    that fallback is one extra YouTube Music request on a click the user
+    made deliberately, and it never touches youtube.com.
     """
     artist = fetch_artist(browse_id)
-    if artist is None:
-        return remote_channel_context(db, user_id, browse_id)
-    if not artist.tracks:
-        return None
+    if artist is None or not artist.tracks:
+        return remote_channel_context(db, user_id, browse_id, avatar_url=avatar_url)
 
     # The official channel where there is one. Where there isn't — a handful
     # of artists exist on YouTube Music with no channel behind them — the

@@ -83,6 +83,11 @@ MOOD_PLAYLIST_LIMIT = 24
 # The chart's artist list runs to 40. Same reasoning.
 CHART_ARTIST_LIMIT = 12
 
+# How many tracks an artist page lists. Matched to search.py's
+# PLAYLIST_ITEM_LIMIT so every remote track list in this app is the same
+# length — the detail panel renders them all on one page either way.
+ARTIST_TRACK_LIMIT = 50
+
 
 # YTMusic wraps a requests.Session, which is not documented as thread-safe,
 # and services/recommendations.py runs its searches across a thread pool.
@@ -105,13 +110,20 @@ def _client() -> YTMusic:
     return client
 
 
-def _call(description: str, method: str, *args, **kwargs):
+def _call(description: str, method: str, *args, level: int = logging.WARNING, **kwargs):
     """One ytmusicapi call, with failure flattened to None. See the module
-    docstring for why the catch is this broad."""
+    docstring for why the catch is this broad.
+
+    `level` is for the one caller whose failures are routine rather than
+    surprising: asking whether a channel is an artist (see fetch_artist)
+    fails for every channel that isn't one, and a traceback per podcast
+    opened is noise that trains you to ignore the log. Anything above INFO
+    keeps the traceback, since at that point it's a real fault.
+    """
     try:
         return getattr(_client(), method)(*args, **kwargs)
     except Exception:
-        logger.warning("YouTube Music %s failed", description, exc_info=True)
+        logger.log(level, "YouTube Music %s failed", description, exc_info=level > logging.INFO)
         return None
 
 
@@ -375,12 +387,16 @@ def fetch_mood_playlists(
 class ArtistProfile:
     """An artist page as YouTube Music knows it.
 
-    `browse_id` is how YouTube Music addresses the artist (in practice the
-    Topic channel's id, which is also what every song result attributes its
-    tracks to); `channel_id` is the artist's **official** YouTube channel —
-    a genuinely different id, and the one worth following, since it carries
-    the real uploads an RSS feed can sync. Resolving one to the other is the
-    only reason to make this call for a follow action.
+    `browse_id` is how YouTube Music addresses the artist, and it accepts
+    more than one id for the same person: the Topic-channel id that song
+    results and chart entries carry, *and* the artist's official channel id
+    — verified live, both open Shirin David's page and both report the same
+    `channelId` back. That second half is what lets an ordinary channel
+    result open an artist page (see services/remote_detail.py).
+
+    `channel_id` is the artist's **official** YouTube channel, which is the
+    one worth following since it carries the real uploads an RSS feed can
+    sync.
     """
 
     browse_id: str
@@ -393,28 +409,62 @@ class ArtistProfile:
     tracks: list[VideoSearchResult]
 
 
-def fetch_artist(browse_id: str) -> ArtistProfile | None:
+def _artist_songs(songs: dict, all_songs: bool) -> list[dict]:
+    """The song entries to list for an artist.
+
+    The page itself only previews five, with a "Top songs" playlist behind a
+    browse id for the rest — 56 of them for a mid-size artist, measured. A
+    five-track artist page is not worth opening, so the playlist is what gets
+    listed and the preview is only the fallback for an artist who has no such
+    playlist. Costs a second request, which is why `all_songs` exists: a
+    caller that only wants the ids off the page header shouldn't pay it.
+    """
+    preview = songs.get("results") or []
+    browse_id = songs.get("browseId")
+    if not all_songs or not browse_id:
+        return preview
+
+    playlist = _call("artist top songs", "get_playlist", browse_id, limit=ARTIST_TRACK_LIMIT)
+    return (playlist or {}).get("tracks") or preview
+
+
+def fetch_artist(browse_id: str, all_songs: bool = True) -> ArtistProfile | None:
     """One artist's page, or None if YouTube Music has no such artist.
 
-    `tracks` merges the page's top songs with its videos, deduplicated by
+    None is also what an ordinary, non-musical channel gets: asked for one,
+    YouTube Music answers with a page this parser can't read (KeyError on
+    'musicImmersiveHeaderRenderer', measured on both a podcast and a tech
+    channel), which _call flattens like any other failure. That makes this
+    function safe to *try* on any channel id and let the answer decide — see
+    services/remote_detail.py.
+
+    `tracks` merges the artist's songs with their videos, deduplicated by
     video id — the two lists overlap in what they are *about* but not in
     what they point at, since YouTube Music holds a separate id for a song's
     audio track (MUSIC_VIDEO_TYPE_ATV) and its official music video
     (…_OMV). Both are playable and either may be the only one that exists
-    for a given release, so both go in, audio first.
+    for a given release, so both go in, audio first. Videos here means music
+    videos only; an artist's vlogs and interviews live on their YouTube
+    channel and YouTube Music doesn't index them, which is the entire point
+    of listing an artist this way.
     """
-    artist = _call("artist", "get_artist", browse_id)
+    artist = _call("artist", "get_artist", browse_id, level=logging.INFO)
     if not artist or not artist.get("name"):
         return None
 
+    sections = (
+        _artist_songs(artist.get("songs") or {}, all_songs),
+        (artist.get("videos") or {}).get("results") or [],
+    )
     tracks: list[VideoSearchResult] = []
     seen: set[str] = set()
-    for section in ("songs", "videos"):
-        for track in _song_results((artist.get(section) or {}).get("results")):
+    for section in sections:
+        for track in _song_results(section):
             if track.video_id in seen:
                 continue
             seen.add(track.video_id)
             tracks.append(track)
+    tracks = tracks[:ARTIST_TRACK_LIMIT]
 
     channel_id = artist.get("channelId")
     return ArtistProfile(
@@ -440,5 +490,8 @@ def resolve_artist_channel(browse_id: str) -> str | None:
     follow. Costs one request, which is why it happens on the follow click
     and not on every search result.
     """
-    artist = fetch_artist(browse_id)
+    # all_songs=False: this wants one field off the page header, and the full
+    # track list it would otherwise pull costs a second request nobody here
+    # reads.
+    artist = fetch_artist(browse_id, all_songs=False)
     return artist.channel_id if artist else None

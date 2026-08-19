@@ -3,7 +3,7 @@
 //
 // What happens when you act on a result lives in home/remote.js (playing a
 // song, following a channel) or in the detail panel (opening a playlist or an
-// unfollowed channel drills into home/detail.js's yt-playlist/yt-channel
+// unfollowed channel drills into home/detail.js's yt-playlist/yt-artist
 // kinds, rather than Explore growing a track list of its own).
 //
 // The tab shows one of two regions at a time: the browse/recommendations
@@ -40,8 +40,9 @@ export function renderChannelResults(results, containerId = "channel-search-resu
         r.subscriber_count != null
           ? `<span class="search-result-subs">${formatSubscribers(r.subscriber_count)}</span>`
           : "";
-      // Two targets on one row: the row itself previews the channel (its
-      // latest uploads, in the detail panel), the button follows it outright
+      // Two targets on one row: the row itself previews what the channel
+      // has (an artist's tracks where there are any, its latest uploads
+      // otherwise — see the click handler), the button follows it outright
       // for when you already know what you're adding.
       return `
         <li
@@ -186,19 +187,18 @@ export function channelCardHtml(channel) {
   `;
 }
 
-/** A charting artist. Same data shape as a channel card and deliberately a
- *  different card: the id on a chart entry is the artist's auto-generated
- *  "Topic" channel, not the channel they upload to, so this opens their
- *  YouTube Music page (which knows both) instead of the channel behind the
- *  id, and carries no Add button — following from here would follow the
- *  wrong one. Follow lives on the artist page, where the right id is known. */
+/** A charting artist. Same data shape as a channel card, and opens the same
+ *  way; what it deliberately lacks is the Add button. The id on a chart
+ *  entry is the artist's auto-generated "Topic" channel rather than the one
+ *  they upload to, so following straight from this card would follow the
+ *  wrong thing. Follow lives on the artist page, which knows both ids. */
 function artistCardHtml(artist) {
   const avatar = artist.thumbnail_url
     ? `<img class="shelf-channel-avatar" src="${escapeHtml(artist.thumbnail_url)}" alt="" loading="lazy" />`
     : `<span class="shelf-channel-avatar"></span>`;
   return `
     <article
-      class="card shelf-channel-card shelf-artist-card"
+      class="card shelf-channel-card"
       data-channel-id="${escapeHtml(artist.channel_id)}"
     >
       ${avatar}
@@ -448,15 +448,14 @@ export function setupRecommendations() {
       return;
     }
 
-    const artistCard = event.target.closest(".shelf-artist-card");
-    if (artistCard) {
-      openDetail("yt-artist", artistCard.dataset.channelId);
-      return;
-    }
-
+    // Both channel-ish cards open the same route, and the server decides
+    // what it is: an artist gets their track list, anything else falls back
+    // to the channel's uploads (see remote_artist_context). The avatar hint
+    // only matters on that fallback — an artist page brings its own
+    // portrait — but the chart card has none to send anyway.
     const channelCard = event.target.closest(".shelf-channel-card");
     if (channelCard) {
-      openDetail("yt-channel", channelCard.dataset.channelId, { avatar: channelCard.dataset.thumbnailUrl || null });
+      openDetail("yt-artist", channelCard.dataset.channelId, { avatar: channelCard.dataset.thumbnailUrl || null });
       return;
     }
 
@@ -530,9 +529,14 @@ export function setupExploreSearch() {
       return;
     }
 
+    // yt-artist, not yt-channel: searching an artist's name finds the
+    // channel they upload to, and for an artist who also vlogs that listing
+    // is mostly not music. Same id, same route as the shelves above — the
+    // server tries the artist page first and falls back to these uploads
+    // for a channel that isn't one (a podcast, say).
     const row = event.target.closest(".search-result-channel");
     if (row?.dataset.channelId) {
-      openDetail("yt-channel", row.dataset.channelId, { avatar: row.dataset.thumbnailUrl || null });
+      openDetail("yt-artist", row.dataset.channelId, { avatar: row.dataset.thumbnailUrl || null });
     }
   });
 

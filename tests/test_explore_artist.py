@@ -1,11 +1,15 @@
-"""The artist detail panel, and the one thing it exists to get right:
-following the artist's *official* channel rather than the auto-generated
-"<Artist> - Topic" one every music result is attributed to.
+"""The artist detail panel: the two things it exists to get right, and the
+fallback that lets every channel result go through it.
 
-Two halves of the same problem are pinned here — the panel resolving the
-official channel for its Follow button, and channel search no longer
-offering the Topic channels as things to follow at all. Both sources are
-monkeypatched out.
+Getting right: following the artist's *official* channel rather than the
+auto-generated "<Artist> - Topic" one every music result is attributed to,
+and channel search no longer offering those Topic channels to follow at
+all.
+
+The fallback: this panel is what a channel card opens now, so an id that
+isn't an artist — or is one with nothing playable — has to come back as the
+plain channel listing rather than a 404. Both sources are monkeypatched
+out.
 """
 
 import pytest
@@ -53,6 +57,34 @@ def fake_artist(monkeypatch):
         monkeypatch.setattr(remote_detail, "fetch_artist", lambda browse_id: profile)
 
     return install
+
+
+@pytest.fixture
+def fake_channel_fallback(monkeypatch):
+    """Stands in for remote_channel_context and records what it was handed,
+    so the tests below can tell "fell back" apart from "404" and check that
+    the avatar hint survived the trip."""
+    calls: list[dict] = []
+
+    def fallback(db, user_id, channel_id, avatar_url=None):
+        calls.append({"channel_id": channel_id, "avatar_url": avatar_url})
+        return {
+            "kind": "yt-channel",
+            "remote": True,
+            "feed": None,
+            "title": "A Plain Channel",
+            "content": [],
+            "empty_message": "Nothing playable here.",
+            "back_label": "Explore",
+            "page": 1,
+            "total_pages": 1,
+            "start_index": 1,
+            "base_url": "#",
+            "video_count": 0,
+        }
+
+    monkeypatch.setattr(remote_detail, "remote_channel_context", fallback)
+    return calls
 
 
 def test_the_panel_lists_the_artists_tracks(client, fake_artist):
@@ -109,29 +141,12 @@ def test_an_already_followed_artist_points_at_the_library_copy(client, db_sessio
     assert "Follow" not in res.text
 
 
-def test_an_id_that_is_not_an_artist_opens_as_a_channel(client, fake_artist, monkeypatch):
-    """The same id shape arrives from ordinary channel results (see
-    routers/explore.py's fallback search), and one of those should still
-    open rather than 404."""
+def test_an_id_that_is_not_an_artist_opens_as_a_channel(
+    client, fake_artist, fake_channel_fallback
+):
+    """Every channel result routes through here, and most channels aren't
+    artists — a podcast that opened as a 404 would be a broken app."""
     fake_artist(None)
-    monkeypatch.setattr(
-        remote_detail,
-        "remote_channel_context",
-        lambda db, user_id, channel_id, avatar_url=None: {
-            "kind": "yt-channel",
-            "remote": True,
-            "feed": None,
-            "title": "A Plain Channel",
-            "content": [],
-            "empty_message": "Nothing playable here.",
-            "back_label": "Explore",
-            "page": 1,
-            "total_pages": 1,
-            "start_index": 1,
-            "base_url": "#",
-            "video_count": 0,
-        },
-    )
 
     res = client.get(f"/partials/detail/yt-artist/{BROWSE_ID}")
 
@@ -139,10 +154,33 @@ def test_an_id_that_is_not_an_artist_opens_as_a_channel(client, fake_artist, mon
     assert "A Plain Channel" in res.text
 
 
-def test_an_artist_with_no_tracks_is_a_404(client, fake_artist):
+def test_an_artist_with_nothing_playable_opens_as_a_channel_too(
+    client, fake_artist, fake_channel_fallback
+):
+    """YouTube Music knowing the name is not the same as it having tracks.
+    The channel's own uploads are still a real answer, so this falls back
+    rather than 404ing on a page it could have shown."""
     fake_artist(_profile(tracks=[]))
 
-    assert client.get(f"/partials/detail/yt-artist/{BROWSE_ID}").status_code == 404
+    res = client.get(f"/partials/detail/yt-artist/{BROWSE_ID}")
+
+    assert res.status_code == 200
+    assert "A Plain Channel" in res.text
+
+
+def test_the_cards_avatar_hint_survives_the_fallback(
+    client, fake_artist, fake_channel_fallback
+):
+    """An artist page brings its own portrait, but the channel listing has
+    none to fetch cheaply — so the hint the card sent has to reach it (see
+    remote_channel_context)."""
+    fake_artist(None)
+
+    client.get(f"/partials/detail/yt-artist/{BROWSE_ID}?avatar=/avatars/{BROWSE_ID}.jpg")
+
+    assert fake_channel_fallback == [
+        {"channel_id": BROWSE_ID, "avatar_url": f"/avatars/{BROWSE_ID}.jpg"}
+    ]
 
 
 @pytest.mark.parametrize("browse_id", ["not-an-id", "PLcQNVKi2yvHREvYwLPBMWEAyuq4AERnrm", "UC"])

@@ -62,10 +62,13 @@ function detailUrl(kind, id, page, avatar) {
   const base = hasId(kind) ? `/partials/detail/${kind}/${id}` : `/partials/detail/playlist/${kind}`;
   const params = new URLSearchParams();
   if (page > 1) params.set("page", page);
-  // yt-channel only: what the card the user clicked through from already
-  // had rendered, forwarded so the detail hero doesn't render blank for a
-  // channel nobody's followed yet — see remote_channel_context's docstring.
-  if (kind === "yt-channel" && avatar) params.set("avatar", avatar);
+  // The two channel kinds only: what the card the user clicked through from
+  // already had rendered, forwarded so the detail hero doesn't render blank
+  // for a channel nobody's followed yet — see remote_channel_context's
+  // docstring. yt-artist takes it because that's the route a channel card
+  // opens, and it falls back to the channel listing when the id turns out
+  // not to be an artist.
+  if ((kind === "yt-channel" || kind === "yt-artist") && avatar) params.set("avatar", avatar);
   const query = params.toString();
   return query ? `${base}?${query}` : base;
 }
