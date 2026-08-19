@@ -14,7 +14,6 @@ import {
   setupPreparingChannels,
   setupRefreshButton,
 } from "../home/library.js";
-import { setupOnboarding } from "../home/onboarding.js";
 import { resumeOverlayIfNeeded, setupPlayerOverlay } from "../home/overlay.js";
 import { openProfileSwitcher, setupProfiles } from "../home/profiles.js";
 import {
@@ -60,7 +59,3 @@ setupHorizontalScrollers();
 setupRefreshButton(refreshRecommendations);
 setupMobileMenu(openProfileSwitcher, refreshRecommendations);
 setupProfiles();
-// Last: its steps call into setupInterests's saveInterests, explore.js's
-// channel search endpoint, and the bulk-import overlay's trigger id, all of
-// which need to already be wired by the time it can open.
-setupOnboarding();

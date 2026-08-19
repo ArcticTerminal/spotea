@@ -120,9 +120,8 @@ def _clean_tables(_init_schema):
     audio_quality on the user row (see models.User), and several tests PUT a
     non-default value through Settings; without this reset that value would
     silently carry into whatever test happens to run next, the same leak the
-    per-table deletes above exist to prevent everywhere else. Caught by
-    test_needs_onboarding_false_once_interests_are_set (test_pages.py)
-    leaving interests set on profile 1, which broke
+    per-table deletes above exist to prevent everywhere else. Caught by a
+    test that left interests set on profile 1, which broke
     test_no_interests_means_an_empty_batch_and_no_searches
     (test_recommendations.py) further into the run.
     """

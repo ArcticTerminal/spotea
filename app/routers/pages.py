@@ -2,9 +2,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
-from app.content_query import followed_feeds
 from app.deps import get_current_profile, get_db, require_login
-from app.genres import MUSIC_GENRES, PODCAST_CATEGORIES
 from app.interests import parse_interests
 from app.models import User
 from app.page_context import (
@@ -62,19 +60,6 @@ def home(
             # load. Explore's recommendations are the opposite case — they can
             # cost a YouTube round trip, so they stay a deliberate fetch.
             "interests": interests,
-            # Drives the onboarding wizard's auto-open (see home/onboarding.js):
-            # a profile with neither an interest nor a followed channel has
-            # nothing for Explore's recommendations or the library to work
-            # from, so it's shown again on every such load rather than tracked
-            # with its own "seen it" flag — closing it without adding either
-            # is treated the same as never having seen it.
-            "needs_onboarding": not interests and followed_feeds(db, user_id=profile.id).first() is None,
-            # The onboarding wizard's chip lists — one Python list per kind
-            # that both the template loops and the curated seed scripts
-            # (scripts/seed_music_artists.py, scripts/seed_podcast_channels.py)
-            # key off of, so the chips and the suggestion cache can't drift.
-            "music_genres": MUSIC_GENRES,
-            "podcast_categories": PODCAST_CATEGORIES,
             **home,
             **library_context(db, profile.id),
             **downloads_context(db, profile.id),

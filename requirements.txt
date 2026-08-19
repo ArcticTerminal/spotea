@@ -13,12 +13,6 @@ python-multipart==0.0.32
 itsdangerous==2.2.0
 bcrypt==5.0.0
 feedparser==6.0.13
-# Only outbound REST call this app makes that isn't yt-dlp — MusicBrainz
-# lookups for the onboarding wizard's genre-artist cache (see
-# services/genre_artists.py). httpx over requests since requirements-dev.txt
-# already carries it (for TestClient), so this doesn't add a second HTTP
-# library to the dependency tree.
-httpx==0.28.1
 
 # yt-dlp and its PO-token plugin used to be listed here, unpinned, on the
 # reasoning that YouTube changes its player constantly and yt-dlp ships

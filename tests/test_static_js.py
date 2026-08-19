@@ -305,23 +305,6 @@ def test_profile_changes_reload_onto_home() -> None:
         "keeps whatever tab or detail hash the outgoing profile had"
     )
 
-
-def test_onboarding_wizard_has_no_way_out_but_finishing() -> None:
-    """It's a required step: a profile that dismisses it is left with the
-    empty library and empty "For you" shelves it exists to prevent, and since
-    needs_onboarding goes false the moment one channel exists, one add was
-    enough to never be offered it again."""
-    index = Path("app/templates/index.html").read_text()
-    onboarding = (JS_DIR / "home" / "onboarding.js").read_text()
-
-    assert 'id="onboarding-close"' not in index, "the wizard has a close button again"
-    assert "{ dismissible: false }" in onboarding, (
-        "the wizard's overlay is dismissible again — backdrop clicks and "
-        "Escape close it"
-    )
-    assert "const REQUIRED_CHANNELS" in onboarding, "the channel gate on Finish is gone"
-
-
 def test_opening_explore_never_shows_a_loading_placeholder() -> None:
     """The shelves are fetched in the background at boot and re-checked
     quietly on every later visit. Entering the tab used to swap a spinner in
@@ -342,66 +325,6 @@ def test_opening_explore_never_shows_a_loading_placeholder() -> None:
         "the unchanged-batch check is gone — every re-check re-renders every "
         "shelf, and every <img> in it, identically"
     )
-
-
-def test_onboarding_add_reports_before_it_waits() -> None:
-    """"Add" says "Added" on the press, not after the round trip.
-
-    Adding a channel is an RSS sync plus a yt-dlp history backfill. Held
-    behind that, picking six channels was six waits stacked on each other,
-    and pressing Finish early meant watching the app redraw itself. The click
-    handler is therefore not async: it labels the row, counts it, and queues
-    the work.
-    """
-    source = (JS_DIR / "home" / "onboarding.js").read_text()
-
-    assert 'container.addEventListener("click", (event) => {' in source, (
-        "the channels step's click handler is async again — the label is back "
-        "to waiting on the request"
-    )
-    assert 'btn.textContent = "Added";' in source, "the optimistic label is gone"
-    assert "enqueue(" in source, "the add queue is gone"
-
-
-def test_onboarding_never_waits_for_a_history_scan() -> None:
-    """POST /feeds resolves the channel and applies its RSS feed before it
-    answers, so the channel's recent uploads are in the library at that
-    point. The one-time full-history scan behind it runs server-side and is
-    minutes long on a big channel (6,504 videos for one in the author's own
-    library) — the wizard used to hold a loading screen for it, for content
-    nothing on the first screen needs. Library's own card carries that wait
-    now."""
-    onboarding = (JS_DIR / "home" / "onboarding.js").read_text()
-    library = (JS_DIR / "home" / "library.js").read_text()
-    index = Path("app/templates/index.html").read_text()
-
-    assert "waitForHistory: false" in onboarding, (
-        "the wizard is waiting for channel history again"
-    )
-    assert "onboarding-step-preparing" not in index, (
-        "the wizard's wait-for-backfill screen is back"
-    )
-    assert "/feeds/backfilling" in library, (
-        "Library no longer checks which channels are still being fetched, so "
-        "its 'Fetching uploads…' cards can never turn back into counts"
-    )
-
-
-def test_onboarding_adds_run_one_at_a_time() -> None:
-    """Each add resolves a channel against a service that rate-limits an
-    unauthenticated residential IP, so the queue drains one job at a time —
-    the same thing the server's own bulk importer does. Five in flight at
-    once is the burst this exists to avoid."""
-    source = (JS_DIR / "home" / "onboarding.js").read_text()
-
-    assert source.count("await followChannel(") == 1, (
-        "more than one followChannel await in the wizard — the queue is no "
-        "longer the single path adds go through"
-    )
-    assert 'jobs.find((candidate) => candidate.status === "queued")' in source, (
-        "the queue no longer walks jobs one at a time"
-    )
-
 
 def test_an_artist_name_is_only_a_link_when_there_is_an_artist_to_open() -> None:
     """A song result carries the artist's channel id most of the time but not
@@ -521,22 +444,6 @@ def test_the_follow_event_carries_what_the_server_decided() -> None:
 
     assert "artistBrowseId: data.feed.artist_browse_id || null" in source
     assert "detail: { feedId, title, artistBrowseId }" in source
-
-
-def test_finish_closes_the_wizard_without_waiting_for_the_queue() -> None:
-    """It used to await the whole Add queue, which drains one channel at a
-    time — measured at ~3.25s each, so six channels was twenty seconds of
-    "Finishing…". The work now happens behind the answer (see
-    services/backfill.run_initial_sync) and Library's card reports it."""
-    source = (JS_DIR / "home" / "onboarding.js").read_text()
-
-    assert "await channelStep?.settled()" not in source, (
-        "Finish is waiting for the Add queue again"
-    )
-    assert "channelStep?.settled().then(" in source, (
-        "nothing refreshes the app once the queue finally drains"
-    )
-
 
 def test_the_first_sync_counts_as_a_channel_still_filling_in() -> None:
     """"syncing" is a phase like the two scan phases, on both sides: the

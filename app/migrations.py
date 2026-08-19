@@ -147,45 +147,6 @@ def _migrate_refresh_interval_off_app_settings(conn, existing_tables: set[str]) 
     conn.execute(text("DROP TABLE app_settings"))
 
 
-def _reset_lazily_resolved_genre_artists(conn, existing_tables: set[str]) -> None:
-    """Clears display metadata that the old lazy, per-request resolution wrote
-    into genre_artists, so the seed scripts can refill it from the committed
-    profiles in scripts/channel_profiles.py.
-
-    Those rows stored an already-built display URL ("/avatar-proxy?u=...")
-    in thumbnail_url. The column now holds the *remote* avatar URL, wrapped
-    for display at read time instead (see services/genre_artists.py), and a
-    leftover proxy URL fed through that wrapping a second time comes out
-    double-encoded and unservable. Matching on "not an absolute URL" rather
-    than on the proxy prefix keeps this correct for any other app-relative
-    form an older build may have written.
-
-    Only ever rewrites rows an old build resolved: on a new install, and on
-    every startup after the first, this matches nothing.
-    """
-    if "genre_artists" not in existing_tables:
-        return
-
-    stale = conn.execute(
-        text("SELECT COUNT(*) FROM genre_artists WHERE thumbnail_url NOT LIKE 'http%'")
-    ).scalar()
-    if not stale:
-        return
-
-    # resolved_at goes too: it is what marks a row as having usable display
-    # metadata, and leaving it set would hide these rows' missing avatars
-    # behind a "already resolved" flag no re-seed would clear.
-    conn.execute(
-        text(
-            "UPDATE genre_artists SET thumbnail_url = NULL, resolved_at = NULL "
-            "WHERE thumbnail_url NOT LIKE 'http%'"
-        )
-    )
-    logger.info(
-        "Cleared %d lazily-resolved genre_artist avatar(s) — re-run the seed scripts to refill", stale
-    )
-
-
 def run_migrations(engine: Engine) -> None:
     inspector = inspect(engine)
     existing_tables = set(inspector.get_table_names())
@@ -207,7 +168,6 @@ def run_migrations(engine: Engine) -> None:
         _create_missing_indexes(conn, engine, existing_tables)
         _remove_legacy_shorts(conn, existing_tables)
         _migrate_refresh_interval_off_app_settings(conn, existing_tables)
-        _reset_lazily_resolved_genre_artists(conn, existing_tables)
 
         # Downloading has always been a play-triggered action (see
         # content.py), so any 'ready' row from before last_played_at existed

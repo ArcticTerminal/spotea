@@ -131,17 +131,6 @@ class ChannelSearchResultOut(BaseModel):
     channel_url: str
 
 
-class GenreSuggestionsOut(BaseModel):
-    """One block of the onboarding wizard's suggestions — the genre that was
-    picked, and the channels seeded under it. Grouped so a profile that picked
-    several sees each of them titled and represented; see
-    services/genre_artists.get_suggested_channels_by_genre.
-    """
-
-    genre: str
-    channels: list[ChannelSearchResultOut]
-
-
 class VideoSearchResultOut(BaseModel):
     video_id: str
     title: str

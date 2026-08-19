@@ -22,7 +22,6 @@ from app.routers import content as content_router
 from app.routers import debug as debug_router
 from app.routers import explore as explore_router
 from app.routers import feeds as feeds_router
-from app.routers import onboarding as onboarding_router
 from app.routers import pages as pages_router
 from app.routers import partials as partials_router
 from app.routers import profiles as profiles_router
@@ -142,7 +141,6 @@ app.include_router(recommendations_router.router)
 app.include_router(profiles_router.router)
 app.include_router(debug_router.router)
 app.include_router(partials_router.router)
-app.include_router(onboarding_router.router)
 app.include_router(pages_router.router)
 
 
