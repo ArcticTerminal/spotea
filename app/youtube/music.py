@@ -300,22 +300,29 @@ def search_playlists(query: str, limit: int = SEARCH_RESULT_LIMIT) -> list[Playl
     return results
 
 
-def fetch_chart_playlists(country: str = GLOBAL_CHART_COUNTRY) -> list[PlaylistSearchResult]:
-    """The chart playlists for a country — "Trending 20 Turkey", "Top 100
-    Songs Turkey" and so on. Four of them, and they are ordinary playlists
-    once opened, so the existing remote-playlist panel renders them with no
-    special casing."""
-    charts = _call(f"charts ({country})", "get_charts", country) or {}
-    return _playlist_results(charts.get("videos"))
+@dataclass
+class Charts:
+    """What one country's chart page holds: the chart playlists themselves
+    ("Trending 20 Turkey", "Top 100 Songs Turkey" — ordinary playlists once
+    opened, so the existing remote-playlist panel renders them with no
+    special casing) and the artists currently charting there."""
+
+    playlists: list[PlaylistSearchResult]
+    artists: list[ChannelSearchResult]
 
 
-def fetch_chart_artists(
-    country: str = GLOBAL_CHART_COUNTRY, limit: int = CHART_ARTIST_LIMIT
-) -> list[ChannelSearchResult]:
-    """The artists currently charting in a country, as followable channels."""
+def fetch_charts(
+    country: str = GLOBAL_CHART_COUNTRY, artist_limit: int = CHART_ARTIST_LIMIT
+) -> Charts:
+    """One country's charts. Both shelves come out of a single request —
+    YouTube Music returns them together, and asking twice would double the
+    cost of a shelf pair nobody edits."""
     charts = _call(f"charts ({country})", "get_charts", country) or {}
-    results = (_artist_result(item) for item in charts.get("artists") or [])
-    return [result for result in results if result is not None][:limit]
+    artists = (_artist_result(item) for item in charts.get("artists") or [])
+    return Charts(
+        playlists=_playlist_results(charts.get("videos")),
+        artists=[artist for artist in artists if artist is not None][:artist_limit],
+    )
 
 
 @dataclass
@@ -329,14 +336,28 @@ class MoodCategory:
     section: str
 
 
-def fetch_mood_categories() -> list[MoodCategory]:
-    """Every mood and genre YouTube Music currently offers, flattened out of
-    its two sections ("Moods & moments" and "Genres") but keeping which one
-    each came from, so a caller can present them apart."""
+# YouTube Music's mood menu has two sections and only one of them is usable.
+# Measured 2026-08-19 across all 40 categories: 25 of them raise a parse
+# error from inside ytmusicapi, and they are every single entry under
+# "Genres" ("Rock", "Jazz", "Latin", …) plus one mood ("Family"). Those
+# grids mix plain videos in among the playlists, and the library's playlist
+# parser reads a browse id off a title run those video items don't have —
+# so it isn't a bad category, it's a shape its parser doesn't handle, and
+# nothing short of reimplementing that parser works around it here.
+# Defaulting to the section that works keeps the shelf reliable; pass
+# section=None to get everything back once upstream can parse it.
+MOOD_SECTION = "Moods & moments"
+
+
+def fetch_mood_categories(section: str | None = MOOD_SECTION) -> list[MoodCategory]:
+    """The moods (and, asked for, genres) YouTube Music currently offers,
+    flattened out of its two sections but keeping which one each came from,
+    so a caller can present them apart."""
     sections = _call("mood categories", "get_mood_categories") or {}
     return [
-        MoodCategory(title=item["title"], params=item["params"], section=section)
-        for section, items in sections.items()
+        MoodCategory(title=item["title"], params=item["params"], section=name)
+        for name, items in sections.items()
+        if section is None or name == section
         for item in items
         if item.get("title") and item.get("params")
     ]

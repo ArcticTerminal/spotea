@@ -54,6 +54,37 @@ def _playlist(playlist_id):
     )
 
 
+@pytest.fixture(autouse=True)
+def _no_browse_shelves(monkeypatch):
+    """Charts and the mood shelf are built on every run, interests or not —
+    so unlike the searches they can't be neutralised by leaving the interest
+    list empty. Stubbed out for every test in this file for exactly the
+    reason the module docstring gives; the two that are *about* them install
+    their own (see fake_browse)."""
+    monkeypatch.setattr(rec, "_BROWSE_BUILDERS", ())
+
+
+@pytest.fixture
+def fake_browse(monkeypatch):
+    """Puts a known chart pair and mood shelf back, for the tests that check
+    what happens to them."""
+
+    def install(*, charts=(), chart_artists=(), mood=None):
+        monkeypatch.setattr(
+            rec,
+            "_BROWSE_BUILDERS",
+            (
+                lambda: {
+                    "charts": [_playlist(p).__dict__ for p in charts],
+                    "chart_artists": [_channel(c).__dict__ for c in chart_artists],
+                },
+                lambda: {"mood": mood},
+            ),
+        )
+
+    return install
+
+
 @pytest.fixture
 def fake_search(monkeypatch):
     """Replaces all three searches with deterministic, query-derived results,
@@ -84,18 +115,47 @@ def _set_interests(db_session, *interests):
     return profile
 
 
-def test_no_interests_means_an_empty_batch_and_no_searches(client, db_session, fake_search):
+def test_no_interests_means_no_interest_searches(client, db_session, fake_search):
+    """The interest shelves stay empty and cost nothing. What a profile with
+    no interests *does* get is the charts and the mood shelf, which don't
+    come from the interest list — see the two tests below."""
     body = client.get("/recommendations").json()
 
-    assert body == {
-        "interests": [],
-        "interests_used": [],
-        "generated_at": None,
-        "videos": [],
-        "channels": [],
-        "playlists": [],
-    }
+    assert body["interests"] == []
+    assert body["interests_used"] == []
+    assert (body["videos"], body["channels"], body["playlists"]) == ([], [], [])
     assert fake_search == []
+
+
+def test_a_profile_with_no_interests_still_gets_the_charts(client, db_session, fake_browse):
+    """The case Explore used to answer with nothing but a nag."""
+    fake_browse(charts=["top-40"], chart_artists=["UCchart"], mood={"title": "Chill", "section": "Moods & moments", "playlists": []})
+
+    body = client.get("/recommendations").json()
+
+    assert [p["playlist_id"] for p in body["charts"]] == ["top-40"]
+    assert [c["channel_id"] for c in body["chart_artists"]] == ["UCchart"]
+    assert body["mood"]["title"] == "Chill"
+    assert body["generated_at"] is not None
+
+
+def test_a_charting_artist_already_followed_is_dropped(client, db_session, fake_browse):
+    """Same rule as the interest-based channels shelf: it's a list of
+    channels to follow, and one already followed isn't."""
+    fake_browse(chart_artists=["UCfollowed", "UCnew"])
+    db_session.add(
+        Feed(
+            user_id=USER_ID,
+            rss_url="https://www.youtube.com/feeds/videos.xml?channel_id=UCfollowed",
+            channel_title="Already Followed",
+            followed=True,
+        )
+    )
+    db_session.commit()
+
+    body = client.get("/recommendations").json()
+
+    assert [c["channel_id"] for c in body["chart_artists"]] == ["UCnew"]
 
 
 def test_a_video_already_in_the_library_is_dropped_from_the_batch(client, db_session, fake_search):
@@ -271,8 +331,10 @@ def test_refresh_rebuilds_even_when_the_cache_is_fresh(client, db_session, fake_
     assert body["interests_used"] == ["jazz"]
 
 
-def test_refresh_with_no_interests_still_makes_no_requests(client, db_session, fake_search):
-    assert client.post("/recommendations/refresh").json()["generated_at"] is None
+def test_refresh_with_no_interests_runs_no_interest_searches(client, db_session, fake_search):
+    body = client.post("/recommendations/refresh").json()
+
+    assert body["interests_used"] == []
     assert fake_search == []
 
 

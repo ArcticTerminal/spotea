@@ -24,6 +24,12 @@ class Settings(BaseSettings):
     # setting, since nobody self-hosting this needs to think about it unless
     # they want their own contact address on record with MusicBrainz.
     musicbrainz_user_agent: str = "Spotea/1.0 ( self-hosted; no contact set )"
+    # Which country's YouTube Music charts Explore shows (see
+    # services/recommendations.py). "ZZ" is YouTube Music's own global chart,
+    # which is the only defensible default for an app that has no idea where
+    # it's running — set a real code ("TR", "DE", "JP") and the shelf becomes
+    # what's actually charting there, which is the version worth having.
+    music_chart_country: str = "ZZ"
 
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=False, extra="ignore")
 
