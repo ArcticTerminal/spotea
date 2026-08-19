@@ -1,46 +1,27 @@
 # Spotea
 
-A self-hosted app for following YouTube channels via RSS, downloading
-selected videos as audio, and listening to them from your browser — like a
-personal, free alternative to following musicians/creators on Spotify.
+A self-hosted music player built on YouTube Music. Follow artists, get told
+when they release something, download what you want to keep, and listen to it
+from your browser — a personal, free alternative to a streaming subscription.
 
-- Register your own account and log in with it — every account is fully
-  isolated, and can hold multiple profiles (household-style, like a
-  streaming service) that each get their own followed channels, library, and
-  downloads
-- Follow a channel by pasting any YouTube URL, or search for it by name from
-  the **Explore** tab — no need to know how to construct an RSS feed link
-  yourself; bulk-import a whole list of channels at once from Settings
-- Feeds refresh automatically in the background on an interval you choose
-  (Settings), and new uploads show up on Home and in Library's **New
-  Uploads** shelf; YouTube Shorts are filtered out since they don't fit a
-  "listen to it" library
-- **Explore** also searches for individual songs directly — add and play one
-  without following the whole channel
-- Tell it what you're into — list genres, artists or moods under **Interests**
-  in Settings, and Explore's **For you** shelves fill up with channels,
-  contents and ready-made playlists searched from them. They refresh on the
-  same schedule as your feeds, with no separate control to keep track of
-- Open a recommended playlist, or any channel you don't follow yet, and browse
-  its tracks on the same page a followed channel gets — Play all and shuffle
-  included. Nothing is stored until you press play, and following is one
-  button away if you like what you hear
-- Library search by title/channel, filter by a channel or by the pinned
-  **Favorites** / **Saved for later** / **New Uploads** / **Recently
-  Played** virtual playlists, with pagination
-- Just hit **Play** — the audio is fetched in the background
-  (via [yt-dlp](https://github.com/yt-dlp/yt-dlp)); on Home/Library/Explore
-  it opens in a persistent in-page player that keeps playing while you keep
-  browsing, with a mini-player bar when collapsed. Anything already
-  downloaded is marked so you know it starts instantly
-- A proper player either way — seek bar, ±15s skip, volume, keyboard
-  shortcuts, media-session/lock-screen controls — and favorite what you
-  liked while it's playing
-- The **Storage** tab shows exactly what's using disk, and clears it per
-  item or all at once; anything you clear comes back next time you play it
-- Installable as a PWA (works like a native app on your phone's home screen)
-
-See [ARCHITECTURE.md](ARCHITECTURE.md) for how it's built.
+- Register your own account and log in with it. One login, one library.
+- **Explore** searches YouTube Music for artists, songs and ready-made
+  playlists — the music catalogue, not youtube.com, so a search for an
+  artist returns their tracks rather than reaction videos and compilations.
+- Follow an artist and their releases start arriving. A background sync
+  compares what YouTube Music lists for them against what it listed last
+  time; anything new lands on Home's **New releases** shelf. Only artists
+  can be followed — this app holds music and nothing else.
+- Open an artist and you get their page: popular songs, albums, singles and
+  similar artists. Open an album or single and you get its tracks, with real
+  durations and cover art.
+- Play anything without following anyone: add a single song straight from
+  search and it plays like everything else.
+- Tell it what you're into — list genres, artists or moods under
+  **Interests** in Settings, and Explore's **For you** shelves fill up from
+  them. This week's charts and a rotating mood shelf are there regardless.
+- Downloads are yours: audio is extracted with yt-dlp, stored on your own
+  disk, and exported as one zip whenever you want it.
 
 ## Running with Docker (recommended)
 
@@ -78,18 +59,16 @@ docker compose up -d --build
 
 Your `./data` volume is untouched by rebuilds.
 
-If you're upgrading an older deployment that predates accounts (i.e. it
-only ever had `APP_PASSWORD`-based login), keep `APP_PASSWORD` set in `.env`
-for this one upgrade — a one-time migration uses it to create a legacy
-account (`owner@local`, that same password) so your existing profiles and
-data keep working without being re-entered. You can register a real account
-and stop needing it afterwards.
+Upgrading across the music-only rewrite needs a fresh database: the schema
+changed shape (feeds became artists, profiles were folded into the account)
+and no migration path was written for it. Move `./data/spotea.db` aside,
+start the app, and register again.
 
 ### Exposing it beyond your local network
 
-Login is now real per-account authentication (hashed passwords, isolated
-data per account), not a single shared password — but there's still no
-email verification or rate limiting on login/registration. If you expose
+Login is real per-account authentication (hashed passwords, isolated data
+per account) — but there's no email verification, and only login is rate
+limited. If you expose
 this instance to the internet, put it behind a reverse proxy with HTTPS
 (e.g. Caddy, nginx, Traefik), and consider whether you want registration
 open to anyone who finds the URL.
@@ -118,10 +97,9 @@ All configuration is via environment variables (see `.env.example`):
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `SECRET_KEY` | yes | — | Random key used to sign session cookies |
-| `APP_PASSWORD` | no | — | Only used by the one-time migration for a pre-accounts deployment (see "Updating" above); fresh installs don't need it |
 | `DATABASE_URL` | no | `sqlite:////app/data/spotea.db` | SQLAlchemy database URL |
 | `STORAGE_DIR` | no | `/app/data/storage` | Where downloaded audio files are stored |
-| `AVATARS_DIR` | no | `/app/data/avatars` | Where fetched channel avatars are stored |
+| `AVATARS_DIR` | no | `/app/data/avatars` | Where fetched artist avatars are stored |
 | `AUDIO_FORMAT` | no | `m4a` | Audio format yt-dlp extracts to |
 | `HOST_PORT` | no | `8000` | Host port docker-compose publishes the app on (Docker only) |
 
