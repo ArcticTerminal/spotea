@@ -4,7 +4,7 @@ populates and why, and app/models.py's GenreArtist for the table shape.
 
 MusicBrainz traffic only, paced to its own ~1 request/second limit — no
 YouTube calls happen here (those are resolved lazily, per artist, the first
-time a real onboarding session actually needs one; see get_suggested_channels).
+time a real onboarding session actually needs one; see get_suggested_channels_by_genre).
 
 Run from the repo root:
     .venv/bin/python -m scripts.seed_genre_artists

@@ -14,7 +14,7 @@ budgets:
     that (hit this live once already during development — TLS handshakes
     to musicbrainz.org started failing outright for a few minutes).
 
-  * get_suggested_channels() — what the onboarding wizard actually calls.
+  * get_suggested_channels_by_genre() — what the onboarding wizard calls.
     Pure database read. No YouTube, no MusicBrainz, no network at all.
 
 That second point used to be the opposite, and the difference is the whole
@@ -177,7 +177,7 @@ def build_row(
 
     Shared by both curated seed scripts so the resolved_at convention lives
     in one place: it means "this row has usable display metadata", which is
-    what get_suggested_channels orders on. A channel with no profile yet
+    what get_suggested_channels_by_genre orders on. A channel with no profile yet
     (just added to a curated list, generator not re-run) is left unresolved
     rather than stamped with a half-filled row — it still appears in the
     wizard, just last and without an avatar.
@@ -246,7 +246,18 @@ def apply_profile(row: GenreArtist, profile: ChannelProfile | None) -> bool:
 def _as_channel_dict(row: GenreArtist) -> dict:
     return {
         "channel_id": row.channel_id,
-        "title": row.title or row.artist_name,
+        # The *curated* name, not the channel's own title. They differ on 259
+        # of the 605 seeded rows, and on the music side the channel title is
+        # usually the noisy one — "SnoopDoggVEVO", "aliciakeysVEVO",
+        # "foofightersVEVO", "Queen Official" — which is both harder to read
+        # and long enough to be truncated on a card sized for a name. The
+        # curated string is what a person calls that artist or show, and
+        # picking it is the whole point of curating one. Every row has one
+        # (artist_name is NOT NULL — it is what a seed script is written
+        # from), so nothing here falls back; row.title stays what it has
+        # always been, proof the resolved channel is the right one (see
+        # apply_profile).
+        "title": row.artist_name,
         # Reuses whatever local copy exists (a channel this profile already
         # follows) and proxies the remote URL otherwise — the same treatment
         # Explore's own search results get, applied here at read time because
@@ -268,22 +279,42 @@ def _as_channel_dict(row: GenreArtist) -> dict:
     }
 
 
-def get_suggested_channels(db: Session, genres: list[str]) -> list[dict]:
-    """Real-artist channel suggestions for the onboarding wizard's step 2,
-    for whichever of `genres` were seeded (see seed_genre) — a free-typed
-    genre with no seeded rows just contributes nothing, not an error, since
-    the search box next to these suggestions already covers that case.
+def get_suggested_channels_by_genre(db: Session, genres: list[str]) -> list[dict]:
+    """Real-artist channel suggestions for the onboarding wizard's last step,
+    grouped under the genre that suggested them — `[{"genre", "channels"}]`,
+    in the order the genres were picked, for whichever of them were seeded
+    (see seed_genre); a free-typed genre with no seeded rows just contributes
+    no group, not an error, since the search box next to these suggestions
+    already covers that case.
+
+    Grouped, and uncapped within a group, because the step draws each genre as
+    its own horizontally scrolling shelf of channel cards (the same shelf and
+    card the Explore tab's "Channels" row is built from) — a catalogue to
+    browse, so a genre shows everything seeded for it rather than a sample of
+    it. It used to be one flat ARTISTS_PER_GENRE-long list shared by every
+    pick, which made picking *more* genres show *less* of each: five picks
+    meant two unlabelled channels apiece out of the twelve seeded for each.
+
+    Nothing here limits how long a shelf gets: what a genre is worth showing
+    is decided upstream, by how many channels are curated into it
+    (ARTISTS_PER_GENRE is the seed scripts' own target), and a shelf that
+    overflows scrolls rather than growing the page.
     """
     if not genres:
         return []
 
-    rows_by_genre: dict[str, list[GenreArtist]] = {}
+    # Deduped across shelves, first genre to claim a channel keeping it: an
+    # act seeded under two of the picks (a Hip-Hop artist also curated under
+    # R&B) would otherwise offer the same "Add" button twice on one screen.
+    groups: list[dict] = []
+    seen: set[str] = set()
     for genre in genres:
         rows = (
             db.query(GenreArtist)
             .filter(func.lower(GenreArtist.genre) == genre.lower())
             # Resolved rows first, so the ones that can render a title and an
-            # avatar fill the shelf before any row still waiting on
+            # avatar fill the front of the shelf — where a row that doesn't
+            # scroll ends — before any row still waiting on
             # scripts/resolve_genre_artists.py. A hand-added channel not yet
             # in the committed profiles still shows up rather than vanishing,
             # just last and bare — it renders its curated artist_name in the
@@ -291,29 +322,13 @@ def get_suggested_channels(db: Session, genres: list[str]) -> list[dict]:
             .order_by(GenreArtist.resolved_at.is_(None), GenreArtist.id)
             .all()
         )
-        if rows:
-            rows_by_genre[genre] = rows
-
-    # Round-robin across genres so a profile that picked several sees all of
-    # them represented (same reasoning as recommendations.py's own
-    # _interleave, a smaller local version here since this is keyed by genre
-    # rather than interest-and-result-kind), deduped by channel, capped at
-    # ARTISTS_PER_GENRE.
-    selected: list[GenreArtist] = []
-    seen: set[str] = set()
-    max_len = max((len(rows) for rows in rows_by_genre.values()), default=0)
-    for rank in range(max_len):
-        for rows in rows_by_genre.values():
-            if rank >= len(rows):
-                continue
-            row = rows[rank]
+        channels = []
+        for row in rows:
             if row.channel_id in seen:
                 continue
             seen.add(row.channel_id)
-            selected.append(row)
-            if len(selected) == ARTISTS_PER_GENRE:
-                break
-        if len(selected) == ARTISTS_PER_GENRE:
-            break
+            channels.append(_as_channel_dict(row))
+        if channels:
+            groups.append({"genre": genre, "channels": channels})
 
-    return [_as_channel_dict(row) for row in selected]
+    return groups

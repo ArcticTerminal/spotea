@@ -194,8 +194,8 @@ def test_explore_recommendations_split_by_duration_at_ten_minutes() -> None:
     source = (JS_DIR / "home" / "explore.js").read_text()
 
     assert "const LONG_FORM_THRESHOLD_SECONDS = 10 * 60;" in source
-    assert 'recShelfHtml("Contents", contents, recVideoCardHtml)' in source
-    assert 'recShelfHtml("Long form", longForm, recVideoCardHtml)' in source
+    assert 'shelfHtml("Contents", contents, recVideoCardHtml)' in source
+    assert 'shelfHtml("Long form", longForm, recVideoCardHtml)' in source
 
 
 def test_wire_scrollers_does_not_leak_a_listener_or_observer_per_row() -> None:
@@ -348,7 +348,7 @@ def test_onboarding_add_reports_before_it_waits() -> None:
     """"Add" says "Added" on the press, not after the round trip.
 
     Adding a channel is an RSS sync plus a yt-dlp history backfill. Held
-    behind that, picking five channels was five waits stacked on each other,
+    behind that, picking six channels was six waits stacked on each other,
     and pressing Finish early meant watching the app redraw itself. The click
     handler is therefore not async: it labels the row, counts it, and queues
     the work.

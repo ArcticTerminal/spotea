@@ -1324,17 +1324,59 @@ profile just sat there under the pointer looking untouched.
 **Onboarding wizard** (`home/onboarding.js`, `needs_onboarding` in
 `routers/pages.py`) — a required, non-dismissible full-screen step for a
 profile with neither an interest nor a followed channel: pick music or
-podcasts, pick a few genres, then follow at least five channels. Its one
+podcasts, pick a few genres, then follow at least six channels. Its one
 piece of real machinery is the add queue. "Add" reports **"Added" on the
 press** and drops the work into a queue that drains one job at a time behind
-the step while the user keeps picking; by the time five are chosen the first
+the step while the user keeps picking; by the time six are chosen the first
 few are usually done. Holding the button on "Adding…" for the round trip
-instead meant five stacked waits, and pressing Finish early meant watching the
+instead meant six stacked waits, and pressing Finish early meant watching the
 app redraw itself afterwards. Adds are counted optimistically, so a failure
 takes its count back, puts its row's button back, and re-locks Finish. One job
-at a time rather than five in parallel for the same reason the server's bulk
+at a time rather than all at once for the same reason the server's bulk
 importer creates channels serially — each is a yt-dlp round trip against a
 service that rate-limits an unauthenticated residential IP.
+
+The channel step is a **catalogue, not a list**: one horizontally scrolling
+shelf per picked genre, built from Explore's own `shelfHtml` and
+`channelCardHtml` (`home/explore.js`, exported for this) so a channel reads
+identically wherever the app offers one — avatar, name, Add. Suggestions come
+back grouped for it (`get_suggested_channels_by_genre` in
+`services/genre_artists.py`) and **uncapped within a group**: a genre shows
+its whole seeded catalogue and the shelf scrolls past what fits, rather than
+being trimmed to a sample. They used to be round-robined into a single
+twelve-long list shared by every pick, which made picking more genres show
+*less* of each — five picks meant two unlabelled rows apiece out of the twelve
+seeded for each of them. Channels are deduped across shelves, first pick to
+claim one keeping it, since an act curated under two genres would otherwise
+offer the same "Add" button twice on one screen. Only the Add button is wired
+here; Explore's cards also open the channel preview, which is a full-panel
+navigation that would strand the wizard half-finished behind it.
+
+A card shows the **curated name, not the channel's own title**
+(`_as_channel_dict`). They differ on 259 of the 605 seeded rows, and on the
+music side the channel title is the noisy one — `SnoopDoggVEVO`,
+`aliciakeysVEVO`, `Queen Official` — both harder to read and long enough to
+be truncated on a card sized for a name; `title` stays what it always was,
+proof the resolved channel is the right one. Names that are still long (the
+podcast side has the longest) wrap to two lines and ellipsize, and
+`overflow-wrap: anywhere` keeps an unbroken handle from running out of the
+card sideways.
+
+The step leads with **search, then a labelled rule, then the shelves** — the
+two are different questions ("who am I already looking for?" vs "what is
+there?"), and a search box buried under a page of shelves read as one long
+scroll of channels rather than two ways in. It also carries its own **Back**,
+which re-opens the chip step with its picks still selected (nothing is reset,
+unlike the kind fork above, and channels already added stay added).
+
+This is also the one step that is **wider than the rest of the wizard**. The
+column width is a custom property (`--onboarding-column`, 560px normally,
+Explore's 1100px on this step) that `home/onboarding.js` switches by stamping
+the visible step onto the modal — it lives there rather than on the step
+because the full-bleed header and footer bars align their contents to the same
+column and cannot see which step is showing. The cards themselves are smaller
+than Home's, since what matters on a catalogue is how much of a genre is on
+screen before the row has to be scrolled.
 
 Nothing in this flow waits for a channel's **history scan**. `POST /feeds`
 resolves the channel and applies its RSS feed (~15 most recent uploads)

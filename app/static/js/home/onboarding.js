@@ -25,9 +25,9 @@
 // pressed and the real work — resolving the channel, syncing its RSS,
 // backfilling its upload history — goes into a queue that drains behind the
 // step while the user keeps picking. Which is the point: by the time anyone
-// has chosen five channels, the first few are usually already done. It used
-// to hold the button on "Adding…" for the whole round trip, so picking five
-// channels meant five waits stacked on top of each other, and pressing
+// has chosen six channels, the first few are usually already done. It used
+// to hold the button on "Adding…" for the whole round trip, so picking six
+// channels meant six waits stacked on top of each other, and pressing
 // Finish early meant watching the app redraw itself afterwards.
 //
 // A job is done once the channel exists — POST /feeds resolves it and applies
@@ -49,7 +49,8 @@
 import { api, debounce, setupOverlay, showToast } from "../core.js";
 import { refreshFragments } from "../fragments.js";
 import { BULK_IMPORT_FINISHED } from "./bulk-import.js";
-import { reloadRecommendations, renderChannelResults } from "./explore.js";
+import { channelCardHtml, reloadRecommendations, renderChannelResults, shelfHtml } from "./explore.js";
+import { wireScrollers } from "./library.js";
 import { followChannel } from "./remote.js";
 import { saveInterests } from "./settings.js";
 
@@ -60,7 +61,7 @@ const STEP_IDS = ["onboarding-step-kind", "onboarding-step-genres", "onboarding-
 // shelves, Library's grid and Explore's "For you" all read as broken with a
 // single channel behind them. The step offers three ways to get there
 // (suggestions, search, bulk import), so this is a handful of clicks.
-const REQUIRED_CHANNELS = 5;
+const REQUIRED_CHANNELS = 6;
 
 // The header's question, per step — the chip step's phrasing depends on
 // which kind was picked, so the title can't live statically in the template.
@@ -76,6 +77,13 @@ function showStep(id) {
     const el = document.getElementById(stepId);
     if (el) el.hidden = stepId !== id;
   }
+  // Which step is showing, stamped where CSS can see it: the channels step
+  // takes Explore's full width for its shelves while the two picking steps
+  // stay a narrow reading column, and the modal's full-bleed header and
+  // footer align their contents to whichever column is current (see
+  // --onboarding-column in style.css).
+  const modal = document.querySelector(".modal-onboarding");
+  if (modal) modal.dataset.step = id;
 }
 
 function setTitle(text) {
@@ -182,10 +190,44 @@ function setupGenreStep(onDone, onBack) {
   };
 }
 
+// One shelf per picked genre, built from Explore's own shelf and channel
+// card (see explore.js's shelfHtml/channelCardHtml) rather than anything of
+// this step's own: the same avatar-name-Add card the Explore tab offers a
+// channel with, in the same horizontally scrolling row.
+//
+// A shelf carries the genre's whole seeded catalogue and scrolls sideways
+// rather than being trimmed to what fits (see
+// services/genre_artists.get_suggested_channels_by_genre) — the step is
+// something to browse across, so the picks read as "here is Jazz, here is
+// Metal" instead of a dozen anonymous rows stacked down the page.
+//
+// Only the Add button is wired, by the delegated handler below. Explore's
+// cards also open the channel preview when clicked, but that is a full-panel
+// navigation, and doing it out from under this modal would strand the wizard
+// half-finished behind it — the same reason the search rows here don't
+// preview either.
+function renderSuggestionShelves(groups, container) {
+  if (!groups.length) {
+    // Only reachable when nothing the user picked was seeded — every
+    // predefined chip is, so this is the free-typed case, which the search
+    // box right below already covers.
+    container.innerHTML = `<p class="muted">Nothing curated for those picks yet — search for a channel below.</p>`;
+    return;
+  }
+
+  container.innerHTML = groups
+    .map((group) => shelfHtml(group.genre, group.channels, channelCardHtml))
+    .join("");
+  // Shelves built here never pass through the fragment swap that normally
+  // wires drag-scrolling, so — exactly like Explore's own — they have to ask
+  // for it themselves.
+  wireScrollers();
+}
+
 // One job per channel the user pressed Add on, in the order they pressed
 // them. `status` walks queued -> working -> done | failed.
 //
-// They run one at a time rather than all at once: five channel resolutions in
+// They run one at a time rather than all at once: several channel resolutions in
 // flight together is a request burst against a service that rate-limits an
 // unauthenticated residential IP (see services/recommendations.py's
 // request-budget note for the same reasoning elsewhere), and the server's own
@@ -203,17 +245,25 @@ function channelJob(channelUrl, button) {
  * so this step fetches nothing on its own); the rest is what Finish needs to
  * know once the queue has drained.
  */
-function setupChannelStep() {
+function setupChannelStep(onBack) {
   const container = document.getElementById("onboarding-step-channels");
   const searchInput = document.getElementById("onboarding-search-input");
   const searchResults = document.getElementById("onboarding-search-results");
   const suggested = document.getElementById("onboarding-suggested-channels");
   const finishBtn = document.getElementById("onboarding-finish");
   const progress = document.getElementById("onboarding-channels-progress");
+  const backBtn = document.getElementById("onboarding-channels-back");
   if (!container || !searchInput || !searchResults || !suggested) return null;
 
+  // Back re-opens the genre step with its picks still selected — going back
+  // to widen or narrow them is the point, so nothing is reset here (unlike
+  // the kind fork above, where a reset is what stops two taxonomies mixing).
+  // Channels already added stay added: the queue behind them has been running
+  // since the press, and un-following them is not what "back" means.
+  backBtn?.addEventListener("click", () => onBack?.());
+
   // Counted optimistically, the moment Add is pressed — the gate is about
-  // what the user has chosen, and making them wait on five round trips
+  // what the user has chosen, and making them wait on six round trips
   // before the button unlocks is the wait this step exists to remove. A job
   // that turns out to fail takes its count back with it (see runQueue).
   let followed = 0;
@@ -323,17 +373,17 @@ function setupChannelStep() {
         suggested.innerHTML = "";
         return;
       }
-      suggested.innerHTML = `<li class="search-loading"><span class="spinner"></span>Finding channels…</li>`;
+      suggested.innerHTML = `<p class="search-loading"><span class="spinner"></span>Finding channels…</p>`;
       // Real artists/shows, not a generic "<genre> music" search — see
       // services/genre_artists.py and scripts/seed_podcast_channels.py. An
       // entry with nothing seeded for it (a free-typed one, or one the caches
-      // just don't cover) comes back an empty list rather than an error; the
-      // search box below still covers it.
+      // just don't cover) simply contributes no block rather than an error;
+      // the search box below still covers it.
       const { ok, data } = await api(
         `/onboarding/suggested-channels?genres=${encodeURIComponent(genres.join(","))}`
       );
       suggested.innerHTML = "";
-      if (ok) renderChannelResults(data, "onboarding-suggested-channels");
+      if (ok) renderSuggestionShelves(data, suggested);
     },
     refreshGate,
     failedCount: () => jobs.filter((job) => job.status === "failed").length,
@@ -347,7 +397,19 @@ export function setupOnboarding() {
   if (!overlay) return;
 
   const handle = setupOverlay("onboarding-overlay", null, [], { dismissible: false });
-  const channelStep = setupChannelStep();
+
+  // Which fork the flow is in, so stepping *back* into the chip step can ask
+  // the same question it asked on the way down — the title is per-kind there
+  // (see TITLES) and there is nothing else on screen that still says which
+  // one was picked.
+  let pickedKind = "music";
+
+  const showGenreStep = () => {
+    setTitle(TITLES[pickedKind] ?? TITLES.music);
+    showStep("onboarding-step-genres");
+  };
+
+  const channelStep = setupChannelStep(showGenreStep);
   const genreStep = setupGenreStep(
     (genres) => {
       setTitle(TITLES.channels);
@@ -361,9 +423,9 @@ export function setupOnboarding() {
     }
   );
   setupKindStep((kind) => {
+    pickedKind = kind;
     genreStep?.applyKind(kind);
-    setTitle(TITLES[kind] ?? TITLES.music);
-    showStep("onboarding-step-genres");
+    showGenreStep();
   });
 
   const finishBtn = document.getElementById("onboarding-finish");

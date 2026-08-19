@@ -112,7 +112,7 @@ def test_seed_genre_is_a_noop_once_the_target_is_already_met(db_session, monkeyp
     assert called == []  # never even asked MusicBrainz — already had enough
 
 
-def test_get_suggested_channels_never_calls_youtube(db_session, monkeypatch):
+def test_suggestions_never_call_youtube(db_session, monkeypatch):
     """The whole point of the change this test guards.
 
     Display metadata used to be resolved lazily, in-request, the first time
@@ -129,22 +129,52 @@ def test_get_suggested_channels_never_calls_youtube(db_session, monkeypatch):
 
     monkeypatch.setattr(ga, "fetch_channel_profile", fail_if_called)
 
-    result = ga.get_suggested_channels(db_session, [GENRE])
+    [group] = ga.get_suggested_channels_by_genre(db_session, [GENRE])
 
-    assert {r["channel_id"] for r in result} == {"UCunresolved00000000", "UCresolved000000000"}
+    assert group["genre"] == GENRE
+    assert {c["channel_id"] for c in group["channels"]} == {
+        "UCunresolved00000000",
+        "UCresolved000000000",
+    }
 
 
-def test_get_suggested_channels_puts_resolved_rows_first(db_session):
+def test_suggestions_put_resolved_rows_first(db_session):
     """A row still waiting on the generator has no avatar and only its
-    curated name, so it fills the shelf after the ones that can render
+    curated name, so it fills the block after the ones that can render
     properly — but it does still appear, rather than vanishing."""
     _row(db_session, channel_id="UCunresolved00000000", artist_name="Not Resolved Yet")
-    _row(db_session, channel_id="UCresolved000000000", resolved=True, title="Resolved")
+    _row(
+        db_session,
+        channel_id="UCresolved000000000",
+        artist_name="Resolved",
+        resolved=True,
+        title="ResolvedVEVO",
+        thumbnail_url="https://yt3.ggpht.com/r=s0",
+    )
 
-    result = ga.get_suggested_channels(db_session, [GENRE])
+    channels = ga.get_suggested_channels_by_genre(db_session, [GENRE])[0]["channels"]
 
-    assert [r["title"] for r in result] == ["Resolved", "Not Resolved Yet"]
-    assert result[1]["thumbnail_url"] is None
+    assert [c["title"] for c in channels] == ["Resolved", "Not Resolved Yet"]
+    assert channels[1]["thumbnail_url"] is None
+
+
+def test_a_card_shows_the_curated_name_not_the_channels_own_title(db_session):
+    """The channel's own title is the noisy one on the music side —
+    "SnoopDoggVEVO" for Snoop Dogg — and long enough to be truncated on a card
+    sized for a name. The curated string is what a person calls that artist,
+    and choosing it is what curating one is for; row.title stays proof the
+    resolved channel is the right one."""
+    _row(
+        db_session,
+        channel_id="UCsnoop00000000000",
+        artist_name="Snoop Dogg",
+        resolved=True,
+        title="SnoopDoggVEVO",
+    )
+
+    channels = ga.get_suggested_channels_by_genre(db_session, [GENRE])[0]["channels"]
+
+    assert channels[0]["title"] == "Snoop Dogg"
 
 
 def test_suggested_channels_proxy_the_stored_remote_avatar_url(db_session):
@@ -159,11 +189,11 @@ def test_suggested_channels_proxy_the_stored_remote_avatar_url(db_session):
         thumbnail_url="https://yt3.ggpht.com/abc=s0",
     )
 
-    result = ga.get_suggested_channels(db_session, [GENRE])
+    channels = ga.get_suggested_channels_by_genre(db_session, [GENRE])[0]["channels"]
 
     # Asked for at the size the card actually draws, not the "=s0" original
     # YouTube reports — see SUGGESTION_AVATAR_SIZE.
-    assert result[0]["thumbnail_url"] == "/avatar-proxy?u=https%3A%2F%2Fyt3.ggpht.com%2Fabc%3Ds176"
+    assert channels[0]["thumbnail_url"] == "/avatar-proxy?u=https%3A%2F%2Fyt3.ggpht.com%2Fabc%3Ds176"
 
 
 def test_suggested_channels_never_report_a_subscriber_count(db_session):
@@ -174,38 +204,94 @@ def test_suggested_channels_never_report_a_subscriber_count(db_session):
     generation time — that nobody asked for."""
     _row(db_session, channel_id="UCsubs000000000000", resolved=True, title="T", subscriber_count=999)
 
-    assert ga.get_suggested_channels(db_session, [GENRE])[0]["subscriber_count"] is None
+    channels = ga.get_suggested_channels_by_genre(db_session, [GENRE])[0]["channels"]
+
+    assert channels[0]["subscriber_count"] is None
 
 
-def test_get_suggested_channels_empty_for_an_unseeded_genre(db_session):
-    assert ga.get_suggested_channels(db_session, ["Some Genre Nobody Seeded"]) == []
+def test_suggestions_are_empty_for_an_unseeded_genre(db_session):
+    assert ga.get_suggested_channels_by_genre(db_session, ["Some Genre Nobody Seeded"]) == []
 
 
-def test_get_suggested_channels_empty_genres_list_short_circuits(db_session):
-    assert ga.get_suggested_channels(db_session, []) == []
+def test_suggestions_empty_genres_list_short_circuits(db_session):
+    assert ga.get_suggested_channels_by_genre(db_session, []) == []
 
 
-def test_get_suggested_channels_caps_at_the_target_across_several_genres(db_session):
-    """Round-robin across the picked genres so each is represented, capped
-    at ARTISTS_PER_GENRE overall."""
-    for genre in ["Hip-Hop", "R&B", "Electronic"]:
-        for i in range(ga.ARTISTS_PER_GENRE):
+def _seed_genres(db_session, genres, per_genre):
+    for g, genre in enumerate(genres):
+        for i in range(per_genre):
+            channel_id = f"UC{g:04d}{i:014d}"
             db_session.add(
                 GenreArtist(
                     genre=genre,
                     artist_name=f"{genre} Artist {i}",
-                    channel_id=f"UC{genre[:2]}{i:016d}",
-                    channel_url=f"https://www.youtube.com/channel/UC{genre[:2]}{i:016d}",
+                    channel_id=channel_id,
+                    channel_url=f"https://www.youtube.com/channel/{channel_id}",
                     resolved_at=utcnow(),
                 )
             )
     db_session.commit()
 
-    result = ga.get_suggested_channels(db_session, ["Hip-Hop", "R&B", "Electronic"])
 
-    assert len(result) == ga.ARTISTS_PER_GENRE
-    # Every picked genre got a look in, rather than the first one filling it.
-    assert len({r["title"].split(" Artist")[0] for r in result}) == 3
+def test_every_picked_genre_gets_its_own_block_in_pick_order(db_session):
+    """The reason suggestions are grouped at all: several picks used to be
+    round-robined into one twelve-long shelf, so each genre contributed two
+    unlabelled channels. Each pick gets a block of its own now."""
+    picked = ["Hip-Hop", "R&B", "Electronic"]
+    _seed_genres(db_session, picked, ga.ARTISTS_PER_GENRE)
+
+    groups = ga.get_suggested_channels_by_genre(db_session, picked)
+
+    assert [g["genre"] for g in groups] == picked
+    for group in groups:
+        assert len(group["channels"]) == ga.ARTISTS_PER_GENRE
+        # Every channel in a block really comes from that block's genre.
+        assert all(c["title"].startswith(group["genre"]) for c in group["channels"])
+
+
+def test_many_picks_each_keep_their_whole_shelf(db_session):
+    """Nothing is traded away as more genres are picked: each one is its own
+    horizontally scrolling shelf, so twenty picks are twenty full shelves
+    rather than twenty thin slices of one."""
+    picked = [f"Genre {i}" for i in range(20)]
+    _seed_genres(db_session, picked, ga.ARTISTS_PER_GENRE)
+
+    groups = ga.get_suggested_channels_by_genre(db_session, picked)
+
+    assert len(groups) == len(picked)
+    assert all(len(g["channels"]) == ga.ARTISTS_PER_GENRE for g in groups)
+
+
+def test_a_single_pick_gets_the_full_seeded_dozen(db_session):
+    _seed_genres(db_session, ["Jazz"], ga.ARTISTS_PER_GENRE)
+
+    [group] = ga.get_suggested_channels_by_genre(db_session, ["Jazz"])
+
+    assert len(group["channels"]) == ga.ARTISTS_PER_GENRE
+
+
+def test_a_channel_seeded_under_two_picks_is_only_offered_once(db_session):
+    """Same "Add" button twice on one screen otherwise — an act curated
+    under both Hip-Hop and R&B is a normal case, not an edge one."""
+    shared = "UCshared0000000000"
+    for genre in ["Hip-Hop", "R&B"]:
+        db_session.add(
+            GenreArtist(
+                genre=genre,
+                artist_name="Shared Act",
+                channel_id=shared,
+                channel_url=f"https://www.youtube.com/channel/{shared}",
+                resolved_at=utcnow(),
+            )
+        )
+    db_session.commit()
+
+    groups = ga.get_suggested_channels_by_genre(db_session, ["Hip-Hop", "R&B"])
+
+    # The second genre had nothing left of its own, so it contributes no
+    # empty block either.
+    assert [g["genre"] for g in groups] == ["Hip-Hop"]
+    assert [c["channel_id"] for c in groups[0]["channels"]] == [shared]
 
 
 def test_build_row_applies_a_committed_profile(db_session):
@@ -219,7 +305,7 @@ def test_build_row_applies_a_committed_profile(db_session):
 def test_build_row_leaves_a_channel_with_no_profile_unresolved(db_session):
     """Just added to a curated list, generator not re-run yet. It has to be
     left unresolved rather than stamped with a half-filled row, since that
-    flag is what get_suggested_channels sorts on."""
+    flag is what get_suggested_channels_by_genre sorts on."""
     row = ga.build_row("Jazz", "New Act", "UCnew00000000000000", None)
 
     assert row.title == "New Act"  # the curated name still shows
@@ -292,39 +378,12 @@ def test_apply_profile_falls_back_to_the_curated_name_on_a_dead_channel(db_sessi
     assert row.resolved_at is not None
 
 
-def test_get_suggested_channels_dedupes_and_caps_at_target(db_session, monkeypatch):
-    shared_channel = "UCshared0000000000"
-    _row(db_session, channel_id=shared_channel, resolved=True, title="Shared", subscriber_count=1)
-    for i in range(ga.ARTISTS_PER_GENRE + 3):
-        db_session.add(
-            GenreArtist(
-                genre="Rock",
-                artist_name=f"Rock Artist {i}",
-                channel_id=f"UCrock{i:015d}",
-                channel_url=f"https://www.youtube.com/channel/UCrock{i:015d}",
-                resolved_at=utcnow(),
-                title=f"Rock Artist {i}",
-                subscriber_count=1,
-            )
-        )
-    # Same channel also tagged under "Rock" in our own cache (plausible —
-    # MusicBrainz can tag one artist with several genres) to check dedup
-    # across the requested genre list, not just within one genre.
-    db_session.add(
-        GenreArtist(
-            genre="Rock",
-            artist_name="Shared",
-            channel_id=shared_channel,
-            channel_url=f"https://www.youtube.com/channel/{shared_channel}",
-            resolved_at=utcnow(),
-            title="Shared",
-            subscriber_count=1,
-        )
-    )
-    db_session.commit()
+def test_a_shelf_carries_everything_seeded_for_its_genre(db_session):
+    """No cap here at all: how much a genre is worth showing is decided by
+    how many channels are curated into it, and a shelf that overflows scrolls
+    sideways rather than growing the step."""
+    _seed_genres(db_session, ["Rock"], ga.ARTISTS_PER_GENRE + 3)
 
-    result = ga.get_suggested_channels(db_session, [GENRE, "Rock"])
+    [group] = ga.get_suggested_channels_by_genre(db_session, ["Rock"])
 
-    assert len(result) == ga.ARTISTS_PER_GENRE
-    channel_ids = [r["channel_id"] for r in result]
-    assert len(channel_ids) == len(set(channel_ids))  # no duplicate channel
+    assert len(group["channels"]) == ga.ARTISTS_PER_GENRE + 3
