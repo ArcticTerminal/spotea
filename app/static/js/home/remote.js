@@ -146,6 +146,10 @@ function hideBackfillOverlay() {
 // which read as broken. Keeping the count in its own nowrap element keeps it
 // atomic no matter how the title line wraps.
 function backfillPhaseParts(phase, done, total) {
+  // The first RSS read, which POST /feeds used to do before answering and
+  // now hands to services/backfill.run_initial_sync. It carries no count —
+  // nothing knows how many entries there are until it has parsed them.
+  if (phase === "syncing") return { title: "Fetching RSS feed…", detail: "" };
   if (phase === "scanning") {
     if (total > 0) return { title: "Fetching channel history…", detail: `${done}/${total} videos found` };
     if (done > 0) return { title: "Fetching channel history…", detail: `Page ${done}` };
@@ -155,13 +159,18 @@ function backfillPhaseParts(phase, done, total) {
   return { title: "", detail: "" };
 }
 
-const isActiveBackfillPhase = (phase) => phase === "scanning" || phase === "saving";
+const isActiveBackfillPhase = (phase) =>
+  phase === "syncing" || phase === "scanning" || phase === "saving";
 
 // Polls until a just-added channel's backfill is done, then announces it.
 // Assumes showBackfillOverlay() is already up (callers show it when the add
 // starts, before the POST even resolves, so there's no gap where the screen
 // looks idle while the RSS sync — itself a couple of seconds — is in flight).
-async function waitForBackfill(feedId, title, { announce = true, showOverlay = true, onProgress } = {}) {
+async function waitForBackfill(
+  feedId,
+  title,
+  { announce = true, showOverlay = true, onProgress, artistBrowseId = null } = {}
+) {
   // Two ways to report the same thing. showOverlay drives the app-wide
   // backfill overlay; onProgress hands the same phase/count to a caller with
   // its own place to put it — the onboarding wizard, whose full-screen modal
@@ -206,7 +215,15 @@ async function waitForBackfill(feedId, title, { announce = true, showOverlay = t
   // "Add" wants — that's a modal you're meant to stay inside while adding
   // several channels in a row, not something a follow should silently
   // navigate you out from under.
-  if (announce) document.dispatchEvent(new CustomEvent(CHANNEL_FOLLOWED, { detail: { feedId, title } }));
+  // `artistBrowseId` rides along so the listener knows which page it just
+  // added — an artist's profile, or a plain channel's listing. Only the
+  // server can say (see services/feed_add._as_artist_follow), so it comes
+  // off the response rather than off whatever the caller sent.
+  if (announce) {
+    document.dispatchEvent(
+      new CustomEvent(CHANNEL_FOLLOWED, { detail: { feedId, title, artistBrowseId } })
+    );
+  }
 }
 
 /**
@@ -271,6 +288,7 @@ export async function followChannel(
       return { added: true, status };
     }
     await waitForBackfill(data.feed.id, data.feed.channel_title || channelUrl, {
+      artistBrowseId: data.feed.artist_browse_id || null,
       announce,
       showOverlay,
       onProgress,

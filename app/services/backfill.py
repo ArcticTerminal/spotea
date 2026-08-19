@@ -1,10 +1,19 @@
-"""One-time full-history scan for a newly followed channel.
+"""The background work a newly followed channel needs: its first RSS sync,
+then its one-time full-history scan.
 
 Split out of routers/feeds.py, which had grown to hold five unrelated
 concerns. This one is the odd shape among them: a long-running background
 job with its own progress tracking that two different callers drive
 differently — a single add defers it so the response can go out
 immediately, while bulk import runs it inline, one channel at a time.
+
+The first RSS sync used to happen inline, inside POST /feeds, and that is
+what the onboarding wizard's Finish button was really waiting on: measured
+per channel, 1.32s to read the durations out of yt-dlp and 0.84s for the
+avatar, against 0.11s for the RSS itself. Six channels, drained one at a
+time, is twenty seconds of somebody looking at "Finishing…". None of it has
+to happen before the answer — the feed row is what Library renders a card
+from, and the card already knows how to say it is still filling in.
 """
 
 import logging
@@ -15,6 +24,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
+from app.feed_sync import apply_feed_data, fetch_feed_data
 from app.models import Content, Feed
 from app.progress import ProgressRegistry
 from app.timeutil import utcnow
@@ -37,10 +47,14 @@ backfill_progress: ProgressRegistry[int, tuple[str, int, int]] = ProgressRegistr
 # see the comment at its call site.
 PROGRESS_UPDATE_INTERVAL = 25
 
-# The two phases a backfill is actually working in. The registry keeps
-# terminal entries readable for a while after the fact (see progress.py), so
-# "has an entry" and "is running" are different questions.
-ACTIVE_PHASES = frozenset({"scanning", "saving"})
+# The phases this is actually working in. The registry keeps terminal
+# entries readable for a while after the fact (see progress.py), so "has an
+# entry" and "is running" are different questions.
+#
+# "syncing" is the first RSS read, which now runs here rather than inside
+# POST /feeds — it belongs in this set for the same reason the other two do:
+# it is time during which the card has nothing real to show yet.
+ACTIVE_PHASES = frozenset({"syncing", "scanning", "saving"})
 
 
 def backfilling_feed_ids(feed_ids: Iterable[int]) -> set[int]:
@@ -59,6 +73,65 @@ def backfilling_feed_ids(feed_ids: Iterable[int]) -> set[int]:
         for feed_id in feed_ids
         if (backfill_progress.get(feed_id) or ("", 0, 0))[0] in ACTIVE_PHASES
     }
+
+
+def mark_syncing(feed_id: int) -> None:
+    """Puts a feed into the "filling in" state without doing any of the work.
+
+    Called by POST /feeds before it answers, so the card Library renders off
+    that answer is already reporting itself — a background task cannot be
+    relied on to have started by the time the client comes back asking for
+    fragments, and losing that race would render a confident "0 videos" and
+    then never poll, because polling only happens while such a card is on
+    the page (see home/library.js). run_initial_sync sets it again for every
+    other caller; the registry takes the same value twice happily."""
+    backfill_progress.set(feed_id, ("syncing", 0, 0))
+
+
+def run_initial_sync(feed_id: int, channel_id: str | None, db: Session) -> None:
+    """Everything following a channel needs that doesn't have to happen
+    before the answer: its first RSS read, and then — for a channel, not an
+    artist — its history scan.
+
+    Registered as "syncing" before anything is fetched, so the card Library
+    renders the moment POST /feeds answers already says "Fetching uploads…"
+    instead of sitting there claiming zero videos. That claim was the reason
+    this had to be inline before: a card that appears empty and stays empty
+    for two seconds reads as a channel that failed to add.
+
+    An artist is where this stops. Their feed is their "<Artist> - Topic"
+    channel, which carries the whole catalogue (1,064 uploads for Drake,
+    measured), and following them means "tell me when they release
+    something" — see routers/feeds.py. The RSS read above has already
+    brought in the recent handful.
+    """
+    feed = db.get(Feed, feed_id)
+    if feed is None:
+        return
+
+    mark_syncing(feed_id)
+    try:
+        apply_feed_data(db, feed, fetch_feed_data(feed.id, feed.rss_url, feed.avatar_url))
+    except Exception:
+        # fetch_feed_data already swallows a FeedError into "no new content",
+        # so anything reaching here is unexpected — and it must still clear
+        # the phase, or the card says "Fetching uploads…" forever.
+        logger.exception("Initial sync failed for feed %s", feed_id)
+        backfill_progress.set(feed_id, ("done", 0, 0))
+        return
+
+    if channel_id and not feed.artist_browse_id:
+        run_backfill(feed_id, channel_id, db)
+    else:
+        backfill_progress.set(feed_id, ("done", 0, 0))
+
+
+def run_initial_sync_task(feed_id: int, channel_id: str | None) -> None:
+    """BackgroundTasks entry point for run_initial_sync, on a session of its
+    own — see run_backfill_task for why the request's session cannot be
+    used here."""
+    with SessionLocal() as db:
+        run_initial_sync(feed_id, channel_id, db)
 
 
 def run_backfill(feed_id: int, channel_id: str, db: Session) -> None:

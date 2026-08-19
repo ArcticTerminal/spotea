@@ -88,7 +88,11 @@ def run_bulk_import(job_id: str, progress: dict, lines: list[str], user_id: int)
                     entry["status"] = "added"
                     entry["error"] = None
                     entry["channel_title"] = feed.channel_title
-                    if channel_id:
+                    # Same rule the single-add route follows: an artist's
+                    # feed is their Topic channel, which holds their whole
+                    # catalogue, and importing all of it is not what a
+                    # subscription list is asking for. See routers/feeds.py.
+                    if channel_id and not feed.artist_browse_id:
                         run_backfill(feed.id, channel_id, db)
                 except FeedAlreadyExistsError as exc:
                     entry["status"] = "duplicate"

@@ -47,12 +47,15 @@ function schedulePreparingCheck() {
 /**
  * Keeps Library's "Fetching uploads…" cards honest.
  *
- * A newly followed channel is usable immediately — POST /feeds syncs its RSS
- * before it answers — while its full upload history is still being scanned in
- * the background, which for a large channel is minutes. That wait used to be
+ * A newly followed channel gets a card as soon as its feed row exists —
+ * POST /feeds answers there and leaves the rest to a background job (see
+ * services/backfill.run_initial_sync): the RSS content first, seconds, then
+ * the full upload history, minutes on a large channel. That wait used to be
  * held in front of whoever added it (the onboarding wizard sat on a loading
  * screen for it); now it lives on the card of the channel it belongs to,
- * where it can be ignored, and this is what takes it back off again.
+ * where it can be ignored, and this is what takes it back off again — the
+ * refresh below is also what puts the channel's videos onto Home, since the
+ * card can now appear before there are any.
  */
 export function setupPreparingChannels() {
   schedulePreparingCheck();

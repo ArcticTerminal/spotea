@@ -403,7 +403,13 @@ export function setupDetailPanel() {
     // dropping the whole cache is simpler than tracking that mapping for a
     // follow action that isn't a frequent occurrence to begin with.
     remoteFragmentCache.clear();
-    openDetail("channel", event.detail.feedId);
+    // An artist lands on their profile, which is the page their library card
+    // opens too (see _library_grid.html) — following someone and then
+    // clicking them a minute later should not show two different pages. The
+    // server is what decided this was an artist, so the id comes from its
+    // response and not from whichever button was pressed.
+    if (event.detail.artistBrowseId) openDetail("yt-artist", event.detail.artistBrowseId);
+    else openDetail("channel", event.detail.feedId);
   });
 
   window.addEventListener("popstate", () => {

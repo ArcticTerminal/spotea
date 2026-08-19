@@ -138,7 +138,7 @@ def _artist_or_channel(db: Session, user_id: int, browse_id: str):
     if artist is None or not artist.tracks:
         return None
 
-    follow_channel_id = artist.topic_channel_id or artist.channel_id or browse_id
+    follow_channel_id = artist.topic_channel_id or artist.channel_id or artist.browse_id
     return artist, {
         "hero_image": cached_avatar_or_hotlink(follow_channel_id, artist.avatar_url),
         "hero_is_avatar": True,
@@ -147,7 +147,12 @@ def _artist_or_channel(db: Session, user_id: int, browse_id: str):
         # Sent back with the follow so the feed can be recorded as this
         # artist's — see routers/feeds.py. The browse id rather than the
         # channel it targets: it's what reopens this page.
-        "artist_browse_id": browse_id,
+        #
+        # The profile's own browse id, not the one this was asked for. They
+        # differ when a VEVO channel was followed through to the page that
+        # actually has the music (see music._redirected_artist), and sending
+        # the VEVO id back would record the feed against the songless page.
+        "artist_browse_id": artist.browse_id,
     }
 
 
