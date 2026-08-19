@@ -373,12 +373,11 @@
 
       <div id="onboarding-step-channels" class="onboarding-step" hidden>
         <div class="onboarding-step-body">
-          <p class="muted">
-            A few channels worth following, based on what you picked — or search for your own.
-          </p>
-
-          <ul id="onboarding-suggested-channels" class="search-results"></ul>
-
+          {# Search first, suggestions second, with a labelled rule between
+             them: the two are different questions ("who am I already looking
+             for?" vs "what is there?"), and a page of shelves with a search
+             box buried under it reads as one long scroll of channels rather
+             than two ways in. #}
           <div class="channel-search">
             <input
               type="text"
@@ -391,8 +390,16 @@
             />
           </div>
           <ul id="onboarding-search-results" class="search-results"></ul>
+
+          <p class="onboarding-divider"><span>or pick from what you like</span></p>
+
+          {# One shelf per picked genre, built client-side from Explore's own
+             shelf/channel card by home/onboarding.js — a div, not a list,
+             because what goes in is .shelf blocks rather than result rows. #}
+          <div id="onboarding-suggested-channels" class="onboarding-shelves"></div>
         </div>
         <div class="modal-actions">
+          <button type="button" id="onboarding-channels-back" class="btn-quiet onboarding-back">Back</button>
           {# Filled by home/onboarding.js — how many channels are followed so
              far against the handful the step asks for before Finish unlocks. #}
           <p id="onboarding-channels-progress" class="muted onboarding-progress"></p>

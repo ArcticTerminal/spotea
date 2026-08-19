@@ -24,7 +24,7 @@ other genres (the podcast categories' curated channels live in the same
 table) are never touched. Safe to re-run: a genre whose rows already match
 the curated list exactly is skipped without deleting anything, which also
 preserves the lazily-resolved YouTube display metadata on those rows
-(title/thumbnail/subscribers — see get_suggested_channels).
+(title/thumbnail/subscribers — see get_suggested_channels_by_genre).
 """
 
 from app.database import SessionLocal

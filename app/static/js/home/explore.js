@@ -34,7 +34,7 @@ export function renderChannelResults(results, containerId = "channel-search-resu
   list.innerHTML = results
     .map((r) => {
       const thumb = r.thumbnail_url
-        ? `<img class="search-result-thumb" src="${escapeHtml(r.thumbnail_url)}" alt="" />`
+        ? `<img class="search-result-thumb" src="${escapeHtml(r.thumbnail_url)}" alt="" loading="lazy" />`
         : `<span class="search-result-thumb"></span>`;
       const subs =
         r.subscriber_count != null
@@ -130,22 +130,39 @@ function recVideoCardHtml(video) {
   `;
 }
 
-function recChannelCardHtml(channel) {
+/**
+ * One channel as a shelf card — avatar, name, Add. Exported because the
+ * onboarding wizard's per-genre shelves are the same component (see
+ * home/onboarding.js): same markup, same shelf geometry, same Add button, so
+ * a channel reads identically wherever the app offers one.
+ *
+ * The subscriber line is dropped entirely when there is no count rather than
+ * left empty — onboarding's suggestions never carry one (see
+ * services/genre_artists._as_channel_dict), and an empty <p> there would
+ * reserve a line of space for nothing.
+ */
+export function channelCardHtml(channel) {
   const avatar = channel.thumbnail_url
-    ? `<img class="rec-channel-avatar" src="${escapeHtml(channel.thumbnail_url)}" alt="" loading="lazy" />`
-    : `<span class="rec-channel-avatar"></span>`;
+    ? `<img class="shelf-channel-avatar" src="${escapeHtml(channel.thumbnail_url)}" alt="" loading="lazy" />`
+    : `<span class="shelf-channel-avatar"></span>`;
+  const subs =
+    channel.subscriber_count != null
+      ? `<p class="card-date">${escapeHtml(formatSubscribers(channel.subscriber_count))}</p>`
+      : "";
   // Same two targets as a channel search result: the card previews, the
-  // button follows without looking first.
+  // button follows without looking first. (Explore wires both; the wizard
+  // wires only the button — a full-panel preview out from under that modal
+  // would strand it half-finished.)
   return `
     <article
-      class="card rec-channel-card"
+      class="card shelf-channel-card"
       data-channel-id="${escapeHtml(channel.channel_id)}"
       data-thumbnail-url="${escapeHtml(channel.thumbnail_url || "")}"
     >
       ${avatar}
       <div class="card-body">
         <h3 class="card-title" title="${escapeHtml(channel.title)}">${escapeHtml(channel.title)}</h3>
-        <p class="card-date">${escapeHtml(formatSubscribers(channel.subscriber_count))}</p>
+        ${subs}
         <button type="button" class="btn-add-channel" data-channel-url="${escapeHtml(channel.channel_url)}">Add</button>
       </div>
     </article>
@@ -197,12 +214,13 @@ function splitByDuration(videos) {
 }
 
 /** A whole shelf, or nothing at all when that kind came back empty — an
- *  empty "Playlists" heading is worse than no heading. */
-function recShelfHtml(title, items, cardHtml) {
+ *  empty "Playlists" heading is worse than no heading. Exported for the
+ *  onboarding wizard, which builds one per picked genre. */
+export function shelfHtml(title, items, cardHtml) {
   if (!items.length) return "";
   return `
     <div class="shelf">
-      <div class="shelf-header"><h3 class="shelf-title">${title}</h3></div>
+      <div class="shelf-header"><h3 class="shelf-title">${escapeHtml(title)}</h3></div>
       <div class="shelf-row">${items.map(cardHtml).join("")}</div>
     </div>
   `;
@@ -225,10 +243,10 @@ function renderRecommendations(data) {
 
   const { contents, longForm } = splitByDuration(data.videos);
   const shelves = [
-    recShelfHtml("Contents", contents, recVideoCardHtml),
-    recShelfHtml("Long form", longForm, recVideoCardHtml),
-    recShelfHtml("Channels", data.channels, recChannelCardHtml),
-    recShelfHtml("Playlists", data.playlists, recPlaylistCardHtml),
+    shelfHtml("Contents", contents, recVideoCardHtml),
+    shelfHtml("Long form", longForm, recVideoCardHtml),
+    shelfHtml("Channels", data.channels, channelCardHtml),
+    shelfHtml("Playlists", data.playlists, recPlaylistCardHtml),
   ].join("");
 
   body.innerHTML =
@@ -366,7 +384,7 @@ export function setupRecommendations() {
       return;
     }
 
-    const channelCard = event.target.closest(".rec-channel-card");
+    const channelCard = event.target.closest(".shelf-channel-card");
     if (channelCard) {
       openDetail("yt-channel", channelCard.dataset.channelId, { avatar: channelCard.dataset.thumbnailUrl || null });
       return;

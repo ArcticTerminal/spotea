@@ -7,7 +7,7 @@ interest strings against GenreArtist.genre, so seeding rows whose genre is a
 PODCAST_CATEGORIES entry makes /onboarding/suggested-channels work for
 podcast categories with zero backend changes. Only genre/artist_name/
 channel_id/channel_url are written here — display metadata (title, avatar,
-subscriber count) is resolved lazily by get_suggested_channels the first
+subscriber count) is resolved lazily by get_suggested_channels_by_genre the first
 time a real onboarding session needs the category, exactly like the music
 rows.
 

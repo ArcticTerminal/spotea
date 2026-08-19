@@ -838,17 +838,33 @@ html[data-active-tab="detail"] .tab-panel[data-tab-panel="detail"] {
   overflow: hidden;
 }
 
+/* How wide the wizard's centered column is, per step (home/onboarding.js
+   stamps the visible step onto the modal). The two picking steps are a
+   reading column at the modal's usual width; the channels step is a
+   catalogue of horizontally scrolling shelves, so it takes the same 1100px
+   the Explore tab it borrows those shelves from uses (.layout). It lives on
+   the modal rather than on the step because the full-bleed header and footer
+   bars align their contents to the same column and can't see which step is
+   showing. */
+.modal-onboarding {
+  --onboarding-column: 560px;
+}
+
+.modal-onboarding[data-step="onboarding-step-channels"] {
+  --onboarding-column: 1100px;
+}
+
 /* The header/footer bars stay full-bleed (border spanning edge to edge
    reads as a page, not a leftover card), but their content lines up with
-   the 560px-wide, centered step body below via matching horizontal
-   padding — plain auto-margins can't do that on an element that's meant
-   to stay full width itself. Below 560px+the base gutter, this collapses
-   to the flat 1.25rem gutter every other input/list in the app already
-   uses; above it, it grows to keep pace with the centered column. */
+   the centered step body below via matching horizontal padding — plain
+   auto-margins can't do that on an element that's meant to stay full width
+   itself. Below the column width + the base gutter, this collapses to the
+   flat 1.25rem gutter every other input/list in the app already uses; above
+   it, it grows to keep pace with the centered column. */
 .modal-onboarding .modal-header {
   flex-shrink: 0;
   margin-bottom: 0;
-  padding: 1rem max(1.25rem, calc((100% - 560px) / 2 + 1.25rem));
+  padding: 1rem max(1.25rem, calc((100% - var(--onboarding-column)) / 2 + 1.25rem));
   padding-top: calc(1rem + env(safe-area-inset-top, 0px));
   border-bottom: 1px solid var(--border-default);
   box-sizing: border-box;
@@ -929,7 +945,7 @@ html[data-active-tab="detail"] .tab-panel[data-tab-panel="detail"] {
   min-height: 0;
   overflow-y: auto;
   width: 100%;
-  max-width: 560px;
+  max-width: var(--onboarding-column);
   margin: 0 auto;
   padding: 1.25rem;
   box-sizing: border-box;
@@ -937,7 +953,7 @@ html[data-active-tab="detail"] .tab-panel[data-tab-panel="detail"] {
 
 .modal-onboarding .modal-actions {
   flex-shrink: 0;
-  padding: 1rem max(1.25rem, calc((100% - 560px) / 2 + 1.25rem))
+  padding: 1rem max(1.25rem, calc((100% - var(--onboarding-column)) / 2 + 1.25rem))
     calc(1rem + env(safe-area-inset-bottom, 0px));
   border-top: 1px solid var(--border-default);
   box-sizing: border-box;
@@ -948,13 +964,13 @@ html[data-active-tab="detail"] .tab-panel[data-tab-panel="detail"] {
 }
 
 /* The channels step's gate counter: how many channels are followed against
-   how many Finish is waiting for. Sits at the far left of the footer, away
-   from the actions — it reports state, it isn't one of them. Two classes
-   deep because `.modal p` further down sets its own margins, and the
-   margin-right: auto here is the whole point (it's what holds this at the
-   left end of a flex row that otherwise packs to the right). */
+   how many Finish is waiting for. It reports state, it isn't one of the
+   actions, so it sits just ahead of them rather than among them — Back's own
+   margin-right: auto is what opens the gap between the two ends of the
+   footer. Two classes deep because `.modal p` further down sets margins of
+   its own that would otherwise put this on a line by itself. */
 .modal-onboarding .onboarding-progress {
-  margin: 0 auto 0 0;
+  margin: 0;
   align-self: center;
   font-size: 0.85rem;
 }
@@ -991,11 +1007,77 @@ html[data-active-tab="detail"] .tab-panel[data-tab-panel="detail"] {
   color: var(--accent);
 }
 
-/* Suggested and searched channels below reuse .search-results /
-   .search-result-channel as-is (see Explore's own channel search) — only
-   the spacing between the two lists needs anything of its own. */
-#onboarding-suggested-channels:not(:empty) {
-  margin-bottom: 1rem;
+/* Searched channels above the shelves reuse .search-results /
+   .search-result-channel as-is (see Explore's own channel search).
+
+   What sits between them is this: a rule with its label set into it, the
+   plainest way to say "two separate offers" without either of them growing a
+   heading. Muted and small on purpose — it is a signpost between two regions
+   of channels, not a third thing to read. Scoped under .modal-onboarding to
+   beat `.modal p`'s own margins. */
+.modal-onboarding .onboarding-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 1.5rem 0 1rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.modal-onboarding .onboarding-divider::before,
+.modal-onboarding .onboarding-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border-default);
+}
+
+/* The suggestion shelves are Explore's .shelf/.shelf-channel-card exactly (see
+   home/onboarding.js), only smaller: this is a catalogue to scan across, so
+   the win is how many of a genre's artists are on screen before the row has
+   to be scrolled — a 200px Home card fits five across the column, these fit
+   eight. The shelf still scrolls sideways past that rather than wrapping. */
+.onboarding-shelves .shelf {
+  margin-bottom: 1.25rem;
+}
+
+.onboarding-shelves .shelf-title {
+  font-size: 0.95rem;
+}
+
+.onboarding-shelves .shelf-row > .card {
+  flex-basis: 108px;
+}
+
+.onboarding-shelves .shelf-channel-card {
+  padding-top: 0.75rem;
+}
+
+.onboarding-shelves .shelf-channel-card .card-body {
+  padding: 0.6rem 0.5rem;
+}
+
+.onboarding-shelves .shelf-channel-card .card-title {
+  font-size: 0.8rem;
+}
+
+.onboarding-shelves .shelf-channel-avatar {
+  width: 56px;
+  height: 56px;
+}
+
+@media (min-width: 480px) {
+  .onboarding-shelves .shelf-row > .card {
+    flex-basis: 124px;
+  }
+
+  .onboarding-shelves .shelf-channel-avatar {
+    width: 64px;
+    height: 64px;
+  }
 }
 
 /* A description sentence next to a dropdown is tight on a phone screen —
@@ -1210,18 +1292,26 @@ html[data-active-tab="detail"] .tab-panel[data-tab-panel="detail"] {
 
 /* Channel cards aren't 16:9 — an avatar reads as a channel, a letterboxed
    thumbnail doesn't. Centered so the row stays even whatever the name
-   length. */
-.rec-channel-card {
+   length. Shared by Explore's "Channels" shelf and the onboarding wizard's
+   per-genre ones (see explore.js's channelCardHtml), which is why nothing
+   here is named for recommendations. */
+.shelf-channel-card {
   align-items: center;
   text-align: center;
   padding-top: 1rem;
 }
 
-.rec-channel-card .card-title {
+.shelf-channel-card .card-title {
   min-height: 0;
+  /* A channel name is often one unbroken word (norahjonesVEVO), which normal
+     word wrapping can't split — so it overflowed the card sideways instead of
+     wrapping, and .card-title's 2-line clamp never got the chance to put an
+     ellipsis on it. Breaking anywhere keeps the name inside the card and
+     hands the clamp something to truncate. */
+  overflow-wrap: anywhere;
 }
 
-.rec-channel-card .card-body {
+.shelf-channel-card .card-body {
   align-items: center;
   gap: 0.4rem;
   width: 100%;
@@ -1230,11 +1320,11 @@ html[data-active-tab="detail"] .tab-panel[data-tab-panel="detail"] {
   flex: 1;
 }
 
-.rec-channel-card .btn-add-channel {
+.shelf-channel-card .btn-add-channel {
   margin-top: auto;
 }
 
-.rec-channel-avatar {
+.shelf-channel-avatar {
   width: 72px;
   height: 72px;
   border-radius: 50%;
