@@ -7,6 +7,7 @@ that means one thing on first load and another on refresh is exactly the
 class of bug this replaced.
 """
 
+import json
 from collections.abc import Iterable
 
 from fastapi import BackgroundTasks
@@ -21,7 +22,7 @@ from app.content_query import (
     query_content_page,
 )
 from app.images import needs_thumbnail_caching
-from app.models import Content
+from app.models import Artist, Content
 from app.services.artist_sync import cache_thumbnail
 from app.services.initial_sync import syncing_artist_ids
 from app.storage import collect_usage, usage_summary
@@ -130,6 +131,21 @@ def home_shelf_items(context: dict) -> list[Content]:
     return [item for key in HOME_SHELF_KEYS for item in context[key]]
 
 
+def _artist_release_count(artist: Artist) -> int:
+    """How many albums/singles this artist has, per the last sync's
+    snapshot (see services/artist_sync.py) — free, since every followed
+    artist row already carries it, and unlike artist_track_counts below it
+    doesn't collapse to 0 for the common case of "followed, nothing new
+    released since". A card with nothing synced yet (still preparing, or a
+    snapshot that failed to parse) reads as 0 rather than raising."""
+    if not artist.release_snapshot:
+        return 0
+    try:
+        return len(json.loads(artist.release_snapshot))
+    except (TypeError, ValueError):
+        return 0
+
+
 def library_context(db: Session, user_id: int) -> dict:
     """Library's channel grid: per-channel counts plus the four pinned
     virtual-playlist tiles.
@@ -148,6 +164,9 @@ def library_context(db: Session, user_id: int) -> dict:
         # longer makes anyone wait for a backfill: the wait moved onto the
         # card of the channel it actually belongs to, where it can be ignored.
         "preparing_artist_ids": syncing_artist_ids(artist.id for artist in artists),
+        # A followed artist's own release count — see _artist_release_count.
+        # No query: every artist here is already loaded above.
+        "artist_release_counts": {artist.id: _artist_release_count(artist) for artist in artists},
         # One grouped count covers every channel's card, rather than a
         # per-artist query each — count_content can't be reused directly here
         # for that reason (it's one artist_id at a time), but the filter has to
@@ -155,6 +174,12 @@ def library_context(db: Session, user_id: int) -> dict:
         # favorited/saved, same as content_query._content_query, or a tile
         # can read a higher count than the channel page it opens onto lists
         # (measured live: 156 vs 154).
+        #
+        # Rarely the more interesting number for a followed artist's own
+        # card: following only starts recording releases from here on (see
+        # artist_sync.py), so this reads 0 for most artists most of the
+        # time — that's correct, not a bug, and the template falls back to
+        # artist_release_counts above for exactly that case.
         "artist_track_counts": dict(
             db.query(Content.artist_id, func.count(Content.id))
             .filter(Content.user_id == user_id, Content.is_preview.is_(False))

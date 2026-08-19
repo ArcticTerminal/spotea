@@ -47,12 +47,13 @@
       </a>
       {% for artist in artists %}
       {% set video_count = artist_track_counts.get(artist.id, 0) %}
-      {# A channel added minutes ago is still having its upload history
-         scanned in the background (services/backfill.py). It is already
-         openable and already has whatever the first sync found, so
-         this replaces the count rather than blocking anything — and it is
-         why nothing else in the app waits for a backfill any more. The
-         data-preparing attribute is what home/library.js polls on. #}
+      {% set release_count = artist_release_counts.get(artist.id, 0) %}
+      {# An artist followed minutes ago is still having its first sync run
+         in the background (services/initial_sync.py). It is already
+         openable, so this replaces the count rather than blocking anything
+         — and it is why nothing else in the app waits for that sync any
+         more. The data-preparing attribute is what home/library.js polls
+         on. #}
       {% set is_preparing = artist.id in preparing_artist_ids %}
       {# The card opens the artist's own profile — albums, singles and what
          they just released, which is what the card stands for. There is no
@@ -78,8 +79,18 @@
           <span class="channel-card-count channel-card-preparing">
             <span class="spinner"></span><span class="channel-card-preparing-text">Fetching releases…</span>
           </span>
+          {% elif video_count %}
+          {# A track from this artist has actually synced in since you
+             followed — see page_context.library_context's
+             artist_track_counts. The rarer, more interesting case. #}
+          <span class="channel-card-count">{{ video_count }} track{{ '' if video_count == 1 else 's' }}</span>
+          {% elif release_count %}
+          {# Following only starts recording releases from here on, so this
+             is what most cards show most of the time: what YouTube Music's
+             own artist page already lists, not what's synced locally. #}
+          <span class="channel-card-count">{{ release_count }} release{{ '' if release_count == 1 else 's' }}</span>
           {% else %}
-          <span class="channel-card-count">{{ video_count }} video{{ '' if video_count == 1 else 's' }}</span>
+          <span class="channel-card-count">Following</span>
           {% endif %}
         </span>
       </a>

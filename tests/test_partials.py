@@ -175,6 +175,59 @@ def test_an_artists_library_card_opens_their_profile(client, db_session):
     assert 'href="/#yt-artist/UC5ZkRnYd3__WBBGnAnWO9Cg"' in body
 
 
+def test_an_artists_card_prefers_its_own_synced_track_count(client, db_session):
+    """_seed's artist has three real (non-preview) Content rows, so the card
+    shows those rather than falling back to a release count it has none of
+    — see page_context.library_context's artist_track_counts/
+    artist_release_counts split."""
+    _seed(db_session)
+
+    body = _fragment_body(client.get("/partials/library").text, "library-grid")
+
+    assert "3 tracks</span>" in body
+
+
+def test_a_followed_artists_card_falls_back_to_its_release_count(client, db_session):
+    """The common case: following only starts recording releases from here
+    on (see services/artist_sync.py), so most cards have no synced track of
+    their own to show — nothing here reads as "0 videos" any more, since
+    the release snapshot every followed artist already carries is worth
+    more than a count that's almost always zero."""
+    artist = Artist(
+        user_id=USER_ID,
+        channel_id="UCreleasefallback0000000",
+        browse_id="UCreleasefallback0000000",
+        name="No Synced Tracks Yet",
+        release_snapshot='["MPREb_a", "MPREb_b"]',
+    )
+    db_session.add(artist)
+    db_session.commit()
+
+    body = _fragment_body(client.get("/partials/library").text, "library-grid")
+
+    assert "2 releases</span>" in body
+    # Scoped to the artist's own card, not the four pinned playlist tiles
+    # above it (Favorites/Saved/New releases/Recently played), which still
+    # say "N videos" and are unrelated to this artist.
+    card = body[body.index('data-detail-id="UCreleasefallback0000000"') :]
+    assert "0 video" not in card[: card.index("</a>")]
+
+
+def test_a_followed_artist_with_neither_count_just_says_following(client, db_session):
+    """Nothing synced, and no release snapshot yet either (still between
+    following and its first sync landing) — "Following" beats a card that
+    claims to know a count of anything."""
+    artist = Artist(
+        user_id=USER_ID, channel_id="UCnocounteither00000000", name="Freshly Followed"
+    )
+    db_session.add(artist)
+    db_session.commit()
+
+    body = _fragment_body(client.get("/partials/library").text, "library-grid")
+
+    assert "Following</span>" in body
+
+
 def test_downloads_fragment_reports_stored_sizes(client, db_session):
     """The modal's own list (full collect_usage) and the Settings summary
     line (the cheaper usage_summary) are two separate fragments now — see

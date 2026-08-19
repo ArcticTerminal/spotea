@@ -71,6 +71,44 @@ def test_the_library_tile_count_excludes_previews(db_session):
     assert library_context(db_session, USER_ID)["artist_track_counts"][artist.id] == 1
 
 
+def test_the_library_tile_falls_back_to_the_release_count(db_session):
+    """artist_track_counts reads 0 for almost every followed artist most of
+    the time — following only starts recording releases from here on (see
+    services/artist_sync.py), it doesn't import the back catalogue. The
+    release snapshot every followed artist already carries is what the
+    template falls back to instead of a card that always says "0"."""
+    artist = _artist(
+        db_session,
+        "https://example.com/release-count-fallback",
+        release_snapshot='["MPREb_1", "MPREb_2", "MPREb_3"]',
+    )
+
+    counts = library_context(db_session, USER_ID)
+
+    assert counts["artist_track_counts"].get(artist.id, 0) == 0
+    assert counts["artist_release_counts"][artist.id] == 3
+
+
+def test_the_library_tile_release_count_survives_no_snapshot_yet(db_session):
+    """A freshly-followed artist whose first sync hasn't landed a snapshot
+    yet — distinct from a malformed one below, and from the "still syncing"
+    card state, which page_context reads off a separate in-memory registry
+    rather than this column."""
+    artist = _artist(db_session, "https://example.com/no-snapshot-yet")
+
+    assert library_context(db_session, USER_ID)["artist_release_counts"][artist.id] == 0
+
+
+def test_the_library_tile_release_count_survives_a_malformed_snapshot(db_session):
+    """Defensive: nothing writes anything but a JSON list here, but a card
+    render is the wrong place to 500 over it either way."""
+    artist = _artist(
+        db_session, "https://example.com/bad-snapshot", release_snapshot="not json"
+    )
+
+    assert library_context(db_session, USER_ID)["artist_release_counts"][artist.id] == 0
+
+
 def test_favorites_playlist_count_excludes_previews(db_session):
     """Favoriting/saving already clears is_preview as a side effect in
     practice, so this is a defensive guard against that invariant ever
