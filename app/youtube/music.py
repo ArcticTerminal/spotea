@@ -83,10 +83,24 @@ MOOD_PLAYLIST_LIMIT = 24
 # The chart's artist list runs to 40. Same reasoning.
 CHART_ARTIST_LIMIT = 12
 
-# How many tracks an artist page lists. Matched to search.py's
-# PLAYLIST_ITEM_LIMIT so every remote track list in this app is the same
-# length — the detail panel renders them all on one page either way.
-ARTIST_TRACK_LIMIT = 50
+# How many tracks an artist page lists. Set above what YouTube Music will
+# ever hand over, so in practice it caps nothing and every artist fits on
+# the one page the remote detail panel has (there is no pagination there —
+# see services/remote_detail._base_context).
+#
+# That's affordable because the ceiling is low and fixed. A "Top songs"
+# playlist stops at 150 no matter whose it is: measured across Taylor
+# Swift, Drake, Frank Sinatra, Tarkan and J.S. Bach — a composer with
+# thousands of works — all five reported exactly 150. It is a cap on that
+# surface rather than a catalogue size; a full discography lives in the
+# albums and singles sections, which is a per-album traversal this app
+# doesn't make. With the artist's music videos merged in, ~160 rows is the
+# worst case.
+#
+# Unlike search.py's PLAYLIST_ITEM_LIMIT (50), this bounds a *render* and
+# not a *fetch*: YouTube Music returns the whole list in the same response,
+# so a lower number here would only throw away tracks already in hand.
+ARTIST_TRACK_LIMIT = 200
 
 
 # YTMusic wraps a requests.Session, which is not documented as thread-safe,
@@ -407,25 +421,40 @@ class ArtistProfile:
     monthly_listeners: str | None
     avatar_url: str | None
     tracks: list[VideoSearchResult]
+    # How many tracks the artist has in total, which is not always how many
+    # are in `tracks` — see ARTIST_TRACK_LIMIT.
+    track_count: int = 0
 
 
-def _artist_songs(songs: dict, all_songs: bool) -> list[dict]:
-    """The song entries to list for an artist.
+def _artist_songs(songs: dict, all_songs: bool) -> tuple[list[dict], int | None]:
+    """The song entries to list for an artist, and how many there are in
+    total when YouTube Music says so.
 
     The page itself only previews five, with a "Top songs" playlist behind a
-    browse id for the rest — 56 of them for a mid-size artist, measured. A
-    five-track artist page is not worth opening, so the playlist is what gets
-    listed and the preview is only the fallback for an artist who has no such
-    playlist. Costs a second request, which is why `all_songs` exists: a
-    caller that only wants the ids off the page header shouldn't pay it.
+    browse id for the rest — 56 for a mid-size artist, 150 for a long career,
+    measured. A five-track artist page is not worth opening, so the playlist
+    is what gets listed and the preview is only the fallback for an artist
+    who has no such playlist. Costs a second request, which is why
+    `all_songs` exists: a caller that only wants the ids off the page header
+    shouldn't pay it.
+
+    `limit` bounds how many continuation requests get made, not the list —
+    ytmusicapi reads whole pages and stops once it has enough, so asking for
+    100 still returned all 150. And the list that comes back can be shorter
+    than the playlist claims, since a few entries fail to parse. Both are
+    why the count travels separately: the caller can't infer "there are
+    more" from the length it was handed.
     """
     preview = songs.get("results") or []
     browse_id = songs.get("browseId")
     if not all_songs or not browse_id:
-        return preview
+        return preview, None
 
     playlist = _call("artist top songs", "get_playlist", browse_id, limit=ARTIST_TRACK_LIMIT)
-    return (playlist or {}).get("tracks") or preview
+    tracks = (playlist or {}).get("tracks")
+    if not tracks:
+        return preview, None
+    return tracks, (playlist or {}).get("trackCount")
 
 
 def fetch_artist(browse_id: str, all_songs: bool = True) -> ArtistProfile | None:
@@ -438,32 +467,41 @@ def fetch_artist(browse_id: str, all_songs: bool = True) -> ArtistProfile | None
     function safe to *try* on any channel id and let the answer decide — see
     services/remote_detail.py.
 
-    `tracks` merges the artist's songs with their videos, deduplicated by
-    video id — the two lists overlap in what they are *about* but not in
-    what they point at, since YouTube Music holds a separate id for a song's
-    audio track (MUSIC_VIDEO_TYPE_ATV) and its official music video
-    (…_OMV). Both are playable and either may be the only one that exists
-    for a given release, so both go in, audio first. Videos here means music
-    videos only; an artist's vlogs and interviews live on their YouTube
-    channel and YouTube Music doesn't index them, which is the entire point
-    of listing an artist this way.
+    `tracks` is the artist's songs and **not** the videos section of the
+    same page, which used to be merged in here. That merge earned its keep
+    when this only had the page's five-song preview to work with; against
+    the full song list it adds almost nothing and costs twice. Measured on
+    Drake and on Shirin David: 8 of the 10 videos were already in the song
+    list under a different id — YouTube Music holds separate ids for a
+    release's audio track (MUSIC_VIDEO_TYPE_ATV) and its official video
+    (…_OMV), so deduplicating by video id can't see they're the same song —
+    and a video entry carries no duration at all (its keys are title,
+    videoId, artists, playlistId, thumbnails, views), so every one of them
+    rendered as a duration-less row at the bottom of the panel.
+
+    An artist with no songs at all now comes back with nothing playable,
+    which sends the panel to their channel listing (see
+    services/remote_detail.py) — where their videos are, in full.
     """
     artist = _call("artist", "get_artist", browse_id, level=logging.INFO)
     if not artist or not artist.get("name"):
         return None
 
-    sections = (
-        _artist_songs(artist.get("songs") or {}, all_songs),
-        (artist.get("videos") or {}).get("results") or [],
-    )
+    songs, reported_count = _artist_songs(artist.get("songs") or {}, all_songs)
     tracks: list[VideoSearchResult] = []
     seen: set[str] = set()
-    for section in sections:
-        for track in _song_results(section):
-            if track.video_id in seen:
-                continue
-            seen.add(track.video_id)
-            tracks.append(track)
+    for track in _song_results(songs):
+        if track.video_id in seen:
+            continue
+        seen.add(track.video_id)
+        tracks.append(track)
+
+    # What the artist has, against what this page will show. The reported
+    # count is the larger of the two whenever entries fail to parse, which
+    # happens routinely — Drake's playlist reports 150 tracks and yields
+    # 143, Bach's 147. It's what lets the panel say "first 143 of 150"
+    # rather than implying 143 is all there is.
+    track_count = max(len(tracks), reported_count or 0)
     tracks = tracks[:ARTIST_TRACK_LIMIT]
 
     channel_id = artist.get("channelId")
@@ -476,6 +514,7 @@ def fetch_artist(browse_id: str, all_songs: bool = True) -> ArtistProfile | None
         monthly_listeners=artist.get("monthlyListeners"),
         avatar_url=_cover_url(artist.get("thumbnails")),
         tracks=tracks,
+        track_count=track_count,
     )
 
 
