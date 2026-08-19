@@ -178,3 +178,53 @@ def avatar_url_at_size(url: str | None, size: int) -> str | None:
     if not url:
         return None
     return _AVATAR_SIZE_RE.sub(f"=s{size}", url)
+
+
+# The same CDN, a second way of naming the size. YouTube Music reports its
+# square art (song covers, album covers, playlist art, artist portraits) as
+# "=w60-h60-l90-rj" rather than "=s<n>" — sometimes with an extra trailing
+# segment, e.g. "=w60-h60-l90-rj-dcJRaW7REL". Unanchored and width/height
+# only, so whatever follows the dimensions is preserved rather than guessed
+# at; verified live that "=w544-h544-l90-rj" serves the same image at 22 KB
+# where the 60px original was 1.3 KB.
+_COVER_SIZE_RE = re.compile(r"=w\d+-h\d+")
+
+
+def cover_url_at_size(url: str | None, size: int) -> str | None:
+    """The same square artwork at `size` pixels, in whichever of the CDN's
+    two size dialects the URL happens to use.
+
+    Both turn up in one YouTube Music response: search results and artist
+    portraits come back as "=w60-h60-…", while the chart shelves' playlist
+    art uses plain "=s192". Handing the "=s" case straight to
+    avatar_url_at_size rather than duplicating its rule is the point of
+    keeping them next to each other.
+
+    A URL with neither (i.ytimg.com video stills, which carry a signed `sqp`
+    query and are not resizable this way) passes through untouched.
+    """
+    if not url:
+        return None
+    if _COVER_SIZE_RE.search(url):
+        return _COVER_SIZE_RE.sub(f"=w{size}-h{size}", url, count=1)
+    return avatar_url_at_size(url, size)
+
+
+# YouTube Music hands back playlist ids as *browse* ids: the same id with a
+# "VL" glued on the front ("VLPL…", "VLRDCLAK5uy_…"). Nothing downstream
+# speaks that dialect — playlist_url() would build a youtube.com/playlist
+# URL that resolves to nothing — and PLAYLIST_ID_RE happily accepts the
+# prefixed form, since it is still 12-64 URL-safe characters. So the strip
+# has to happen here, before the shared validation, rather than being caught
+# by it.
+_BROWSE_PLAYLIST_PREFIX = "VL"
+
+
+def playlist_id_from_browse_id(browse_id: str | None) -> str | None:
+    """A YouTube Music browse id as a plain playlist id, or None if it isn't
+    one. Ids that already arrive unprefixed (the mood shelves report
+    `playlistId` rather than `browseId`) pass through the same validation."""
+    if not browse_id:
+        return None
+    playlist_id = browse_id.removeprefix(_BROWSE_PLAYLIST_PREFIX)
+    return playlist_id if PLAYLIST_ID_RE.match(playlist_id) else None

@@ -27,4 +27,6 @@ httpx==0.28.1
 # cached `pip install` layer on every rebuild and the running image sat six
 # weeks behind upstream while looking, from here, like it floated. They're
 # installed in their own layer after `COPY app` instead (see Dockerfile),
-# which any real change to the app invalidates.
+# which any real change to the app invalidates. ytmusicapi sits in that same
+# layer, for the same reason applied to a different moving target: YouTube
+# Music's private InnerTube endpoint (see app/youtube/music.py).
