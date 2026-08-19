@@ -407,3 +407,17 @@ def test_a_non_release_id_is_rejected_without_being_fetched(client, monkeypatch,
     monkeypatch.setattr(remote_detail, "fetch_release", fail_if_called)
 
     assert client.get(f"/partials/detail/yt-release/{browse_id}").status_code == 404
+
+
+def test_a_redirected_artist_is_followed_and_reopened_by_the_page_that_has_the_music(
+    client, fake_artist
+):
+    """A VEVO channel opens the artist page through a redirect (see
+    music._redirected_artist), and the id the hero hands back has to be the
+    page it landed on. Sending the VEVO id back would record the feed
+    against the songless page, so the library card would reopen that."""
+    fake_artist(_profile(browse_id="UCtxdfwb9wfkoGocVUAJ-Bmg"))
+
+    res = client.get("/partials/detail/yt-artist/UClRx3MMyYUyqOxyEqA5F2nQ")
+
+    assert 'data-artist-browse-id="UCtxdfwb9wfkoGocVUAJ-Bmg"' in res.text

@@ -547,12 +547,50 @@ def _topic_channel_id(songs: list[dict], name: str) -> str | None:
     Sezen Aksu: the name match finds exactly one id, credited on 56 of 56
     and 150 of 150 tracks respectively, and its feed is titled "<Artist> -
     Topic". Costs nothing — this is the response the page already returned.
+
+    Case-insensitively, because the two halves of that match come from
+    different places and do not always agree: Usher's page is headed
+    "USHER" while every one of his tracks credits "Usher", and an exact
+    comparison quietly returned nothing for him.
     """
+    wanted = name.casefold()
     for song in songs:
         for artist in song.get("artists") or []:
-            if artist.get("name") == name and CHANNEL_ID_RE.match(artist.get("id") or ""):
+            if (artist.get("name") or "").casefold() == wanted and CHANNEL_ID_RE.match(
+                artist.get("id") or ""
+            ):
                 return artist["id"]
     return None
+
+
+def _redirected_artist(artist: dict, browse_id: str) -> tuple[dict, str]:
+    """Follows a VEVO channel through to the artist page that has the music
+    on it.
+
+    A label's VEVO channel is a video channel, and YouTube Music answers for
+    one with an artist page that knows the right name and carries no songs
+    at all — no preview, no "Top songs" playlist behind it, nothing to read
+    a Topic channel off (measured on Travis Scott, 50 Cent, Snoop Dogg and
+    Beyoncé: all four came back with a name and zero songs). What it does
+    carry is a `channelId` pointing somewhere else, and asking again with
+    that returns the real page, songs and all — 4 of 4.
+
+    That difference is the whole trigger, so the second request only ever
+    happens on a page that had nothing to offer anyway. An artist asked for
+    by their own id gets their own id back and never reaches this.
+    """
+    redirect = artist.get("channelId")
+    if (artist.get("songs") or {}).get("results"):
+        return artist, browse_id
+    if not redirect or redirect == browse_id or not CHANNEL_ID_RE.match(redirect):
+        return artist, browse_id
+
+    followed = _call("redirected artist", "get_artist", redirect, level=logging.INFO)
+    if not followed or not followed.get("name"):
+        return artist, browse_id
+    # The id travels with it: this is the one that reopens the profile, and
+    # the VEVO id would reopen the songless page this just escaped.
+    return followed, redirect
 
 
 def _related_artists(section: dict | None) -> list[ChannelSearchResult]:
@@ -584,7 +622,10 @@ def fetch_artist(browse_id: str, all_songs: bool = True) -> ArtistProfile | None
 
     An artist with no songs at all comes back with nothing playable, which
     sends the panel to their channel listing (see
-    services/remote_detail.py) — where their videos are, in full.
+    services/remote_detail.py) — where their videos are, in full. A VEVO
+    channel looks exactly like that case and isn't: see _redirected_artist,
+    which is why `browse_id` on the returned profile is not always the one
+    that was asked for.
 
     Everything else on the page — albums, singles, videos, related artists
     — comes back too, off this same response. The profile renders all of
@@ -594,6 +635,10 @@ def fetch_artist(browse_id: str, all_songs: bool = True) -> ArtistProfile | None
     artist = _call("artist", "get_artist", browse_id, level=logging.INFO)
     if not artist or not artist.get("name"):
         return None
+
+    # A VEVO channel lands on a page with the right name and no music on it;
+    # this is what walks from there to the page that has it.
+    artist, browse_id = _redirected_artist(artist, browse_id)
 
     songs, reported_count = _artist_songs(artist.get("songs") or {}, all_songs)
     tracks: list[VideoSearchResult] = []

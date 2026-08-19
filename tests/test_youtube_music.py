@@ -650,3 +650,95 @@ def test_cover_url_at_size_handles_both_size_dialects(url, expected):
 )
 def test_playlist_id_from_browse_id(browse_id, expected):
     assert playlist_id_from_browse_id(browse_id) == expected
+
+
+# ---------------------------------------------------------------------------
+# Pages that answer with an artist's name and none of their music. Both of
+# these were found by following the same six channels the onboarding wizard
+# suggests and seeing which ones came out as artists.
+# ---------------------------------------------------------------------------
+
+VEVO_ID = "UClRx3MMyYUyqOxyEqA5F2nQ"
+REAL_ARTIST_ID = "UCtxdfwb9wfkoGocVUAJ-Bmg"
+ARTIST_TOPIC_ID = "UCf_gP4AMRSgAfyzbkeS9k4g"
+
+# What a VEVO channel actually returns: the right name, and no songs section
+# at all — no preview, no browseId behind it. Captured live on Travis Scott,
+# and identical in shape on 50 Cent, Snoop Dogg and Beyoncé.
+VEVO_PAGE = {"name": "Travis Scott", "channelId": REAL_ARTIST_ID, "songs": {"results": []}}
+
+REAL_ARTIST_PAGE = {
+    "name": "Travis Scott",
+    "channelId": REAL_ARTIST_ID,
+    "songs": {
+        "browseId": None,
+        "results": [
+            {
+                "title": "FE!N",
+                "videoId": "_efHZg9D9iE",
+                "artists": [{"name": "Travis Scott", "id": ARTIST_TOPIC_ID}],
+            }
+        ],
+    },
+}
+
+
+def test_a_vevo_channel_is_followed_through_to_the_real_artist_page(client):
+    """A label's VEVO channel is a video channel. YouTube Music answers for
+    one with an artist page carrying the name and nothing else, which read
+    as "artist with no music" — so the wizard followed the VEVO channel
+    itself and the library card opened a plain track list."""
+    fake = client(get_artist=lambda browse_id: VEVO_PAGE if browse_id == VEVO_ID else REAL_ARTIST_PAGE)
+
+    profile = music.fetch_artist(VEVO_ID, all_songs=False)
+
+    assert profile.topic_channel_id == ARTIST_TOPIC_ID
+    # The id travels with the redirect: the VEVO id would reopen the songless
+    # page this just escaped.
+    assert profile.browse_id == REAL_ARTIST_ID
+    assert [call[1][0] for call in fake.calls] == [VEVO_ID, REAL_ARTIST_ID]
+
+
+def test_an_artist_page_with_songs_is_never_asked_for_twice(client):
+    """The second request is what the redirect costs, so it only happens on
+    a page that had nothing to offer in the first place."""
+    fake = client(get_artist=REAL_ARTIST_PAGE)
+
+    music.fetch_artist(REAL_ARTIST_ID, all_songs=False)
+
+    assert len(fake.calls) == 1
+
+
+def test_a_page_with_no_songs_and_no_redirect_is_left_alone(client):
+    """An artist who genuinely has no music on YouTube Music. There is
+    nowhere to redirect to, and the caller still gets the page."""
+    fake = client(get_artist={"name": "Nobody", "channelId": REAL_ARTIST_ID, "songs": {"results": []}})
+
+    profile = music.fetch_artist(REAL_ARTIST_ID, all_songs=False)
+
+    assert profile.topic_channel_id is None
+    assert len(fake.calls) == 1
+
+
+def test_the_topic_channel_is_matched_regardless_of_case(client):
+    """Usher's page is headed "USHER" and every one of his tracks credits
+    "Usher" — an exact comparison found nothing and he was followed as a
+    channel."""
+    client(
+        get_artist={
+            "name": "USHER",
+            "songs": {
+                "results": [
+                    {
+                        "title": "Yeah!",
+                        "videoId": "_efHZg9D9iE",
+                        "artists": [{"name": "Usher", "id": ARTIST_TOPIC_ID}],
+                    }
+                ]
+            },
+        }
+    )
+
+    profile = music.fetch_artist("UCaNrhBiXsXIM2epDl_kEzgQ", all_songs=False)
+
+    assert profile.topic_channel_id == ARTIST_TOPIC_ID
