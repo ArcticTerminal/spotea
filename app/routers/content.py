@@ -9,6 +9,7 @@ from app.database import SessionLocal
 from app.deps import get_current_user, get_db, require_login
 from app.downloader import DownloadError, VideoUnavailableError, download_audio
 from app.formatting import safe_filename
+from app.images import needs_thumbnail_caching
 from app.models import Content, User
 from app.page_context import playlist_filter
 from app.progress import ProgressRegistry
@@ -148,7 +149,7 @@ def get_content(
 
     # Caches for next time only, same as pages.py's _queue_thumbnail_caching
     # — this response still carries whatever thumbnail_url is on file now.
-    if content.thumbnail_url and "ytimg.com" in content.thumbnail_url:
+    if needs_thumbnail_caching(content.thumbnail_url):
         background_tasks.add_task(cache_thumbnail, content.video_id, content.thumbnail_url)
 
     return ContentOut.from_content(content)

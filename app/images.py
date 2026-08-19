@@ -93,12 +93,30 @@ def download_avatar(channel_id: str, avatar_url: str) -> str | None:
 
 def download_thumbnail(video_id: str, thumbnail_url: str) -> str | None:
     """Same deal as download_avatar, for a video's thumbnail — re-served from
-    our own origin instead of every Home/Library/Explore render hitting
-    i*.ytimg.com directly for every card on screen. Safe to call for videos
-    already known (e.g. every entry in a freshly-fetched RSS artist, not just
-    new ones) — _download_image's on-disk check makes repeat calls a no-op
-    file stat rather than a redundant fetch."""
+    our own origin instead of every Home/Library/Explore render hotlinking
+    YouTube Music's cover CDN (yt3.ggpht.com, lh3.googleusercontent.com)
+    directly for every card on screen. Safe to call for videos already known
+    (e.g. every entry in a freshly-fetched artist sync, not just new ones) —
+    _download_image's on-disk check makes repeat calls a no-op file stat
+    rather than a redundant fetch."""
     return _download_image(settings.thumbnails_dir, f"{video_id}.jpg", thumbnail_url, "/thumbnails")
+
+
+def needs_thumbnail_caching(thumbnail_url: str | None) -> bool:
+    """True for a thumbnail still pointing at a remote URL rather than our
+    own /thumbnails/{video_id}.jpg — the condition every caller of
+    artist_sync.cache_thumbnail queues a background download on.
+
+    Used to key off "ytimg.com in thumbnail_url", back when every thumbnail
+    came from yt-dlp/RSS reading i*.ytimg.com stills. YouTube Music's cover
+    art never uses that host (yt3.ggpht.com and lh3.googleusercontent.com
+    instead — see youtube/urls.py's absolute_thumbnail_url), so that check
+    stopped matching anything the day discovery moved to YouTube Music: every
+    thumbnail silently stayed an uncached, ORB-flaky hotlink forever. Keying
+    off "already local" instead of "old CDN" can't go stale the same way if
+    the CDN changes again.
+    """
+    return bool(thumbnail_url) and not thumbnail_url.startswith("/thumbnails/")
 
 
 def cached_avatar_path(channel_id: str) -> str | None:

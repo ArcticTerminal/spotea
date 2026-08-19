@@ -218,6 +218,7 @@ def cache_thumbnail(video_id: str, thumbnail_url: str) -> None:
     if local_url and local_url != thumbnail_url:
         with SessionLocal() as db:
             db.query(Content).filter(
-                Content.video_id == video_id, Content.thumbnail_url.like("%ytimg.com%")
+                Content.video_id == video_id,
+                ~Content.thumbnail_url.like("/thumbnails/%"),
             ).update({"thumbnail_url": local_url}, synchronize_session=False)
             db.commit()

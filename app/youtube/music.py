@@ -47,7 +47,7 @@ from dataclasses import dataclass, field
 
 from ytmusicapi import YTMusic
 
-from app.images import cached_avatar_or_hotlink
+from app.images import cached_avatar_or_hotlink, proxied_avatar_url
 from app.youtube.models import (
     PLAYLIST_ITEM_LIMIT,
     SEARCH_RESULT_LIMIT,
@@ -192,16 +192,39 @@ def _parse_count(text: str | None) -> int | None:
 
 
 def _cover_url(thumbnails: list[dict] | None) -> str | None:
-    """The largest reported cover, asked for at COVER_SIZE.
+    """The largest reported cover, asked for at COVER_SIZE — the raw remote
+    URL, not yet proxied. Every candidate here is a real URL YouTube Music
+    itself reported, unlike yt-dlp's speculative maxresdefault.jpg guess
+    (which 404s), so the last (largest) one is always usable.
 
-    Simpler than search.py's _best_thumbnail_url, and can afford to be:
-    that one exists to drop yt-dlp's speculative maxresdefault.jpg guess,
-    which 404s. Every candidate here is a real URL YouTube Music itself
-    reported, so the last (largest) one is always usable.
+    Used directly only where the caller does its own proxying downstream
+    (an artist's `avatar_url`, passed to cached_avatar_or_hotlink by
+    remote_detail.py once a local copy is worth checking for). Everywhere
+    else, see _proxied_cover_url below.
     """
     if not thumbnails:
         return None
     return absolute_thumbnail_url(cover_url_at_size(thumbnails[-1].get("url"), COVER_SIZE))
+
+
+def _proxied_cover_url(thumbnails: list[dict] | None) -> str | None:
+    """A song, playlist or release cover, ready to render.
+
+    Unlike a followed artist's avatar, none of these ever earn a local copy
+    (see cached_avatar_or_hotlink's docstring on why not — the same 92%
+    orphan-file problem applies here at a much larger scale, since a track
+    or an album is browsed far more often than it's followed). So this
+    always goes through /avatar-proxy rather than checking for one on disk
+    first — hotlinking Google's CDN directly from these cards used to fail
+    silently and often: Chrome's ORB rejects a real share of yt3.ggpht.com
+    responses outright (see download_avatar's docstring), and any cover
+    that happened to arrive on lh3.googleusercontent.com instead — which
+    absolute_thumbnail_url only rewrites away from for the yt3 host — was
+    hard-blocked by this app's own img-src CSP, which never allowed that
+    host at all.
+    """
+    url = _cover_url(thumbnails)
+    return proxied_avatar_url(url) if url else None
 
 
 def _artist_names(item: dict) -> tuple[str | None, str | None]:
@@ -251,7 +274,7 @@ def _song_result(item: dict) -> VideoSearchResult | None:
     return VideoSearchResult(
         video_id=video_id,
         title=title,
-        thumbnail_url=_cover_url(item.get("thumbnails")),
+        thumbnail_url=_proxied_cover_url(item.get("thumbnails")),
         duration_seconds=item.get("duration_seconds"),
         channel_title=channel_title,
         channel_id=channel_id,
@@ -271,7 +294,7 @@ def _playlist_result(item: dict) -> PlaylistSearchResult | None:
     return PlaylistSearchResult(
         playlist_id=playlist_id,
         title=item.get("title") or "Untitled playlist",
-        thumbnail_url=_cover_url(item.get("thumbnails")),
+        thumbnail_url=_proxied_cover_url(item.get("thumbnails")),
         # `author` is the publisher ("YouTube Music" for the curated ones);
         # `description` is the line YouTube Music itself prints under a mood
         # playlist, and it is the more useful of the two — "Taylor Swift,
@@ -555,7 +578,7 @@ def _releases(section: dict | None, kind: str) -> list[ArtistRelease]:
                 browse_id=browse_id,
                 title=title,
                 year=item.get("year"),
-                cover_url=_cover_url(item.get("thumbnails")),
+                cover_url=_proxied_cover_url(item.get("thumbnails")),
                 # Singles report their own ("Single", and "EP" for some);
                 # albums report nothing, so the shelf they came from is the
                 # only thing that knows.
@@ -744,7 +767,7 @@ def fetch_release(browse_id: str) -> ReleaseDetail | None:
         title=release["title"],
         year=release.get("year"),
         kind=release.get("type") or "Release",
-        cover_url=_cover_url(release.get("thumbnails")),
+        cover_url=_proxied_cover_url(release.get("thumbnails")),
         artist_names=", ".join(artists) or None,
         tracks=tracks,
     )

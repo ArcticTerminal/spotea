@@ -20,6 +20,7 @@ from app.content_query import (
     new_upload_filter,
     query_content_page,
 )
+from app.images import needs_thumbnail_caching
 from app.models import Content
 from app.services.artist_sync import cache_thumbnail
 from app.services.initial_sync import syncing_artist_ids
@@ -42,7 +43,7 @@ def queue_thumbnail_caching(background_tasks: BackgroundTasks, items: Iterable[C
     queued twice."""
     seen: set[str] = set()
     for item in items:
-        if not item.thumbnail_url or "ytimg.com" not in item.thumbnail_url:
+        if not needs_thumbnail_caching(item.thumbnail_url):
             continue
         if item.video_id in seen:
             continue

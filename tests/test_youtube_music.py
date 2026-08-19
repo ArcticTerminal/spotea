@@ -9,11 +9,19 @@ in for artists, and counts that arrive as "1.8M" rather than a number.
 """
 
 import logging
+from urllib.parse import quote
 
 import pytest
 
 from app.youtube import music
 from app.youtube.urls import cover_url_at_size, playlist_id_from_browse_id
+
+
+def _proxied(remote_url: str) -> str:
+    """The same wrapping _proxied_cover_url applies — see that function's
+    docstring for why a song/playlist/release cover is never hotlinked
+    directly."""
+    return f"/avatar-proxy?u={quote(remote_url, safe='')}"
 
 SONG = {
     "title": "Biliyorsun",
@@ -155,7 +163,7 @@ def test_cover_art_is_requested_at_a_size_worth_rendering(client):
 
     (result,) = music.search_songs("sezen aksu")
 
-    assert result.thumbnail_url == "https://yt3.ggpht.com/abc=w544-h544-l90-rj"
+    assert result.thumbnail_url == _proxied("https://yt3.ggpht.com/abc=w544-h544-l90-rj")
 
 
 def test_an_entry_with_no_video_id_is_dropped(client):
@@ -300,7 +308,7 @@ def test_both_chart_shelves_come_from_one_request(client):
     assert playlist.playlist_id == "OLAK5uy_mFBgHnPi7PIkt7vlG84rCduzVjFtuHnpM"
     # Chart art names its size the other way round ("=s192", not
     # "=w226-h226"); cover_url_at_size handles both.
-    assert playlist.thumbnail_url == "https://yt3.ggpht.com/k=s544"
+    assert playlist.thumbnail_url == _proxied("https://yt3.ggpht.com/k=s544")
 
 
 def test_a_charting_artist_becomes_a_followable_channel(client):
@@ -564,7 +572,7 @@ def test_an_artist_page_carries_its_releases(client):
 
     (album,) = artist.albums
     assert (album.browse_id, album.year, album.kind) == ("MPREb_HIQTwIoDtEM", "2025", "Album")
-    assert album.cover_url == "https://x/c=w544-h544-l90-rj"
+    assert album.cover_url == _proxied("https://x/c=w544-h544-l90-rj")
     (single,) = artist.singles
     # Singles report their own type; albums report none, so the shelf names it.
     assert single.kind == "Single"
@@ -603,7 +611,7 @@ def test_an_album_and_a_single_open_the_same_way(client):
     assert (release.title, release.year, release.kind) == ("Schlau aber blond", "2025", "Album")
     assert release.artist_names == "Shirin David"
     assert [track.video_id for track in release.tracks] == ["_efHZg9D9iE"]
-    assert release.cover_url == "https://x/c=w544-h544-l90-rj"
+    assert release.cover_url == _proxied("https://x/c=w544-h544-l90-rj")
 
 
 @pytest.mark.parametrize("response", [None, {"title": "Gone", "tracks": []}, {"tracks": [SONG]}])
