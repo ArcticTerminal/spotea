@@ -120,27 +120,34 @@ def _artist_or_channel(db: Session, user_id: int, browse_id: str):
     YouTube Music request on a click the user made deliberately, and never
     touches youtube.com.
 
-    The follow target is the artist's **official** channel, not the id the
-    tracks are attributed to. Every song YouTube Music returns is credited
-    to the auto-generated "<Artist> - Topic" channel and the charts name
-    artists the same way; following one of those gets you an automated
-    container rather than the channel the artist uploads to. The artist
-    page is the only place that reports both ids, so this is where the swap
-    is made. Where there is no official channel — a handful of artists have
-    none — the browse id is still a real channel with a working RSS feed,
-    so following it is a worse answer than the right one and a better
-    answer than a button that does nothing.
+    The follow target is the artist's **"<Artist> - Topic" channel**, which
+    is what "following an artist" means in a music app: that channel
+    carries their releases and nothing else, so a new single reaches Home's
+    New Uploads through the RSS sync that already runs, while their
+    official channel's feed would deliver vlogs and interviews alongside
+    it. Nothing else in this app follows a Topic channel — channel search
+    drops them by name, since nobody browsing for a channel means to pick
+    one — and this is the single place where following one is the right
+    answer rather than the wrong one.
+
+    Falls back to the official channel, then to the browse id, for the
+    artists with no Topic channel behind them: a worse answer than the
+    right one, and a better answer than a button that does nothing.
     """
     artist = fetch_artist(browse_id)
     if artist is None or not artist.tracks:
         return None
 
-    follow_channel_id = artist.channel_id or browse_id
+    follow_channel_id = artist.topic_channel_id or artist.channel_id or browse_id
     return artist, {
         "hero_image": cached_avatar_or_hotlink(follow_channel_id, artist.avatar_url),
         "hero_is_avatar": True,
         "channel_url": CHANNEL_PAGE_URL_TEMPLATE.format(channel_id=follow_channel_id),
         "followed_feed_id": _followed_feed_id(db, user_id, follow_channel_id),
+        # Sent back with the follow so the feed can be recorded as this
+        # artist's — see routers/feeds.py. The browse id rather than the
+        # channel it targets: it's what reopens this page.
+        "artist_browse_id": browse_id,
     }
 
 

@@ -51,16 +51,22 @@
     {# Already following it? Then the library's own copy of this channel is
        the more useful page of the two, so offer that instead of a Follow
        button that would do nothing. On an artist page the channel this
-       follows is the artist's official one, not the Topic channel whose
-       tracks are listed below — see _artist_or_channel. Both artist views
-       carry it, so following doesn't disappear when you open the full song
-       list. #}
+       follows is their "<Artist> - Topic" channel, which carries their
+       releases and nothing else — see _artist_or_channel. Both artist views
+       carry the button, so following doesn't disappear when you open the
+       full song list. #}
     {% if followed_feed_id %}
     <button type="button" id="open-followed-channel-btn" class="btn-quiet channel-hero-unfollow" data-feed-id="{{ followed_feed_id }}">
       In your library
     </button>
     {% else %}
-    <button type="button" id="follow-channel-btn" class="btn-primary channel-hero-follow" data-channel-url="{{ channel_url }}">
+    <button
+      type="button"
+      id="follow-channel-btn"
+      class="btn-primary channel-hero-follow"
+      data-channel-url="{{ channel_url }}"
+      {% if artist_browse_id %}data-artist-browse-id="{{ artist_browse_id }}"{% endif %}
+    >
       Follow
     </button>
     {% endif %}

@@ -276,7 +276,11 @@ export function setupDetailPanel() {
       // Doesn't navigate here — the CHANNEL_FOLLOWED listener below opens the
       // real (library) channel page once the history backfill has finished,
       // which is the same place adding from a search result lands.
-      followChannel(followBtn.dataset.channelUrl, followBtn);
+      // An artist profile's button carries who it is; every other hero's
+      // doesn't, and undefined leaves the request exactly as it was.
+      followChannel(followBtn.dataset.channelUrl, followBtn, {
+        artistBrowseId: followBtn.dataset.artistBrowseId || null,
+      });
       return;
     }
 

@@ -45,7 +45,9 @@ def add_feed(
     db: Session = Depends(get_db),
 ) -> FeedAddResult:
     try:
-        feed, new_count, channel_id = add_feed_core(db, payload.channel_url, profile.id)
+        feed, new_count, channel_id = add_feed_core(
+            db, payload.channel_url, profile.id, artist_browse_id=payload.artist_browse_id
+        )
     except FeedAlreadyExistsError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Feed already added") from exc
     except ChannelResolutionError as exc:
@@ -59,7 +61,14 @@ def add_feed(
     except InvalidFeedError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    if channel_id:
+    # No history scan for an artist. The feed points at their Topic channel,
+    # which holds their whole catalogue — 1,064 uploads for Drake, measured
+    # — and a full scan would import all of it to answer a request that only
+    # means "tell me when they release something". The RSS parse above has
+    # already brought in the latest handful, and everything after that
+    # arrives the same way. Their back catalogue stays one click away on the
+    # profile, which is a browse surface and doesn't need library rows.
+    if channel_id and not payload.artist_browse_id:
         background_tasks.add_task(run_backfill_task, feed.id, channel_id)
 
     return FeedAddResult(feed=FeedOut.model_validate(feed), new_content_count=new_count)

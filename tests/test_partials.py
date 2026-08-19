@@ -158,6 +158,32 @@ def test_library_fragment_counts_follow_the_data(client, db_session):
     assert "2 videos</span>" in after
 
 
+def test_an_artists_library_card_opens_their_profile(client, db_session):
+    """The card stands for the artist, so it opens the artist — albums,
+    singles, what they just released — rather than the track list of
+    whatever has synced so far. Nothing in home/library.js decides this: the
+    card already carries which kind it opens."""
+    _seed(db_session)
+    feed = db_session.query(Feed).first()
+    feed.artist_browse_id = "UC5ZkRnYd3__WBBGnAnWO9Cg"
+    db_session.commit()
+
+    body = _fragment_body(client.get("/partials/library").text, "library-grid")
+
+    assert 'data-detail-kind="yt-artist"' in body
+    assert 'data-detail-id="UC5ZkRnYd3__WBBGnAnWO9Cg"' in body
+    assert 'href="/#yt-artist/UC5ZkRnYd3__WBBGnAnWO9Cg"' in body
+
+
+def test_a_plain_channels_card_still_opens_its_track_list(client, db_session):
+    _seed(db_session)
+
+    body = _fragment_body(client.get("/partials/library").text, "library-grid")
+
+    assert 'data-detail-kind="channel"' in body
+    assert "yt-artist" not in body
+
+
 def test_downloads_fragment_reports_stored_sizes(client, db_session):
     """The modal's own list (full collect_usage) and the Settings summary
     line (the cheaper usage_summary) are two separate fragments now — see

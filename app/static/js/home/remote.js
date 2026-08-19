@@ -232,7 +232,7 @@ async function waitForBackfill(feedId, title, { announce = true, showOverlay = t
 export async function followChannel(
   channelUrl,
   button,
-  { announce = true, showOverlay = true, waitForHistory = true, onProgress } = {}
+  { announce = true, showOverlay = true, waitForHistory = true, onProgress, artistBrowseId = null } = {}
 ) {
   const originalLabel = button?.textContent;
   if (button) {
@@ -250,7 +250,10 @@ export async function followChannel(
 
   const { ok, status, data } = await api("/feeds", {
     method: "POST",
-    body: { channel_url: channelUrl },
+    // Following from an artist's profile sends who it is, which is what
+    // tells the server to record the feed as that artist and to skip the
+    // history scan — see routers/feeds.py's add_feed.
+    body: { channel_url: channelUrl, artist_browse_id: artistBrowseId },
   });
 
   if (ok) {

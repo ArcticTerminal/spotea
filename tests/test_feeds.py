@@ -245,7 +245,7 @@ def test_adding_a_feed_youtube_would_not_serve_is_not_a_bad_request(client, monk
     monkeypatch.setattr(
         feeds_router,
         "add_feed_core",
-        lambda db, url, user_id: (_ for _ in ()).throw(
+        lambda db, url, user_id, artist_browse_id=None: (_ for _ in ()).throw(
             FeedUnavailableError("Could not fetch RSS feed: HTTP Error 429")
         ),
     )
@@ -260,7 +260,7 @@ def test_adding_a_feed_that_really_is_the_wrong_url_is_still_a_bad_request(clien
     monkeypatch.setattr(
         feeds_router,
         "add_feed_core",
-        lambda db, url, user_id: (_ for _ in ()).throw(
+        lambda db, url, user_id, artist_browse_id=None: (_ for _ in ()).throw(
             InvalidFeedError("URL is not a valid YouTube channel RSS feed")
         ),
     )
@@ -590,3 +590,119 @@ def test_library_marks_a_channel_whose_history_is_still_being_fetched(client, db
 
     body = client.get("/partials/library").text
     assert "data-preparing" not in body, "the card kept saying it was fetching after the scan ended"
+
+
+# --------------------------------------------------------------------------
+# Following an artist. A different thing from following a channel: the feed
+# points at their "<Artist> - Topic" channel, carries their browse id, and
+# skips the history scan.
+# --------------------------------------------------------------------------
+
+TOPIC_ID = "UCDdTH-sn8qG64wK5ChFDQ4Q"
+ARTIST_BROWSE_ID = "UC5ZkRnYd3__WBBGnAnWO9Cg"
+
+
+def _stub_topic_feed(monkeypatch, title="Shirin David - Topic"):
+    parsed = ParsedFeed(channel_title=title, entries=[])
+    monkeypatch.setattr(feed_add_module, "fetch_feed", lambda url: parsed)
+    monkeypatch.setattr(
+        feed_add_module,
+        "fetch_feed_data",
+        lambda feed_id, rss_url, avatar_url: FeedFetchResult(
+            parsed=parsed, durations={}, channel_id=TOPIC_ID, avatar_url=None
+        ),
+    )
+
+
+def test_following_an_artist_records_which_artist_it_is(db_session, monkeypatch):
+    """The column is both the flag and the address: it says this feed is an
+    artist's, and it's the id that reopens their profile."""
+    _stub_topic_feed(monkeypatch)
+
+    feed, _new_count, _channel_id = feed_add_module.create_feed_from_rss_url(
+        db_session, channel_feed_url(TOPIC_ID), USER_ID, artist_browse_id=ARTIST_BROWSE_ID
+    )
+
+    assert feed.artist_browse_id == ARTIST_BROWSE_ID
+
+
+def test_an_artists_card_is_not_titled_topic(db_session, monkeypatch):
+    """The feed points at "Shirin David - Topic" and that is genuinely its
+    title, but the library card is standing for the artist."""
+    _stub_topic_feed(monkeypatch)
+
+    feed, _new_count, _channel_id = feed_add_module.create_feed_from_rss_url(
+        db_session, channel_feed_url(TOPIC_ID), USER_ID, artist_browse_id=ARTIST_BROWSE_ID
+    )
+
+    assert feed.channel_title == "Shirin David"
+
+
+def test_following_a_plain_channel_keeps_its_name_and_stays_unmarked(db_session, monkeypatch):
+    """The suffix strip and the marking are artist-follow behaviour, not
+    something every add now does — a channel that really is called
+    "… - Topic" and was added by URL keeps its name."""
+    _stub_topic_feed(monkeypatch)
+
+    feed, _new_count, _channel_id = feed_add_module.create_feed_from_rss_url(
+        db_session, channel_feed_url(TOPIC_ID), USER_ID
+    )
+
+    assert feed.channel_title == "Shirin David - Topic"
+    assert feed.artist_browse_id is None
+
+
+def test_following_an_artist_skips_the_history_scan(client, monkeypatch):
+    """A Topic channel holds the artist's whole catalogue — 1,064 uploads
+    for Drake, measured. Scanning it would import all of it to answer a
+    request that only means "tell me when they release something"."""
+    scans: list[int] = []
+    monkeypatch.setattr(
+        feeds_router,
+        "add_feed_core",
+        lambda db, url, user_id, artist_browse_id=None: (
+            Feed(
+                id=7,
+                user_id=user_id,
+                rss_url=channel_feed_url(TOPIC_ID),
+                channel_title="Shirin David",
+                added_at=datetime(2026, 8, 19),
+            ),
+            0,
+            TOPIC_ID,
+        ),
+    )
+    monkeypatch.setattr(feeds_router, "run_backfill_task", lambda feed_id, channel_id: scans.append(feed_id))
+
+    res = client.post(
+        "/feeds",
+        json={"channel_url": f"https://www.youtube.com/channel/{TOPIC_ID}", "artist_browse_id": ARTIST_BROWSE_ID},
+    )
+
+    assert res.status_code == 201
+    assert scans == []
+
+
+def test_following_a_channel_still_scans_its_history(client, monkeypatch):
+    scans: list[int] = []
+    monkeypatch.setattr(
+        feeds_router,
+        "add_feed_core",
+        lambda db, url, user_id, artist_browse_id=None: (
+            Feed(
+                id=7,
+                user_id=user_id,
+                rss_url=channel_feed_url(TOPIC_ID),
+                channel_title="A Channel",
+                added_at=datetime(2026, 8, 19),
+            ),
+            0,
+            TOPIC_ID,
+        ),
+    )
+    monkeypatch.setattr(feeds_router, "run_backfill_task", lambda feed_id, channel_id: scans.append(feed_id))
+
+    res = client.post("/feeds", json={"channel_url": "https://www.youtube.com/@somebody"})
+
+    assert res.status_code == 201
+    assert scans == [7]

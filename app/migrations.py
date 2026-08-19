@@ -22,6 +22,9 @@ _COLUMN_MIGRATIONS = [
     ("content", "last_played_at", "DATETIME"),
     ("feeds", "avatar_url", "VARCHAR(500)"),
     ("feeds", "followed", "BOOLEAN NOT NULL DEFAULT 1"),
+    # Null for every pre-existing feed, which is correct: none of them were
+    # followed as an artist. See Feed.artist_browse_id.
+    ("feeds", "artist_browse_id", "VARCHAR(32)"),
     ("content", "is_preview", "BOOLEAN NOT NULL DEFAULT 0"),
     ("content", "is_new_upload", "BOOLEAN NOT NULL DEFAULT 0"),
     # Nullable with no backfill here: NULL means "not measured yet", which
