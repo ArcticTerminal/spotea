@@ -150,10 +150,21 @@ class PlaylistSearchResultOut(BaseModel):
     channel_title: str | None
 
 
+class MoodShelfOut(BaseModel):
+    """One of YouTube Music's moods or genres and its playlists. `title` is
+    the shelf's heading ("Chill", "Bollywood & Indian") and `section` is
+    which of the two menus it came from, so the client can say whether it's
+    showing a mood or a genre."""
+
+    title: str
+    section: str
+    playlists: list[PlaylistSearchResultOut]
+
+
 class RecommendationsOut(BaseModel):
-    """Explore's "For you" shelves. The three result lists are the same
-    shapes the search box returns, because they come from the same searches —
-    the client renders a recommended song and a searched one identically, and
+    """Explore's browse shelves. Every result list reuses a shape the search
+    box already returns, because they come from the same searches — the
+    client renders a recommended song and a searched one identically, and
     "listen" on either goes through POST /feeds/videos."""
 
     # Everything the profile listed, so Explore can say what it's working
@@ -163,11 +174,15 @@ class RecommendationsOut(BaseModel):
     # The subset this batch was actually built from — see
     # services/recommendations.py's INTERESTS_PER_RUN.
     interests_used: list[str]
-    # None only when there are no interests, i.e. nothing was ever built.
-    generated_at: datetime | None
+    generated_at: datetime
     videos: list[VideoSearchResultOut]
     channels: list[ChannelSearchResultOut]
     playlists: list[PlaylistSearchResultOut]
+    # Below here: shelves that don't come from the interest list at all, so
+    # they're filled in even for a profile that has listed none.
+    charts: list[PlaylistSearchResultOut]
+    chart_artists: list[ChannelSearchResultOut]
+    mood: MoodShelfOut | None
 
 
 class VideoAddCreate(BaseModel):

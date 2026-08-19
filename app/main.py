@@ -220,11 +220,24 @@ def get_avatar(filename: str) -> FileResponse:
 
 
 # Hosts youtube/search.py's absolute_thumbnail_url ever hands back for a
-# channel avatar — googleusercontent.com is the one it rewrites away from
+# channel avatar — yt3.googleusercontent.com is the one it rewrites away from
 # (see that function), kept here too in case some path skips the rewrite.
+#
+# lh3.googleusercontent.com is the same CDN under a different name, and
+# YouTube Music picks between the two per artist with no pattern worth
+# guessing at: of twelve charting artists, eight portraits came back on yt3
+# and four on lh3. absolute_thumbnail_url's rewrite is deliberately
+# host-and-path specific and doesn't cover it (the two names don't share a
+# path namespace, so rewriting would 404), which left those four rendering
+# as empty circles — the proxy rejected them before ever fetching.
+#
 # Exact hostname match only: no endswith/substring check, which a URL like
 # https://evil.example/yt3.ggpht.com could otherwise slip past.
-_AVATAR_PROXY_ALLOWED_HOSTS = {"yt3.ggpht.com", "yt3.googleusercontent.com"}
+_AVATAR_PROXY_ALLOWED_HOSTS = {
+    "yt3.ggpht.com",
+    "yt3.googleusercontent.com",
+    "lh3.googleusercontent.com",
+}
 _AVATAR_PROXY_CACHE_HEADERS = {"Cache-Control": "private, max-age=86400"}
 
 # A 1x1 fully transparent PNG, served in place of an avatar whose upstream

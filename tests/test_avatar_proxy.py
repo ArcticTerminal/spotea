@@ -25,6 +25,20 @@ def test_a_proxied_avatar_is_streamed_through(client, monkeypatch):
     assert fetched == ["https://yt3.ggpht.com/abc=s900-c-k-c0x00ffffff-no-rj"]
 
 
+def test_an_lh3_portrait_is_proxied_too(client, monkeypatch):
+    """YouTube Music serves artist portraits from lh3.googleusercontent.com
+    nearly as often as from yt3 — four of twelve charting artists, measured.
+    Leaving it off the allowlist rejected those before they were ever
+    fetched, which rendered as an empty circle on the card."""
+    monkeypatch.setattr(main, "fetch_image_bytes", lambda url: (b"\xff\xd8\xff", "image/jpeg"))
+
+    res = client.get(
+        "/avatar-proxy", params={"u": "https://lh3.googleusercontent.com/abc=w544-h544-p-l90-rj"}
+    )
+
+    assert res.status_code == 200
+
+
 def test_a_non_allowlisted_host_is_rejected_without_being_fetched(client, monkeypatch):
     """The host check is what stops a tampered `u` from turning this into an
     open fetch of arbitrary hosts on the server's own behalf."""

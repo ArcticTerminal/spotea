@@ -248,15 +248,26 @@ def test_a_mood_playlist_describes_itself_by_who_is_on_it(client):
     assert result.channel_title == "Taylor Swift, Lewis Capaldi"
 
 
-def test_mood_categories_remember_which_section_they_came_from(client):
-    client(
-        get_mood_categories={
-            "Moods & moments": [{"title": "Chill", "params": "aaa"}],
-            "Genres": [{"title": "Blues", "params": "bbb"}],
-        }
-    )
+MOOD_MENU = {
+    "Moods & moments": [{"title": "Chill", "params": "aaa"}],
+    "Genres": [{"title": "Blues", "params": "bbb"}],
+}
+
+
+def test_mood_categories_skip_the_section_that_cannot_be_parsed(client):
+    """Measured across all 40 categories: every "Genres" entry raises a
+    parse error from inside ytmusicapi. See music.MOOD_SECTION."""
+    client(get_mood_categories=MOOD_MENU)
 
     categories = music.fetch_mood_categories()
+
+    assert [(c.title, c.section) for c in categories] == [("Chill", "Moods & moments")]
+
+
+def test_mood_categories_remember_which_section_they_came_from(client):
+    client(get_mood_categories=MOOD_MENU)
+
+    categories = music.fetch_mood_categories(section=None)
 
     assert [(c.title, c.section) for c in categories] == [
         ("Chill", "Moods & moments"),
@@ -264,32 +275,30 @@ def test_mood_categories_remember_which_section_they_came_from(client):
     ]
 
 
-def test_chart_playlists_come_from_the_videos_section(client):
-    client(
-        get_charts={
-            "videos": [
-                {
-                    "title": "Trending 20 Turkey",
-                    "playlistId": "OLAK5uy_mFBgHnPi7PIkt7vlG84rCduzVjFtuHnpM",
-                    "thumbnails": [{"url": "https://yt3.googleusercontent.com/k=s192"}],
-                }
-            ],
-            "artists": [],
-        }
-    )
+CHART_PLAYLIST = {
+    "title": "Trending 20 Turkey",
+    "playlistId": "OLAK5uy_mFBgHnPi7PIkt7vlG84rCduzVjFtuHnpM",
+    "thumbnails": [{"url": "https://yt3.googleusercontent.com/k=s192"}],
+}
 
-    (result,) = music.fetch_chart_playlists("TR")
 
-    assert result.playlist_id == "OLAK5uy_mFBgHnPi7PIkt7vlG84rCduzVjFtuHnpM"
+def test_both_chart_shelves_come_from_one_request(client):
+    fake = client(get_charts={"videos": [CHART_PLAYLIST], "artists": [CHART_ARTIST]})
+
+    charts = music.fetch_charts("TR")
+
+    assert len(fake.calls) == 1
+    (playlist,) = charts.playlists
+    assert playlist.playlist_id == "OLAK5uy_mFBgHnPi7PIkt7vlG84rCduzVjFtuHnpM"
     # Chart art names its size the other way round ("=s192", not
     # "=w226-h226"); cover_url_at_size handles both.
-    assert result.thumbnail_url == "https://yt3.ggpht.com/k=s544"
+    assert playlist.thumbnail_url == "https://yt3.ggpht.com/k=s544"
 
 
 def test_a_charting_artist_becomes_a_followable_channel(client):
     client(get_charts={"videos": [], "artists": [CHART_ARTIST]})
 
-    (result,) = music.fetch_chart_artists("TR")
+    (result,) = music.fetch_charts("TR").artists
 
     assert result.channel_id == "UCZpmeLoLLb3vmxgscRyLPgw"
     assert result.subscriber_count == 1_800_000
@@ -299,7 +308,16 @@ def test_a_charting_artist_becomes_a_followable_channel(client):
 def test_an_artist_without_a_channel_behind_it_is_dropped(client):
     client(get_charts={"videos": [], "artists": [{**CHART_ARTIST, "browseId": "MPLAucbrowseid"}]})
 
-    assert music.fetch_chart_artists("TR") == []
+    assert music.fetch_charts("TR").artists == []
+
+
+def test_a_country_with_no_charts_at_all_is_two_empty_shelves(client):
+    client(get_charts=None)
+
+    charts = music.fetch_charts("ZZ")
+
+    assert charts.playlists == []
+    assert charts.artists == []
 
 
 @pytest.mark.parametrize(

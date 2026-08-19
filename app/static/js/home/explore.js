@@ -226,32 +226,46 @@ export function shelfHtml(title, items, cardHtml) {
   `;
 }
 
+/** The nudge to go and list some interests. Shown above the shelves rather
+ *  than instead of them: the charts and the mood shelf don't come from the
+ *  interest list, so a profile that has listed none still has plenty to
+ *  look at — it just isn't personal yet. */
+function interestsPromptHtml() {
+  return `
+    <p class="muted">
+      Tell Spotea what you're into — add a few interests in Settings and this fills up with
+      channels, songs and playlists picked for you.
+    </p>
+    <button type="button" id="recommendations-open-settings" class="btn-primary">Add interests</button>
+  `;
+}
+
 function renderRecommendations(data) {
   const body = document.getElementById("recommendations-body");
   if (!body) return;
 
-  if (!data.interests.length) {
-    body.innerHTML = `
-      <p class="muted">
-        Tell Spotea what you're into — add a few interests in Settings and this fills up with
-        channels, songs and playlists worth trying.
-      </p>
-      <button type="button" id="recommendations-open-settings" class="btn-primary">Add interests</button>
-    `;
-    return;
-  }
-
   const { contents, longForm } = splitByDuration(data.videos);
   const shelves = [
+    // Interest-based first, because they're the ones about this profile.
     shelfHtml("Contents", contents, recVideoCardHtml),
     shelfHtml("Long form", longForm, recVideoCardHtml),
     shelfHtml("Channels", data.channels, channelCardHtml),
     shelfHtml("Playlists", data.playlists, recPlaylistCardHtml),
+    // Then what everyone gets: this week's charts and one rotating mood.
+    shelfHtml("Charts", data.charts, recPlaylistCardHtml),
+    shelfHtml("Charting artists", data.chart_artists, channelCardHtml),
+    // The only shelf whose heading comes from YouTube rather than from this
+    // file, so the only one that needs escaping.
+    data.mood
+      ? shelfHtml(escapeHtml(data.mood.title), data.mood.playlists, recPlaylistCardHtml)
+      : "",
   ].join("");
 
+  const prompt = data.interests.length ? "" : interestsPromptHtml();
   body.innerHTML =
-    shelves ||
-    `<p class="muted">Nothing came back this time. Try refreshing, or add a different interest in Settings.</p>`;
+    prompt +
+    (shelves ||
+      `<p class="muted">Nothing came back this time. Try refreshing, or add a different interest in Settings.</p>`);
   // Shelves built here never pass through the fragment swap that normally
   // wires drag-scrolling, so they have to ask for it themselves.
   wireScrollers();
