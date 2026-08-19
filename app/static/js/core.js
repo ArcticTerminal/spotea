@@ -17,7 +17,7 @@ const PLAYLIST_KINDS = ["favorites", "saved", "new-uploads", "recently-played"];
 // showing something the library doesn't have yet — a recommended YouTube
 // playlist, a channel nobody follows, or a YouTube Music artist (see
 // app/services/remote_detail.py).
-const ID_DETAIL_KINDS = ["channel", "yt-channel", "yt-playlist", "yt-artist"];
+const ID_DETAIL_KINDS = ["channel", "yt-channel", "yt-playlist", "yt-artist-songs", "yt-artist", "yt-release"];
 
 export function classifyHash(hash) {
   const [path, query] = hash.split("?");

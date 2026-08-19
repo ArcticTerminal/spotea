@@ -16,8 +16,9 @@ import pytest
 
 from app.models import Feed
 from app.services import remote_detail
+from app.timeutil import utcnow
 from app.youtube import search as yt_search
-from app.youtube.music import ArtistProfile
+from app.youtube.music import ArtistProfile, ArtistRelease, ReleaseDetail
 from app.youtube.search import VideoSearchResult
 
 USER_ID = 1
@@ -36,6 +37,16 @@ def _track(video_id="_efHZg9D9iE"):
     )
 
 
+def _release(title="Schlau aber blond", year="2025", kind="Album", browse_id="MPREb_HIQTwIoDtEM"):
+    return ArtistRelease(
+        browse_id=browse_id,
+        title=title,
+        year=year,
+        kind=kind,
+        cover_url="https://lh3.googleusercontent.com/c=w544-h544-l90-rj",
+    )
+
+
 def _profile(**overrides):
     fields = {
         "browse_id": BROWSE_ID,
@@ -47,6 +58,10 @@ def _profile(**overrides):
         "avatar_url": "https://lh3.googleusercontent.com/x=w544-h544-p-l90-rj",
         "tracks": [_track()],
         "track_count": 1,
+        "albums": [_release()],
+        "singles": [_release("Gut Genug", "2026", "Single", "MPREb_5Y3mCZ5XtG3")],
+        "related": [],
+        "videos": [],
     }
     fields.update(overrides)
     return ArtistProfile(**fields)
@@ -100,22 +115,22 @@ def test_the_panel_lists_the_artists_tracks(client, fake_artist):
 
 
 def test_a_capped_track_list_says_so(client, fake_artist):
-    """An artist with 150 songs whose page reads "100 tracks" is claiming to
+    """An artist with 150 songs whose list reads "100 tracks" is claiming to
     be their whole catalogue. Same wording a truncated remote playlist
     uses."""
     fake_artist(_profile(tracks=[_track(f"_efHZg9D{n:03d}") for n in range(100)], track_count=157))
 
-    res = client.get(f"/partials/detail/yt-artist/{BROWSE_ID}")
+    res = client.get(f"/partials/detail/yt-artist-songs/{BROWSE_ID}")
 
-    assert "First 100 of 157 tracks · 28.9M monthly listeners" in res.text
+    assert "First 100 of 157 tracks" in res.text
 
 
 def test_an_uncapped_track_list_just_counts(client, fake_artist):
     fake_artist(_profile(tracks=[_track()], track_count=1))
 
-    res = client.get(f"/partials/detail/yt-artist/{BROWSE_ID}")
+    res = client.get(f"/partials/detail/yt-artist-songs/{BROWSE_ID}")
 
-    assert "1 track · 28.9M monthly listeners" in res.text
+    assert "1 track" in res.text
     assert "First 1" not in res.text
 
 
@@ -252,3 +267,120 @@ def test_a_channel_that_merely_mentions_topic_is_kept(monkeypatch):
     monkeypatch.setattr(yt_search, "cached_avatar_path", lambda channel_id: None)
 
     assert len(yt_search.search_channels("on topic")) == 1
+
+
+# --------------------------------------------------------------------------
+# The profile itself: shelves rather than a track list, and the two views it
+# hands off to.
+# --------------------------------------------------------------------------
+
+
+def test_the_profile_shows_the_releases_not_just_songs(client, fake_artist):
+    """The whole point of the profile. A ranked list of 150 songs can't
+    answer "what did they just put out" — it ranks by popularity, so a new
+    single sits wherever it charts."""
+    fake_artist(_profile())
+
+    res = client.get(f"/partials/detail/yt-artist/{BROWSE_ID}")
+
+    assert res.status_code == 200
+    assert "Albums" in res.text
+    assert "Schlau aber blond" in res.text
+    assert "Singles" in res.text
+    assert "Gut Genug" in res.text
+    # Opening a release goes by its browse id, which works for both kinds.
+    assert 'data-release-id="MPREb_HIQTwIoDtEM"' in res.text
+
+
+def test_an_empty_shelf_renders_nothing_at_all(client, fake_artist):
+    """Not an empty heading — an artist with no albums shouldn't have a
+    section telling them so."""
+    fake_artist(_profile(albums=[], singles=[]))
+
+    res = client.get(f"/partials/detail/yt-artist/{BROWSE_ID}")
+
+    assert "Albums" not in res.text
+    assert "Singles" not in res.text
+
+
+def test_this_years_releases_are_badged(client, fake_artist):
+    """The year is the only date YouTube Music reports here, so "new" can
+    mean nothing finer — and a release from a past year must not claim it."""
+    this_year = str(utcnow().year)
+    fake_artist(_profile(albums=[_release(year=this_year)], singles=[_release("Old", "2019")]))
+
+    res = client.get(f"/partials/detail/yt-artist/{BROWSE_ID}")
+
+    assert res.text.count(">New<") == 1
+
+
+def test_the_profile_offers_the_full_song_list(client, fake_artist):
+    fake_artist(_profile(tracks=[_track(f"_efHZg9D{n:03d}") for n in range(10)], track_count=56))
+
+    res = client.get(f"/partials/detail/yt-artist/{BROWSE_ID}")
+
+    assert f"/#yt-artist-songs/{BROWSE_ID}" in res.text
+    assert "All 56 songs" in res.text
+
+
+def test_a_preview_that_is_the_whole_catalogue_offers_nothing_more(client, fake_artist):
+    """"See all" pointing at the same ten rows is a control that does
+    nothing."""
+    fake_artist(_profile(tracks=[_track()], track_count=1))
+
+    res = client.get(f"/partials/detail/yt-artist/{BROWSE_ID}")
+
+    assert "yt-artist-songs" not in res.text
+
+
+def test_the_profile_never_offers_play_all(client, fake_artist):
+    """Play all reads the rendered rows on a remote list (home/remote.js),
+    and the rows here are a preview — it would quietly play ten of 150."""
+    fake_artist(_profile(tracks=[_track(f"_efHZg9D{n:03d}") for n in range(10)], track_count=56))
+
+    res = client.get(f"/partials/detail/yt-artist/{BROWSE_ID}")
+
+    assert "detail-play-all" not in res.text
+
+
+def test_the_full_song_list_keeps_the_artists_follow_button(client, fake_artist):
+    """Going one level in shouldn't drop the action the profile offered."""
+    fake_artist(_profile())
+
+    res = client.get(f"/partials/detail/yt-artist-songs/{BROWSE_ID}")
+
+    assert f"https://www.youtube.com/channel/{OFFICIAL_ID}" in res.text
+    assert "detail-play-all" in res.text
+
+
+def test_a_release_opens_as_a_track_list(client, monkeypatch):
+    """An album and a single are the same thing once opened, so they share
+    a route — see music.fetch_release."""
+    monkeypatch.setattr(
+        remote_detail,
+        "fetch_release",
+        lambda browse_id: ReleaseDetail(
+            title="Schlau aber blond",
+            year="2025",
+            kind="Album",
+            cover_url="https://lh3.googleusercontent.com/c=w544-h544-l90-rj",
+            artist_names="Shirin David",
+            tracks=[_track()],
+        ),
+    )
+
+    res = client.get("/partials/detail/yt-release/MPREb_HIQTwIoDtEM")
+
+    assert res.status_code == 200
+    assert "Album · 2025 · Shirin David · 1 track" in res.text
+    assert "Biliyorsun" in res.text
+
+
+@pytest.mark.parametrize("browse_id", ["UCNaGLJRPE3ohleIDM7RFtlQ", "MPREb_", "../etc/passwd"])
+def test_a_non_release_id_is_rejected_without_being_fetched(client, monkeypatch, browse_id):
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("must not fetch an id that failed validation")
+
+    monkeypatch.setattr(remote_detail, "fetch_release", fail_if_called)
+
+    assert client.get(f"/partials/detail/yt-release/{browse_id}").status_code == 404

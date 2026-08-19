@@ -77,6 +77,9 @@ class FakeYTMusic:
     def get_playlist(self, playlist_id, limit=None):
         return self._record("get_playlist", playlist_id, limit=limit)
 
+    def get_album(self, browse_id):
+        return self._record("get_album", browse_id)
+
 
 @pytest.fixture
 def client(monkeypatch):
@@ -526,6 +529,86 @@ def test_a_channel_that_is_not_an_artist_is_none(client, caplog):
         assert music.fetch_artist("UCGq-a57w-aPwyi3pW7XLiHw") is None
 
     assert [record.levelno for record in caplog.records] == [logging.INFO]
+
+
+def test_an_artist_page_carries_its_releases(client):
+    """All of it off the one response the songs came from, which is what
+    makes a profile cost what a bare track list cost."""
+    client(
+        get_artist={
+            "name": "Shirin David",
+            "songs": {"results": [SONG]},
+            "albums": {
+                "results": [
+                    {
+                        "title": "Schlau aber blond",
+                        "browseId": "MPREb_HIQTwIoDtEM",
+                        "year": "2025",
+                        "audioPlaylistId": "OLAK5uy_niuCyuWWZYKv6jIwsWqDkVsYiBq9C_Plg",
+                        "thumbnails": [{"url": "https://x/c=w226-h226-l90-rj"}],
+                    }
+                ]
+            },
+            "singles": {
+                "results": [
+                    {"title": "Gut Genug", "browseId": "MPREb_5Y3mCZ5XtG3", "year": "2026", "type": "Single"}
+                ]
+            },
+            "related": {"results": [CHART_ARTIST]},
+        }
+    )
+
+    artist = music.fetch_artist("UCx")
+
+    (album,) = artist.albums
+    assert (album.browse_id, album.year, album.kind) == ("MPREb_HIQTwIoDtEM", "2025", "Album")
+    assert album.cover_url == "https://x/c=w544-h544-l90-rj"
+    (single,) = artist.singles
+    # Singles report their own type; albums report none, so the shelf names it.
+    assert single.kind == "Single"
+    assert [artist.title for artist in artist.related] == ["BLOK3"]
+
+
+def test_a_release_with_no_browse_id_is_dropped(client):
+    """A card with nothing to open is worse than one card fewer."""
+    client(
+        get_artist={
+            "name": "Shirin David",
+            "songs": {"results": [SONG]},
+            "albums": {"results": [{"title": "Nameless"}, {"browseId": "MPREb_ok"}]},
+        }
+    )
+
+    assert music.fetch_artist("UCx").albums == []
+
+
+def test_an_album_and_a_single_open_the_same_way(client):
+    """YouTube Music answers a one-track single and a fourteen-track album
+    with the identical structure, which is why one route serves both."""
+    client(
+        get_album={
+            "title": "Schlau aber blond",
+            "year": "2025",
+            "type": "Album",
+            "artists": [{"name": "Shirin David"}],
+            "thumbnails": [{"url": "https://x/c=w226-h226-l90-rj"}],
+            "tracks": [SONG],
+        }
+    )
+
+    release = music.fetch_release("MPREb_HIQTwIoDtEM")
+
+    assert (release.title, release.year, release.kind) == ("Schlau aber blond", "2025", "Album")
+    assert release.artist_names == "Shirin David"
+    assert [track.video_id for track in release.tracks] == ["_efHZg9D9iE"]
+    assert release.cover_url == "https://x/c=w544-h544-l90-rj"
+
+
+@pytest.mark.parametrize("response", [None, {"title": "Gone", "tracks": []}, {"tracks": [SONG]}])
+def test_a_release_that_cannot_be_read_is_none(client, response):
+    client(get_album=response)
+
+    assert music.fetch_release("MPREb_x") is None
 
 
 def test_an_unknown_artist_is_none_not_an_empty_profile(client):

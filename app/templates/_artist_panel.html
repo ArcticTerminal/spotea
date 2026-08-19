@@ -1,0 +1,132 @@
+{# An artist's profile, as GET /partials/detail/yt-artist/{id} returns it.
+
+   The one panel body in this app that isn't a track list. Everything else
+   Explore drills into answers "what's in here", which a list answers well;
+   an artist answers several questions at once — what did they just put
+   out, what's the album called, what are they known for — and a single
+   ranked list of 150 songs buries all but the last. So: a short preview of
+   the popular songs, then shelves.
+
+   Every section comes out of the same response (see
+   services/remote_detail.remote_artist_context), so the whole profile
+   costs what the bare track list cost. Sections with nothing in them
+   render nothing at all rather than an empty heading.
+
+   The shelves reuse Explore's card and scroller classes deliberately —
+   a release here should read the same as a playlist there, and
+   home/detail.js wires their clicks alongside the track rows'.
+#}
+<button type="button" class="back-link" id="detail-back-btn">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-arrow-left" /></svg>
+  {{ back_label | default("Explore") }}
+</button>
+
+{# show_play_actions=false: the rows below are a preview, and Play all
+   reads the rendered rows on a remote list (see home/remote.js) — it would
+   quietly play ten of a hundred and fifty. #}
+{% with show_play_actions = false, content = songs %}
+{% include "_detail_hero.html" %}
+{% endwith %}
+
+{% if description %}
+<p class="artist-bio" id="artist-bio">{{ description }}</p>
+<button type="button" class="btn-quiet artist-bio-toggle" id="artist-bio-toggle" aria-expanded="false" aria-controls="artist-bio">
+  More
+</button>
+{% endif %}
+
+{% if songs %}
+<div class="shelf-header">
+  <h3 class="shelf-title">Popular songs</h3>
+  {% if songs_total %}
+  <a class="shelf-see-more artist-see-all" href="{{ songs_url }}">All {{ songs_total }} songs</a>
+  {% endif %}
+</div>
+<div class="track-list">
+  {% for item in songs %}
+  {% set index = loop.index %}
+  {% include "_remote_track_row.html" %}
+  {% endfor %}
+</div>
+{% endif %}
+
+{% macro release_shelf(heading, releases) %}
+{% if releases %}
+<div class="shelf">
+  <div class="shelf-header"><h3 class="shelf-title">{{ heading }}</h3></div>
+  <div class="shelf-row">
+    {% for release in releases %}
+    <article class="card release-card" data-release-id="{{ release.browse_id }}" data-title="{{ release.title }}">
+      <button type="button" class="thumb" aria-label="Open {{ release.title }}">
+        {% if release.cover_url %}<img src="{{ release.cover_url }}" alt="" loading="lazy" />{% endif %}
+      </button>
+      <div class="card-body">
+        <h3 class="card-title" title="{{ release.title }}">{{ release.title }}</h3>
+        <p class="card-date">
+          {{ release.year or release.kind }}
+          {# The only date this surface reports is the year, so "New" can
+             mean nothing finer than "released this year". #}
+          {% if release.year and release.year == current_year %}<span class="badge-new">New</span>{% endif %}
+        </p>
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+{% endmacro %}
+
+{{ release_shelf("Albums", albums) }}
+{{ release_shelf("Singles", singles) }}
+
+{% if videos %}
+<div class="shelf">
+  <div class="shelf-header"><h3 class="shelf-title">Videos</h3></div>
+  <div class="shelf-row">
+    {% for video in videos %}
+    {# A card, not a row: these carry no duration at all (see
+       music.ArtistProfile.videos), and a card doesn't print one. #}
+    <article
+      class="card rec-card"
+      data-video-id="{{ video.video_id }}"
+      data-title="{{ video.title }}"
+      data-thumbnail-url="{{ video.thumbnail_url or '' }}"
+      data-channel-title="{{ video.channel_title or '' }}"
+      data-channel-id="{{ video.channel_id or '' }}"
+    >
+      <button type="button" class="thumb rec-play" aria-label="Play {{ video.title }}">
+        {% if video.thumbnail_url %}<img src="{{ video.thumbnail_url }}" alt="" loading="lazy" />{% endif %}
+      </button>
+      <div class="card-body">
+        <h3 class="card-title" title="{{ video.title }}">{{ video.title }}</h3>
+        <p class="card-channel">{{ video.channel_title or "" }}</p>
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{% if related %}
+<div class="shelf">
+  <div class="shelf-header"><h3 class="shelf-title">Similar artists</h3></div>
+  <div class="shelf-row">
+    {% for artist in related %}
+    {# No Add button, same reason a charting-artist card has none: the id
+       here is the artist's browse id, which is their Topic channel, and
+       following that follows the wrong thing. Opening the card lands on
+       their profile, where the right id is known. #}
+    <article class="card shelf-channel-card" data-channel-id="{{ artist.channel_id }}">
+      {% if artist.thumbnail_url %}
+      <img class="shelf-channel-avatar" src="{{ artist.thumbnail_url }}" alt="" loading="lazy" />
+      {% else %}
+      <span class="shelf-channel-avatar"></span>
+      {% endif %}
+      <div class="card-body">
+        <h3 class="card-title" title="{{ artist.title }}">{{ artist.title }}</h3>
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}

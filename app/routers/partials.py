@@ -36,11 +36,13 @@ from app.page_context import (
 )
 from app.services.remote_detail import (
     remote_artist_context,
+    remote_artist_songs_context,
     remote_channel_context,
     remote_playlist_context,
+    remote_release_context,
 )
 from app.templating import templates
-from app.youtube.urls import CHANNEL_ID_RE, PLAYLIST_ID_RE
+from app.youtube.urls import CHANNEL_ID_RE, PLAYLIST_ID_RE, RELEASE_ID_RE
 
 router = APIRouter(prefix="/partials", tags=["partials"], dependencies=[Depends(require_login)])
 
@@ -191,4 +193,38 @@ def remote_artist_fragment(
     context = remote_artist_context(db, profile.id, browse_id, avatar_url=avatar)
     if context is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Could not open this artist")
+    return templates.TemplateResponse(request, "_fragment_detail.html", context)
+
+
+@router.get("/detail/yt-artist-songs/{browse_id}", response_class=HTMLResponse)
+def remote_artist_songs_fragment(
+    browse_id: str,
+    request: Request,
+    avatar: str | None = None,
+    profile: User = Depends(get_current_profile),
+    db: Session = Depends(get_db),
+) -> HTMLResponse:
+    """Everything an artist has, as one list — the profile's "See all".
+    Its own address rather than a query flag on the route above, because
+    it's a separate view in history: pressing back from here goes to the
+    profile, which is where the person came from."""
+    if not CHANNEL_ID_RE.match(browse_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artist not found")
+
+    context = remote_artist_songs_context(db, profile.id, browse_id, avatar_url=avatar)
+    if context is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Could not open this artist")
+    return templates.TemplateResponse(request, "_fragment_detail.html", context)
+
+
+@router.get("/detail/yt-release/{browse_id}", response_class=HTMLResponse)
+def remote_release_fragment(browse_id: str, request: Request) -> HTMLResponse:
+    """An album or single, opened from an artist's profile. One route for
+    both — YouTube Music answers them identically (see music.fetch_release)."""
+    if not RELEASE_ID_RE.match(browse_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Release not found")
+
+    context = remote_release_context(browse_id)
+    if context is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Could not open this release")
     return templates.TemplateResponse(request, "_fragment_detail.html", context)

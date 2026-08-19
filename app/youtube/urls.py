@@ -33,6 +33,12 @@ SHORT_MAX_DURATION_SECONDS = 60
 # channel route, which interpolates it straight into a youtube.com URL).
 CHANNEL_ID_RE = re.compile(r"^UC[\w-]{22}$")
 
+# A YouTube Music release id — an album or a single. Same reason as above:
+# it arrives as untrusted path input (see routers/partials.py's release
+# route) and goes straight into an API call. Length isn't fixed the way a
+# channel id's is, so this bounds it rather than pinning it.
+RELEASE_ID_RE = re.compile(r"^MPREb_[\w-]{1,32}$")
+
 CHANNEL_ID_URL_RE = re.compile(r"youtube\.com/channel/(UC[\w-]{22})")
 CHANNEL_ID_PARAM_RE = re.compile(r"channel_id=([\w-]+)")
 

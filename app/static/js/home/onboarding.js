@@ -50,7 +50,7 @@ import { api, debounce, setupOverlay, showToast } from "../core.js";
 import { refreshFragments } from "../fragments.js";
 import { BULK_IMPORT_FINISHED } from "./bulk-import.js";
 import { channelCardHtml, reloadRecommendations, renderChannelResults, shelfHtml } from "./explore.js";
-import { wireScrollers } from "./library.js";
+import { wireScrollers } from "./scrollers.js";
 import { followChannel } from "./remote.js";
 import { saveInterests } from "./settings.js";
 
