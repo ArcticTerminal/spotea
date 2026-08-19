@@ -1,6 +1,8 @@
 import logging
 from datetime import datetime
 
+import pytest
+
 import app.feed_sync as feed_sync_module
 import app.routers.feeds as feeds_router
 import app.services.backfill as backfill_module
@@ -8,8 +10,9 @@ import app.services.feed_add as feed_add_module
 from app.feed_sync import FeedFetchResult, apply_feed_data
 from app.models import Content, Feed, User
 from app.youtube.extract import BackfillEntry
+from app.youtube.music import ArtistProfile
 from app.youtube.rss import FeedUnavailableError, InvalidFeedError, ParsedEntry, ParsedFeed
-from app.youtube.urls import channel_feed_url
+from app.youtube.urls import channel_feed_url, longform_feed_url
 
 USER_ID = 1
 
@@ -655,7 +658,12 @@ def test_following_a_plain_channel_keeps_its_name_and_stays_unmarked(db_session,
 def test_following_an_artist_skips_the_history_scan(client, monkeypatch):
     """A Topic channel holds the artist's whole catalogue — 1,064 uploads
     for Drake, measured. Scanning it would import all of it to answer a
-    request that only means "tell me when they release something"."""
+    request that only means "tell me when they release something".
+
+    The saved feed is what says so, not the request: since
+    feed_add._as_artist_follow the server recognises most artist follows on
+    its own, and those arrive as a plain channel URL with nothing in the
+    payload to key off."""
     scans: list[int] = []
     monkeypatch.setattr(
         feeds_router,
@@ -666,6 +674,7 @@ def test_following_an_artist_skips_the_history_scan(client, monkeypatch):
                 user_id=user_id,
                 rss_url=channel_feed_url(TOPIC_ID),
                 channel_title="Shirin David",
+                artist_browse_id=ARTIST_BROWSE_ID,
                 added_at=datetime(2026, 8, 19),
             ),
             0,
@@ -706,3 +715,183 @@ def test_following_a_channel_still_scans_its_history(client, monkeypatch):
 
     assert res.status_code == 201
     assert scans == [7]
+
+
+# --------------------------------------------------------------------------
+# The server recognising an artist by itself (see feed_add._as_artist_follow).
+# Above this line, "follow the Topic channel" only happened when the client
+# said so — which meant only the detail panel's Follow button, since it is
+# the only surface that opens an artist's profile first. The onboarding
+# wizard, Explore's Add button and bulk import all followed the channel the
+# artist also vlogs on. These are about the answer no longer depending on
+# which button was pressed.
+# --------------------------------------------------------------------------
+
+OFFICIAL_ID = "UC5ZkRnYd3__WBBGnAnWO9Cg"
+
+
+def _artist(*, topic_channel_id=TOPIC_ID, browse_id=OFFICIAL_ID):
+    return ArtistProfile(
+        browse_id=browse_id,
+        channel_id=browse_id,
+        topic_channel_id=topic_channel_id,
+        name="Shirin David",
+        description=None,
+        subscriber_count=None,
+        monthly_listeners=None,
+        avatar_url=None,
+        tracks=[],
+    )
+
+
+def _stub_artist_lookup(monkeypatch, profile, calls=None):
+    """Overrides conftest's _no_artist_lookup, which answers "not an artist"
+    for the whole suite."""
+
+    def fake_fetch_artist(browse_id, all_songs=True):
+        if calls is not None:
+            calls.append((browse_id, all_songs))
+        return profile
+
+    monkeypatch.setattr(feed_add_module, "fetch_artist", fake_fetch_artist)
+
+
+def test_following_a_musicians_own_channel_follows_their_topic_channel(db_session, monkeypatch):
+    """The whole point: nothing in this call says "artist" — it is the plain
+    channel URL an Add button sends — and it still ends up on the channel
+    that carries their releases instead of their vlogs."""
+    _stub_topic_feed(monkeypatch)
+    _stub_artist_lookup(monkeypatch, _artist())
+
+    feed, _new_count, _channel_id = feed_add_module.create_feed_from_rss_url(
+        db_session, channel_feed_url(OFFICIAL_ID), USER_ID
+    )
+
+    assert feed.rss_url == channel_feed_url(TOPIC_ID)
+
+
+def test_a_server_recognised_artist_is_marked_and_titled_like_one(db_session, monkeypatch):
+    """Same two things the client-answered path does — the id that reopens
+    the profile, and a card that reads as the artist rather than "… - Topic"."""
+    _stub_topic_feed(monkeypatch)
+    _stub_artist_lookup(monkeypatch, _artist())
+
+    feed, _new_count, _channel_id = feed_add_module.create_feed_from_rss_url(
+        db_session, channel_feed_url(OFFICIAL_ID), USER_ID
+    )
+
+    assert feed.artist_browse_id == OFFICIAL_ID
+    assert feed.channel_title == "Shirin David"
+
+
+def test_a_channel_that_is_not_a_musicians_is_followed_as_itself(db_session, monkeypatch):
+    """What every podcast and tech channel does. YouTube Music is asked and
+    says no (its parser cannot read a non-artist page — measured), and the
+    follow proceeds exactly as it did before any of this existed."""
+    calls: list[tuple[str, bool]] = []
+    _stub_topic_feed(monkeypatch, title="Some Tech Channel")
+    _stub_artist_lookup(monkeypatch, None, calls)
+
+    feed, _new_count, _channel_id = feed_add_module.create_feed_from_rss_url(
+        db_session, channel_feed_url(OFFICIAL_ID), USER_ID
+    )
+
+    assert feed.rss_url == channel_feed_url(OFFICIAL_ID)
+    assert feed.artist_browse_id is None
+    assert feed.channel_title == "Some Tech Channel"
+    # all_songs=False: the songs themselves are a second request, and this
+    # only ever wanted the ids off the page header.
+    assert calls == [(OFFICIAL_ID, False)]
+
+
+def test_an_artist_with_no_topic_channel_is_followed_as_a_channel(db_session, monkeypatch):
+    """There is nothing better to follow: the Topic id is read off the
+    artist's own tracks, so an artist page carrying none leaves this with
+    only the channel it started with."""
+    _stub_topic_feed(monkeypatch, title="Some Artist")
+    _stub_artist_lookup(monkeypatch, _artist(topic_channel_id=None))
+
+    feed, _new_count, _channel_id = feed_add_module.create_feed_from_rss_url(
+        db_session, channel_feed_url(OFFICIAL_ID), USER_ID
+    )
+
+    assert feed.rss_url == channel_feed_url(OFFICIAL_ID)
+    assert feed.artist_browse_id is None
+
+
+def test_a_caller_that_already_knows_is_not_asked_again(db_session, monkeypatch):
+    """The detail panel read the id off the profile it is already showing.
+    Asking YouTube Music to work out what the request just said is a wasted
+    live request on the one path that never needed it."""
+    calls: list[tuple[str, bool]] = []
+    _stub_topic_feed(monkeypatch)
+    _stub_artist_lookup(monkeypatch, _artist(), calls)
+
+    feed_add_module.create_feed_from_rss_url(
+        db_session, channel_feed_url(TOPIC_ID), USER_ID, artist_browse_id=OFFICIAL_ID
+    )
+
+    assert calls == []
+
+
+def test_a_playlist_feed_is_never_offered_to_youtube_music(db_session, monkeypatch):
+    """A UULF playlist feed (see urls.longform_feed_url) carries no channel
+    id, and there is nothing YouTube Music could answer for it."""
+    calls: list[tuple[str, bool]] = []
+    _stub_topic_feed(monkeypatch, title="Videos Tab")
+    _stub_artist_lookup(monkeypatch, _artist(), calls)
+
+    feed_add_module.create_feed_from_rss_url(
+        db_session, longform_feed_url(OFFICIAL_ID), USER_ID
+    )
+
+    assert calls == []
+
+
+def test_following_the_channel_of_an_artist_already_followed_is_a_duplicate(
+    db_session, monkeypatch
+):
+    """Resolution runs before the duplicate check for this: the official
+    channel and the Topic channel are two URLs for one card, and the check
+    can only see that once both have been reduced to the same one."""
+    _stub_topic_feed(monkeypatch)
+    _stub_artist_lookup(monkeypatch, _artist())
+    db_session.add(
+        Feed(
+            user_id=USER_ID,
+            rss_url=channel_feed_url(TOPIC_ID),
+            channel_title="Shirin David",
+            followed=True,
+        )
+    )
+    db_session.commit()
+
+    with pytest.raises(feed_add_module.FeedAlreadyExistsError):
+        feed_add_module.create_feed_from_rss_url(
+            db_session, channel_feed_url(OFFICIAL_ID), USER_ID
+        )
+
+
+def test_adding_an_artist_by_plain_channel_url_skips_the_scan_end_to_end(
+    client, db_session, monkeypatch
+):
+    """The onboarding wizard's Add button, in full: it sends a channel URL
+    and nothing else (it never opens the profile — a full-panel navigation
+    out from under its modal would strand the wizard half-finished), and the
+    feed it gets back is the artist's, with no history scan behind it."""
+    scans: list[int] = []
+    _stub_topic_feed(monkeypatch)
+    _stub_artist_lookup(monkeypatch, _artist())
+    monkeypatch.setattr(
+        feeds_router, "run_backfill_task", lambda feed_id, channel_id: scans.append(feed_id)
+    )
+
+    res = client.post(
+        "/feeds", json={"channel_url": f"https://www.youtube.com/channel/{OFFICIAL_ID}"}
+    )
+
+    assert res.status_code == 201
+    feed = db_session.query(Feed).filter(Feed.id == res.json()["feed"]["id"]).one()
+    assert feed.rss_url == channel_feed_url(TOPIC_ID)
+    assert feed.artist_browse_id == OFFICIAL_ID
+    assert scans == []

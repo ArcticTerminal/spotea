@@ -37,6 +37,12 @@ class FeedOut(BaseModel):
     channel_title: str | None
     avatar_url: str | None
     added_at: datetime
+    # Reported back because the client no longer decides it: a follow can
+    # arrive as a plain channel URL and come out the other side as an
+    # artist's, with the server having worked that out (see
+    # services/feed_add._as_artist_follow). This is how the page that asked
+    # finds out which of the two it got.
+    artist_browse_id: str | None = None
 
 
 class ContentOut(BaseModel):

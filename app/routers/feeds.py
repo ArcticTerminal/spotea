@@ -68,7 +68,12 @@ def add_feed(
     # already brought in the latest handful, and everything after that
     # arrives the same way. Their back catalogue stays one click away on the
     # profile, which is a browse surface and doesn't need library rows.
-    if channel_id and not payload.artist_browse_id:
+    #
+    # Read off the saved feed rather than off the request: the request only
+    # says so when the client already knew, and since services/feed_add.py's
+    # _as_artist_follow the far commoner case is the server working it out
+    # for a client that just sent a channel URL.
+    if channel_id and not feed.artist_browse_id:
         background_tasks.add_task(run_backfill_task, feed.id, channel_id)
 
     return FeedAddResult(feed=FeedOut.model_validate(feed), new_content_count=new_count)

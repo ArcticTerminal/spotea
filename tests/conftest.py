@@ -45,6 +45,7 @@ from app.config import settings
 from app.database import Base, SessionLocal, engine
 from app.main import app
 from app.models import Account, User
+from app.services import feed_add
 
 
 def _assert_paths_isolated() -> None:
@@ -144,6 +145,23 @@ def _clean_tables(_init_schema):
                 conn.execute(table.delete().where(table.c.id != DEFAULT_ACCOUNT_ID))
             else:
                 conn.execute(table.delete())
+
+
+@pytest.fixture(autouse=True)
+def _no_artist_lookup(monkeypatch):
+    """Following anything asks YouTube Music whether the channel belongs to
+    a musician (see services/feed_add._as_artist_follow). That is a live
+    request on a code path dozens of tests take incidentally — every "add a
+    feed and check X" test in the suite — so the default answer here is
+    "not an artist", which is also what leaves those tests asserting the
+    behaviour they were written for.
+
+    Same reasoning as test_recommendations.py's _no_browse_shelves: a
+    network call that fires without any test asking for it has to be shut
+    off centrally, or the suite quietly goes online. The tests that are
+    *about* artist detection install their own answer over this one.
+    """
+    monkeypatch.setattr(feed_add, "fetch_artist", lambda browse_id, all_songs=True: None)
 
 
 @pytest.fixture
