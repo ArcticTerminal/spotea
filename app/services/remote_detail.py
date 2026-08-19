@@ -22,7 +22,14 @@ from sqlalchemy.orm import Session
 
 from app.images import cached_avatar_path
 from app.models import Feed
-from app.youtube.search import fetch_channel_avatar, fetch_channel_uploads, fetch_playlist, proxied_avatar_url
+from app.youtube.music import fetch_artist
+from app.youtube.search import (
+    cached_avatar_or_hotlink,
+    fetch_channel_avatar,
+    fetch_channel_uploads,
+    fetch_playlist,
+    proxied_avatar_url,
+)
 from app.youtube.urls import CHANNEL_PAGE_URL_TEMPLATE, channel_feed_url
 
 # What a caller-supplied avatar_url (see remote_channel_context) is allowed
@@ -88,6 +95,72 @@ def remote_playlist_context(playlist_id: str) -> dict | None:
     return context
 
 
+def _followed_feed_id(db: Session, user_id: int, channel_id: str) -> int | None:
+    followed = (
+        db.query(Feed)
+        .filter(
+            Feed.user_id == user_id,
+            Feed.rss_url == channel_feed_url(channel_id),
+            Feed.followed.is_(True),
+        )
+        .first()
+    )
+    return followed.id if followed else None
+
+
+def remote_artist_context(db: Session, user_id: int, browse_id: str) -> dict | None:
+    """An artist's page as YouTube Music knows it — their tracks, and a
+    Follow that lands on the right channel.
+
+    That last part is the reason this exists as its own kind rather than
+    reusing remote_channel_context. Every song YouTube Music returns is
+    attributed to the artist's auto-generated "<Artist> - Topic" channel,
+    and the charts name artists the same way; following one of those gets
+    you an automated container, not the channel the artist actually uploads
+    to. The artist page is the only place that reports both ids, so this is
+    where the swap can be made — the panel plays the Topic channel's tracks
+    and follows the official channel, which is what someone pressing that
+    button means.
+
+    Falls through to remote_channel_context when YouTube Music has no artist
+    under this id: the same id also arrives from ordinary channel results
+    (see routers/explore.py's fallback search), and a channel that isn't an
+    artist should still open rather than 404.
+    """
+    artist = fetch_artist(browse_id)
+    if artist is None:
+        return remote_channel_context(db, user_id, browse_id)
+    if not artist.tracks:
+        return None
+
+    # The official channel where there is one. Where there isn't — a handful
+    # of artists exist on YouTube Music with no channel behind them — the
+    # browse id is still a real channel with a working RSS feed, so following
+    # it is a worse answer than the right one but a better answer than a
+    # button that does nothing.
+    follow_channel_id = artist.channel_id or browse_id
+
+    context = _base_context("yt-artist", browse_id, artist.name, artist.tracks)
+    context.update(
+        {
+            "video_count": len(artist.tracks),
+            "count_label": (
+                f"{len(artist.tracks)} tracks · {artist.monthly_listeners} monthly listeners"
+                if artist.monthly_listeners
+                else f"{len(artist.tracks)} tracks"
+            ),
+            # Routed through /avatar-proxy rather than hotlinked: artist
+            # portraits come off lh3.googleusercontent.com, which the
+            # yt3.ggpht.com rewrite doesn't cover (see urls.py).
+            "hero_image": cached_avatar_or_hotlink(follow_channel_id, artist.avatar_url),
+            "hero_is_avatar": True,
+            "channel_url": CHANNEL_PAGE_URL_TEMPLATE.format(channel_id=follow_channel_id),
+            "followed_feed_id": _followed_feed_id(db, user_id, follow_channel_id),
+        }
+    )
+    return context
+
+
 def remote_channel_context(
     db: Session, user_id: int, channel_id: str, avatar_url: str | None = None
 ) -> dict | None:
@@ -115,16 +188,6 @@ def remote_channel_context(
         fetched_avatar = fetch_channel_avatar(channel_id)
         hero_image = proxied_avatar_url(fetched_avatar) if fetched_avatar else None
 
-    followed = (
-        db.query(Feed)
-        .filter(
-            Feed.user_id == user_id,
-            Feed.rss_url == channel_feed_url(channel_id),
-            Feed.followed.is_(True),
-        )
-        .first()
-    )
-
     context = _base_context(
         "yt-channel", channel_id, uploads.title or "Channel", uploads.items
     )
@@ -135,7 +198,7 @@ def remote_channel_context(
             "hero_image": hero_image,
             "hero_is_avatar": True,
             "channel_url": CHANNEL_PAGE_URL_TEMPLATE.format(channel_id=channel_id),
-            "followed_feed_id": followed.id if followed else None,
+            "followed_feed_id": _followed_feed_id(db, user_id, channel_id),
         }
     )
     return context

@@ -5,12 +5,13 @@
 // mini-bar alive while browsing one, since there's no longer a document
 // boundary for that DOM to fall off of.
 //
-// Four things open it, and they differ only in where the rows come from:
+// Five things open it, and they differ only in where the rows come from:
 //   channel/{feed_id}     a followed channel        (from Library)
 //   {playlist kind}       one of the four pinned    (from Library)
 //   yt-playlist/{id}      a YouTube playlist        (from Explore)
 //   yt-channel/{id}       an unfollowed channel     (from Explore)
-// The last two are "remote": their rows have no Content row yet, so playing
+//   yt-artist/{id}        a YouTube Music artist    (from Explore)
+// The last three are "remote": their rows have no Content row yet, so playing
 // from them goes through home/remote.js, which materializes the list first.
 
 import { unfollowChannel } from "../content-actions.js";
@@ -22,7 +23,7 @@ import { CHANNEL_FOLLOWED, followChannel, playRemoteList } from "./remote.js";
 import { activate } from "./tabs.js";
 
 // Detail kinds whose rows come from YouTube rather than the database.
-const REMOTE_KINDS = ["yt-channel", "yt-playlist"];
+const REMOTE_KINDS = ["yt-channel", "yt-playlist", "yt-artist"];
 const isRemoteKind = (kind) => REMOTE_KINDS.includes(kind);
 
 // Remote fragment HTML already fetched this session, keyed by the exact
