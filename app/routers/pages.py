@@ -51,6 +51,10 @@ def home(
             # profiles.js's renameProfile for the one case a reload doesn't
             # already cover (renaming the profile you're currently on).
             "profile_name": profile.name,
+            # Labels Settings' Account group, so the rows that reach past the
+            # active profile say whose login they belong to. The login is
+            # otherwise never shown anywhere in the app after registration.
+            "account_email": profile.account.email,
             "feed_refresh_interval_minutes": profile.account.feed_refresh_interval_minutes,
             # Server-rendered rather than fetched by home/settings.js on boot:
             # the interest chips are part of the Settings panel's first paint,

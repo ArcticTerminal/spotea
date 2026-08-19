@@ -60,11 +60,16 @@ async function ensureProfilesLoaded() {
   await loadProfiles();
 }
 
-function updateHeaderProfileName(name) {
+// Three places name the active profile now that Settings labels its
+// per-profile group with it; renaming the profile you're currently on is the
+// one path that doesn't reload the page, so they're all updated here.
+function updateActiveProfileName(name) {
   const header = document.getElementById("profile-switcher-name");
   if (header) header.textContent = name;
   const mobileMenu = document.getElementById("mobile-menu-profile-name");
   if (mobileMenu) mobileMenu.textContent = name;
+  const settingsGroup = document.getElementById("settings-profile-name");
+  if (settingsGroup) settingsGroup.textContent = name;
 }
 
 // Current profile gets the same accent border/tint treatment as a checked
@@ -167,7 +172,7 @@ async function renameProfile(profileId, name) {
     // free. This is the one path that doesn't — renaming just refreshes the
     // overlay's own lists in place — so it's the one place the header name
     // has to be kept in sync by hand.
-    if (data?.is_current) updateHeaderProfileName(data.name);
+    if (data?.is_current) updateActiveProfileName(data.name);
   }
   return ok;
 }

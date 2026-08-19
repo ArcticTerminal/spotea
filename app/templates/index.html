@@ -180,76 +180,91 @@
 
     <section id="tab-settings" class="tab-panel" data-tab-panel="settings" hidden>
       <div class="channels-panel-inner">
-        <h2>Profiles</h2>
-        <div class="settings-row">
-          <div class="settings-row-info">
-            <span class="settings-row-label">Profiles</span>
-            <span class="settings-row-desc">Switch, rename, or remove a profile. Deleting one also removes its channels and downloads.</span>
-          </div>
-          <button type="button" id="open-profiles-settings" class="btn-quiet">Manage profiles</button>
-        </div>
+        {# Two groups, because the rows genuinely divide that way and nothing
+           on the panel used to say so: everything here is per-profile except
+           the profile roster itself and the refresh interval, which live on
+           the Account (see models.py — `User` is a profile, `Account` is the
+           login). Whose settings you are looking at was previously invisible,
+           so changing the interval on one profile silently changed it for the
+           whole household. #}
+        <section class="settings-group">
+          <h2>This profile · <span id="settings-profile-name" class="settings-group-who">{{ profile_name }}</span></h2>
 
-        <h2>Interests</h2>
-        <div class="settings-row">
-          <div class="settings-row-info">
-            <span class="settings-row-label">What you're into</span>
-            <span class="settings-row-desc">Genres, artists, moods — Explore's "For you" shelves are searched from these.</span>
+          <div class="settings-row">
+            <div class="settings-row-info">
+              <span class="settings-row-label">What you're into</span>
+              <span class="settings-row-desc">Genres, artists, moods — Explore's "For you" shelves are searched from these.</span>
+            </div>
+            <button type="button" id="open-interests" class="btn-quiet">Manage interests</button>
           </div>
-          <button type="button" id="open-interests" class="btn-quiet">Manage interests</button>
-        </div>
 
-        <h2>History</h2>
-        <div class="settings-row">
-          <div class="settings-row-info">
-            <span class="settings-row-label">Recently played</span>
-            <span class="settings-row-desc">Clears your "Recently played" shelf on Home. Doesn't remove any downloads.</span>
+          <div class="settings-row">
+            <div class="settings-row-info">
+              <span class="settings-row-label">Recently played</span>
+              <span class="settings-row-desc">Clears your "Recently played" shelf on Home. Doesn't remove any downloads.</span>
+            </div>
+            <button type="button" id="clear-recently-played" class="btn-quiet">Clear</button>
           </div>
-          <button type="button" id="clear-recently-played" class="btn-quiet">Clear</button>
-        </div>
 
-        <h2>Downloads</h2>
-        <div class="settings-row">
-          <div class="settings-row-info">
-            <span class="settings-row-label">Storage used</span>
-            <span class="settings-row-desc" id="settings-storage-desc">{% include "_storage_summary.html" %}</span>
+          <div class="settings-row">
+            <div class="settings-row-info">
+              <span class="settings-row-label">Storage used</span>
+              <span class="settings-row-desc" id="settings-storage-desc">{% include "_storage_summary.html" %}</span>
+            </div>
+            <button type="button" id="open-downloads" class="btn-quiet">Manage downloads</button>
           </div>
-          <button type="button" id="open-downloads" class="btn-quiet">Manage downloads</button>
-        </div>
 
-        <h2>Audio quality</h2>
-        <div class="settings-row">
-          <div class="settings-row-info">
-            <span class="settings-row-label">Download quality</span>
-            <span class="settings-row-desc">Applies to new downloads only — files you already have keep their current quality.</span>
+          {# Per-profile and staying that way: the downloads it applies to are
+             themselves per-profile (Content.user_id), so one profile can be on
+             Data saver while another keeps High quality. #}
+          <div class="settings-row">
+            <div class="settings-row-info">
+              <span class="settings-row-label">Download quality</span>
+              <span class="settings-row-desc">Applies to new downloads only — files you already have keep their current quality.</span>
+            </div>
+            <select id="audio-quality-select" class="settings-select" aria-label="Download quality">
+              <option value="high" {{ 'selected' if audio_quality == 'high' }}>High quality</option>
+              <option value="low" {{ 'selected' if audio_quality == 'low' }}>Data saver</option>
+            </select>
           </div>
-          <select id="audio-quality-select" class="settings-select" aria-label="Download quality">
-            <option value="high" {{ 'selected' if audio_quality == 'high' }}>High quality</option>
-            <option value="low" {{ 'selected' if audio_quality == 'low' }}>Data saver</option>
-          </select>
-        </div>
 
-        <h2>Channels</h2>
-        <div class="settings-row">
-          <div class="settings-row-info">
-            <span class="settings-row-label">Import channels</span>
-            <span class="settings-row-desc">Paste a list of handles or URLs to follow several channels at once.</span>
+          <div class="settings-row">
+            <div class="settings-row-info">
+              <span class="settings-row-label">Import channels</span>
+              <span class="settings-row-desc">Paste a list of handles or URLs to follow several channels at once.</span>
+            </div>
+            <button type="button" id="open-bulk-import" class="btn-quiet">Import</button>
           </div>
-          <button type="button" id="open-bulk-import" class="btn-quiet">Import</button>
-        </div>
+        </section>
 
-        <h2>Feed updates</h2>
-        <div class="settings-row">
-          <div class="settings-row-info">
-            <span class="settings-row-label">Check for new videos</span>
-            <span class="settings-row-desc">How often followed channels are checked for new videos in the background.</span>
+        <section class="settings-group">
+          <h2>Account · <span class="settings-group-who">{{ account_email }}</span></h2>
+
+          <div class="settings-row">
+            <div class="settings-row-info">
+              <span class="settings-row-label">Profiles</span>
+              <span class="settings-row-desc">Switch, rename, or remove a profile. Deleting one also removes its channels and downloads.</span>
+            </div>
+            <button type="button" id="open-profiles-settings" class="btn-quiet">Manage profiles</button>
           </div>
-          <select id="refresh-interval-select" class="settings-select" aria-label="Check for new videos">
-            <option value="15" {{ 'selected' if feed_refresh_interval_minutes == 15 }}>Every 15 minutes</option>
-            <option value="30" {{ 'selected' if feed_refresh_interval_minutes == 30 }}>Every 30 minutes</option>
-            <option value="60" {{ 'selected' if feed_refresh_interval_minutes == 60 }}>Every hour</option>
-            <option value="120" {{ 'selected' if feed_refresh_interval_minutes == 120 }}>Every 2 hours</option>
-          </select>
-        </div>
+
+          {# The scope sentence is repeated in the row's own description rather
+             than left to the group heading: this is the one control where
+             account-wide is genuinely surprising — the interval sits next to
+             five per-profile rows and reads like another one. #}
+          <div class="settings-row">
+            <div class="settings-row-info">
+              <span class="settings-row-label">Check for new videos</span>
+              <span class="settings-row-desc">How often followed channels are checked for new videos in the background. Applies to every profile on this account.</span>
+            </div>
+            <select id="refresh-interval-select" class="settings-select" aria-label="Check for new videos">
+              <option value="15" {{ 'selected' if feed_refresh_interval_minutes == 15 }}>Every 15 minutes</option>
+              <option value="30" {{ 'selected' if feed_refresh_interval_minutes == 30 }}>Every 30 minutes</option>
+              <option value="60" {{ 'selected' if feed_refresh_interval_minutes == 60 }}>Every hour</option>
+              <option value="120" {{ 'selected' if feed_refresh_interval_minutes == 120 }}>Every 2 hours</option>
+            </select>
+          </div>
+        </section>
       </div>
     </section>
 

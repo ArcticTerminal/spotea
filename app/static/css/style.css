@@ -624,27 +624,37 @@ html[data-active-tab="detail"] .tab-panel[data-tab-panel="detail"] {
   margin-top: 0;
 }
 
-/* Settings only: seven of these headings each sit over exactly one
-   .settings-row, which already has its own hairline border-bottom — a full
-   1rem heading per single row reads as seven noisy section breaks for what
-   is really one flat list. Scoped to #tab-settings so Explore's "Songs"/
-   "Channels" headings (each over an actual multi-item list) keep their
-   normal weight; shrunk to a quiet, uppercase label rather than restructured,
-   since the seven groupings themselves aren't wrong, just over-announced. */
-#tab-settings .channels-panel-inner h2 {
+/* Settings has exactly two headings, one per .settings-group ("This
+   profile" / "Account"), each covering several rows. Kept as a quiet
+   uppercase label rather than the generic 1rem heading above because every
+   row underneath already carries its own bold label — a heavier group header
+   competes with them. Scoped to #tab-settings so Explore's "Songs"/"Channels"
+   headings keep their normal weight. Its own :first-child rule (rather than
+   relying on the generic one) because this ID-scoped selector outranks it. */
+#tab-settings .settings-group h2 {
   font-size: 0.72rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--text-muted);
-  margin: 1.5rem 0 0.35rem;
+  margin: 0 0 0.35rem;
 }
 
-/* Needed despite the generic :first-child rule above — this ID-scoped
-   selector outranks it, so without a matching override here the first
-   heading ("Profiles") would pick up this rule's own margin-top instead. */
-#tab-settings .channels-panel-inner h2:first-child {
-  margin-top: 0;
+/* The gap between the two groups is the only thing separating per-profile
+   settings from account-wide ones, so it's wider than the space between
+   rows inside a group — the last row of a group keeps its own hairline,
+   which reads as the group's floor. */
+#tab-settings .settings-group + .settings-group {
+  margin-top: 2.25rem;
+}
+
+/* Whose settings the group holds — a profile name or the account's email.
+   Both opt out of the heading's uppercasing: these are real names, not
+   labels, and an address shouted at 0.72rem is harder to read than the
+   heading it trails. */
+.settings-group-who {
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 /* Spotify-style settings row: label + one-line description on the left,
