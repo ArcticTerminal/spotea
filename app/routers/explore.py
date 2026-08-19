@@ -25,6 +25,7 @@ from app.schemas import (
 from app.storage import purge_content
 from app.timeutil import utcnow
 from app.youtube.extract import resolve_video_channel
+from app.youtube.music import search_songs
 from app.youtube.search import search_channels, search_videos
 from app.youtube.urls import CHANNEL_ID_RE, channel_feed_url
 
@@ -33,6 +34,16 @@ router = APIRouter(prefix="/feeds", tags=["explore"], dependencies=[Depends(requ
 
 @router.get("/search", response_model=list[ChannelSearchResultOut])
 def search_feeds(q: str) -> list[ChannelSearchResultOut]:
+    """Channels to follow — the half of Explore's search box that finds
+    podcasts, and therefore the half that stays on youtube.com.
+
+    Deliberately not moved to YouTube Music alongside the songs below.
+    Measured live: searching YouTube Music for "The Diary of a CEO" put a
+    reupload channel whose episodes have a few hundred views ahead of the
+    real 19M-subscriber one this finds first, and it models a podcast as a
+    playlist rather than a channel — which is the wrong identity for a feed
+    this app syncs over RSS. See app/youtube/music.py's docstring.
+    """
     query = q.strip()
     if not query:
         return []
@@ -42,11 +53,29 @@ def search_feeds(q: str) -> list[ChannelSearchResultOut]:
 
 @router.get("/search-videos", response_model=list[VideoSearchResultOut])
 def search_video_feeds(q: str) -> list[VideoSearchResultOut]:
+    """Songs, from YouTube Music rather than youtube.com.
+
+    Same endpoint, same response shape, different index — and the index is
+    the point. youtube.com ranks a music query against everything it has,
+    so an artist's name returns reaction videos and hour-long compilations
+    alongside the tracks; YouTube Music only has tracks, and hands back the
+    artist, album and duration already attached instead of leaving the row
+    to say nothing but a title.
+
+    The fallback is not a general safety net — it fires only on a query
+    YouTube Music has *no* answer for, which in practice means a query that
+    wasn't about music. Somebody pasting the title of a talk or a one-off
+    upload into the same box should still find it, and an empty list is a
+    worse answer there than an imperfect one. It costs nothing on the
+    common path: the yt-dlp search only runs once the music search has
+    already come back empty.
+    """
     query = q.strip()
     if not query:
         return []
 
-    return [VideoSearchResultOut(**result.__dict__) for result in search_videos(query)]
+    results = search_songs(query) or search_videos(query)
+    return [VideoSearchResultOut(**result.__dict__) for result in results]
 
 
 def _get_or_create_placeholder_feed(
