@@ -9,18 +9,18 @@ from pydantic import ValidationError
 
 from app.schemas import _CONTENT_TITLE_MAX_LENGTH as TITLE_MAX
 from app.schemas import _URL_MAX_LENGTH as URL_MAX
-from app.schemas import FeedCreate, VideoAddCreate
+from app.schemas import ArtistCreate, VideoAddCreate
 
 
 @pytest.mark.parametrize("model, field, limit", [
-    (FeedCreate, "channel_url", URL_MAX),
+    (ArtistCreate, "channel_url", URL_MAX),
 ])
 def test_a_value_at_the_limit_is_accepted(model, field, limit):
     model(**{field: "x" * limit})
 
 
 @pytest.mark.parametrize("model, field, limit", [
-    (FeedCreate, "channel_url", URL_MAX),
+    (ArtistCreate, "channel_url", URL_MAX),
 ])
 def test_one_character_past_the_limit_is_rejected(model, field, limit):
     with pytest.raises(ValidationError):
@@ -28,7 +28,7 @@ def test_one_character_past_the_limit_is_rejected(model, field, limit):
 
 
 @pytest.mark.parametrize("model, field", [
-    (FeedCreate, "channel_url"),
+    (ArtistCreate, "channel_url"),
 ])
 def test_an_empty_value_is_rejected(model, field):
     with pytest.raises(ValidationError):

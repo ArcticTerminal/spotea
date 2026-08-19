@@ -9,7 +9,7 @@ remove. These tests pin that down by rendering both and comparing.
 import re
 from datetime import datetime, timedelta
 
-from app.models import Content, Feed, User
+from app.models import Artist, Content, User
 from app.timeutil import utcnow
 
 USER_ID = 1
@@ -22,12 +22,12 @@ USER_ID = 1
 DEFAULT_USER_ID = 1
 
 
-def _other_user_feed(db_session) -> Feed:
+def _other_user_feed(db_session) -> Artist:
     """A second profile with one channel, for the scoping tests below.
 
     A real `User` row rather than a made-up user_id: SQLite only enforces
     foreign keys when a connection asks it to, and the app now does (see
-    app/database.py), so a feed pointing at a profile that doesn't exist is
+    app/database.py), so a artist pointing at a profile that doesn't exist is
     rejected rather than silently accepted.
     """
     other_user = User(email="other3@example.com", password_hash="x")
@@ -35,15 +35,15 @@ def _other_user_feed(db_session) -> Feed:
     db_session.commit()
     db_session.refresh(other_user)
 
-    feed = Feed(
+    artist = Artist(
         user_id=other_user.id,
-        rss_url="https://example.com/other",
-        channel_title="Someone Else",
+        channel_id="https://example.com/other",
+        name="Someone Else",
     )
-    db_session.add(feed)
+    db_session.add(artist)
     db_session.commit()
-    db_session.refresh(feed)
-    return feed
+    db_session.refresh(artist)
+    return artist
 
 FRAGMENTS = [
     ("/partials/home", ["home-shelves"]),
@@ -54,35 +54,35 @@ FRAGMENTS = [
 
 
 def _seed(db_session):
-    feed = Feed(
+    artist = Artist(
         user_id=USER_ID,
-        rss_url="https://www.youtube.com/feeds/videos.xml?channel_id=UCpartials000000000000000",
-        channel_title="Partial Channel",
+        channel_id="UCpartials000000000000000",
+        name="Partial Channel",
     )
-    db_session.add(feed)
+    db_session.add(artist)
     db_session.commit()
-    db_session.refresh(feed)
+    db_session.refresh(artist)
 
     now = utcnow()
     db_session.add_all(
         [
             Content(
-                feed_id=feed.id, user_id=USER_ID, video_id="partnew0001", title="Fresh Upload",
+                artist_id=artist.id, user_id=USER_ID, video_id="partnew0001", title="Fresh Upload",
                 published_at=now - timedelta(days=1), duration_seconds=300, is_new_upload=True,
             ),
             Content(
-                feed_id=feed.id, user_id=USER_ID, video_id="partfav0001", title="A Favorite",
+                artist_id=artist.id, user_id=USER_ID, video_id="partfav0001", title="A Favorite",
                 published_at=datetime(2026, 1, 1), is_favorite=True,
                 status="ready", file_path="/nonexistent.m4a", file_size_bytes=3 * 1024 * 1024,
             ),
             Content(
-                feed_id=feed.id, user_id=USER_ID, video_id="partsave001", title="Saved And Played",
+                artist_id=artist.id, user_id=USER_ID, video_id="partsave001", title="Saved And Played",
                 published_at=datetime(2025, 12, 1), is_saved=True, last_played_at=now,
             ),
         ]
     )
     db_session.commit()
-    return feed
+    return artist
 
 
 def _normalize(html):
@@ -164,8 +164,8 @@ def test_an_artists_library_card_opens_their_profile(client, db_session):
     whatever has synced so far. Nothing in home/library.js decides this: the
     card already carries which kind it opens."""
     _seed(db_session)
-    feed = db_session.query(Feed).first()
-    feed.artist_browse_id = "UC5ZkRnYd3__WBBGnAnWO9Cg"
+    artist = db_session.query(Artist).first()
+    artist.browse_id = "UC5ZkRnYd3__WBBGnAnWO9Cg"
     db_session.commit()
 
     body = _fragment_body(client.get("/partials/library").text, "library-grid")
@@ -173,15 +173,6 @@ def test_an_artists_library_card_opens_their_profile(client, db_session):
     assert 'data-detail-kind="yt-artist"' in body
     assert 'data-detail-id="UC5ZkRnYd3__WBBGnAnWO9Cg"' in body
     assert 'href="/#yt-artist/UC5ZkRnYd3__WBBGnAnWO9Cg"' in body
-
-
-def test_a_plain_channels_card_still_opens_its_track_list(client, db_session):
-    _seed(db_session)
-
-    body = _fragment_body(client.get("/partials/library").text, "library-grid")
-
-    assert 'data-detail-kind="channel"' in body
-    assert "yt-artist" not in body
 
 
 def test_downloads_fragment_reports_stored_sizes(client, db_session):
@@ -223,26 +214,6 @@ def test_fragments_require_login():
             assert res.headers["location"] == "/login", url
 
 
-def test_channel_detail_fragment(client, db_session):
-    """The channel/playlist detail panel (home/detail.js) isn't SSR'd inside
-    index.html at all — unlike FRAGMENTS above, there's no full-page render
-    to compare it against, so this asserts content directly, the same way
-    the old standalone channel.html page's test did before it moved here."""
-    feed = _seed(db_session)
-
-    res = client.get(f"/partials/detail/channel/{feed.id}")
-
-    assert res.status_code == 200
-    body = _fragment_body(res.text, "detail-panel")
-    assert "Partial Channel" in body
-    assert "Fresh Upload" in body
-    assert "3 videos" in body
-
-
-def test_channel_detail_fragment_404s_for_an_unknown_feed(client):
-    assert client.get("/partials/detail/channel/9999").status_code == 404
-
-
 def test_playlist_detail_fragments(client, db_session):
     _seed(db_session)
 
@@ -260,12 +231,12 @@ def test_playlist_detail_fragments(client, db_session):
 
 
 def test_detail_fragments_carry_the_play_all_controls(client, db_session):
-    feed = _seed(db_session)
+    _seed(db_session)
 
-    for url in [f"/partials/detail/channel/{feed.id}", "/partials/detail/playlist/favorites"]:
-        body = _fragment_body(client.get(url).text, "detail-panel")
-        assert 'id="detail-play-all"' in body, url
-        assert 'id="detail-shuffle"' in body, url
+    body = _fragment_body(client.get("/partials/detail/playlist/favorites").text, "detail-panel")
+
+    assert 'id="detail-play-all"' in body
+    assert 'id="detail-shuffle"' in body
 
 
 def test_empty_playlist_detail_fragments_render_their_empty_message(client):
@@ -289,11 +260,11 @@ def test_playlist_detail_fragment_404s_for_an_unknown_kind(client):
 
 def test_detail_pagination(client, db_session):
     """DEFAULT_PAGE_SIZE=50 — same threshold as the fragment/page tests above."""
-    feed = _seed(db_session)
+    artist = _seed(db_session)
     db_session.add_all(
         [
             Content(
-                feed_id=feed.id, user_id=USER_ID, video_id=f"bulkvid{i:04d}"[:11], title=f"Bulk {i}",
+                artist_id=artist.id, user_id=USER_ID, video_id=f"bulkvid{i:04d}"[:11], title=f"Bulk {i}",
                 published_at=datetime(2025, 6, 1) - timedelta(days=i), is_favorite=True,
             )
             for i in range(55)
@@ -313,17 +284,17 @@ def test_detail_pagination(client, db_session):
 
 
 def test_pagination_numbered_links_are_windowed_around_the_current_page(client, db_session):
-    """A channel/playlist with a few thousand videos runs past a thousand
+    """A playlist with a few thousand tracks runs past a thousand
     pages at DEFAULT_PAGE_SIZE — showing every page number would be its own
     scroll-forever problem, so only current ± 2 plus the first/last page (with
     an ellipsis for the gap) actually render as links. _seed() itself adds
     one favorite ("partfav0001"), so 499 more makes an even 500 — exactly 10
     pages at DEFAULT_PAGE_SIZE=50."""
-    feed = _seed(db_session)
+    artist = _seed(db_session)
     db_session.add_all(
         [
             Content(
-                feed_id=feed.id, user_id=USER_ID, video_id=f"windowvi{i:03d}"[:11], title=f"Window {i}",
+                artist_id=artist.id, user_id=USER_ID, video_id=f"windowvi{i:03d}"[:11], title=f"Window {i}",
                 published_at=datetime(2025, 6, 1) - timedelta(days=i), is_favorite=True,
             )
             for i in range(499)
@@ -355,7 +326,7 @@ def test_detail_fragments_require_login():
     from app.main import app
 
     with TestClient(app) as anonymous:
-        for url in ["/partials/detail/channel/1", "/partials/detail/playlist/favorites"]:
+        for url in ["/partials/detail/playlist/favorites"]:
             res = anonymous.get(url, follow_redirects=False)
             assert res.status_code == 303, url
             assert res.headers["location"] == "/login", url
@@ -366,7 +337,7 @@ def test_detail_fragments_are_scoped_to_the_current_profile(client, db_session):
     other = _other_user_feed(db_session)
     db_session.add(
         Content(
-            feed_id=other.id,
+            artist_id=other.id,
             user_id=other.user_id,
             video_id="otherprof02",
             title="Not Yours",
@@ -375,9 +346,6 @@ def test_detail_fragments_are_scoped_to_the_current_profile(client, db_session):
     )
     db_session.commit()
 
-    # Another profile's channel isn't just filtered out of the response —
-    # it's a 404, same as any other feed_id that isn't this user's.
-    assert client.get(f"/partials/detail/channel/{other.id}").status_code == 404
     assert "Not Yours" not in client.get("/partials/detail/playlist/favorites").text
 
 
@@ -388,7 +356,7 @@ def test_fragments_are_scoped_to_the_current_profile(client, db_session):
     other = _other_user_feed(db_session)
     db_session.add(
         Content(
-            feed_id=other.id,
+            artist_id=other.id,
             user_id=other.user_id,
             video_id="otherprof01",
             title="Not Yours",

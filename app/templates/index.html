@@ -22,10 +22,10 @@
     // localStorage copy of the last tab instead, which meant an action taken
     // from Settings dropped you back into Settings on the next load.
     //
-    // A channel/playlist hash resolves to the "detail" panel instead — kept
+    // An artist/playlist hash resolves to the "detail" panel instead — kept
     // out of VALID_TABS itself so those routes can't get treated as a
     // remembered tab. That includes the two yt-* routes, which are the same
-    // panel showing a YouTube playlist or an unfollowed channel (see
+    // panel showing a YouTube Music playlist or an artist (see
     // services/remote_detail.py). home/detail.js re-parses the hash after module load to
     // actually fetch and fill the panel; this only has to get first paint
     // right. A player/<id> hash is deliberately not handled here at all — it
@@ -34,7 +34,7 @@
     (function () {
       var VALID_TABS = ["home", "library", "explore", "settings"];
       var PLAYLIST_KINDS = ["favorites", "saved", "new-uploads", "recently-played"];
-      var DETAIL_PREFIXES = ["channel/", "yt-channel/", "yt-playlist/"];
+      var DETAIL_PREFIXES = ["yt-artist/", "yt-artist-songs/", "yt-release/", "yt-playlist/"];
       var hash = location.hash.slice(1).split("?")[0];
       var isDetail =
         PLAYLIST_KINDS.indexOf(hash) !== -1 ||
@@ -65,7 +65,7 @@
       <h1 class="brand"><img src="/static/img/logo.svg" alt="" class="brand-logo" />Spotea</h1>
       <div class="topbar-actions">
         <div class="topbar-actions-inline">
-          <button type="button" id="refresh-feeds-btn" class="btn-icon" aria-label="Refresh feeds" title="Refresh feeds">
+          <button type="button" id="refresh-artists-btn" class="btn-icon" aria-label="Refresh" title="Check for new releases">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-refresh" /></svg>
           </button>
           <form method="post" action="/logout">
@@ -79,7 +79,7 @@
         <div id="mobile-menu" class="mobile-menu" role="menu" hidden>
           <button type="button" id="mobile-menu-refresh" class="mobile-menu-item" role="menuitem">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-refresh" /></svg>
-            <span>Refresh feeds</span>
+            <span>Check for new releases</span>
           </button>
           <form method="post" action="/logout" class="mobile-menu-form">
             <button type="submit" class="mobile-menu-item" role="menuitem">
@@ -112,7 +112,7 @@
     <section id="tab-library" class="tab-panel" data-tab-panel="library">
       <div class="content-header">
         <h2>Your channels</h2>
-        {% if feeds %}
+        {% if artists %}
         <input
           type="text"
           id="library-search-input"
@@ -154,7 +154,7 @@
 
              No refresh control of its own: these shelves are re-checked on
              every visit to this tab, rebuilt once the interval Settings sets
-             for feed refreshes has elapsed, when the interest list is
+             for refreshes has elapsed, when the interest list is
              edited, and when the app-wide Refresh button is pressed. #}
           <div class="shelf-header recommendations-header">
             <h2 class="shelf-title">For you</h2>
@@ -209,14 +209,14 @@
 
           <div class="settings-row">
             <div class="settings-row-info">
-              <span class="settings-row-label">Check for new videos</span>
+              <span class="settings-row-label">Check for new releases</span>
               <span class="settings-row-desc">How often followed artists are checked for new releases in the background.</span>
             </div>
-            <select id="refresh-interval-select" class="settings-select" aria-label="Check for new videos">
-              <option value="15" {{ 'selected' if feed_refresh_interval_minutes == 15 }}>Every 15 minutes</option>
-              <option value="30" {{ 'selected' if feed_refresh_interval_minutes == 30 }}>Every 30 minutes</option>
-              <option value="60" {{ 'selected' if feed_refresh_interval_minutes == 60 }}>Every hour</option>
-              <option value="120" {{ 'selected' if feed_refresh_interval_minutes == 120 }}>Every 2 hours</option>
+            <select id="refresh-interval-select" class="settings-select" aria-label="Check for new releases">
+              <option value="15" {{ 'selected' if refresh_interval_minutes == 15 }}>Every 15 minutes</option>
+              <option value="30" {{ 'selected' if refresh_interval_minutes == 30 }}>Every 30 minutes</option>
+              <option value="60" {{ 'selected' if refresh_interval_minutes == 60 }}>Every hour</option>
+              <option value="120" {{ 'selected' if refresh_interval_minutes == 120 }}>Every 2 hours</option>
             </select>
           </div>
         </section>
@@ -237,7 +237,7 @@
 
       <p class="muted">
         Genres, artists, moods — one per entry. Explore's <strong>For you</strong> shelves are
-        searched from these, and update on the same schedule as your feeds.
+        searched from these, and update on the same schedule as your library.
       </p>
 
       {# The chips are rendered by home/settings.js from the data-interests
@@ -283,15 +283,6 @@
     </div>
   </div>
 
-  <div id="backfill-overlay" class="overlay" hidden>
-    <div class="backfill-overlay-content">
-      <span class="spinner spinner-lg" role="status" aria-label="Fetching channel history"></span>
-      <div class="backfill-overlay-text">
-        <p id="backfill-overlay-title"></p>
-        <p id="backfill-overlay-detail"></p>
-      </div>
-    </div>
-  </div>
 
   {% include "_player_overlay.html" %}
 {% endblock %}

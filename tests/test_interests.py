@@ -111,7 +111,7 @@ def test_omitting_interests_leaves_them_alone(client):
     res = client.put("/settings", json={"audio_quality": "low"})
     assert res.json() == {
         "audio_quality": "low",
-        "feed_refresh_interval_minutes": 30,
+        "refresh_interval_minutes": 30,
         "interests": ["jazz"],
     }
 

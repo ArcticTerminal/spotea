@@ -15,7 +15,7 @@ class User(Base):
     Was two tables — an `Account` holding the credentials and one or more
     `User` profiles under it, Netflix-style. The household model is gone
     (one person, one library), so the credentials moved onto the row that
-    already owned the feeds and the content, and `accounts` went away.
+    already owned the artists and the content, and `accounts` went away.
 
     Email is always stored lowercased (normalized at the auth-router call
     sites), so a plain unique constraint is enough without a case-insensitive
@@ -39,14 +39,14 @@ class User(Base):
     interests: Mapped[str | None] = mapped_column(Text, default=None)
     # How often the background scheduler refreshes this library — see
     # scheduler.py.
-    feed_refresh_interval_minutes: Mapped[int] = mapped_column(default=30)
+    refresh_interval_minutes: Mapped[int] = mapped_column(default=30)
     # When the scheduler last refreshed it. None means never, which the
     # scheduler treats the same as "overdue" — so a fresh account's first
     # tick refreshes it immediately rather than waiting a full interval with
     # nothing to compare against.
-    feeds_refreshed_at: Mapped[datetime | None] = mapped_column(default=None)
+    refreshed_at: Mapped[datetime | None] = mapped_column(default=None)
 
-    feeds: Mapped[list["Feed"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    artists: Mapped[list["Artist"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     content: Mapped[list["Content"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     recommendation_cache: Mapped["RecommendationCache | None"] = relationship(
         back_populates="user", cascade="all, delete-orphan"
@@ -79,28 +79,41 @@ class RecommendationCache(Base):
     user: Mapped["User"] = relationship(back_populates="recommendation_cache")
 
 
-class Feed(Base):
-    __tablename__ = "feeds"
-    __table_args__ = (UniqueConstraint("user_id", "rss_url", name="uq_feed_user_rss_url"),)
+class Artist(Base):
+    """A musician in the library.
+
+    Was `Feed`, keyed by the RSS URL a sync used to read. Nothing reads RSS
+    any more (see services/artist_sync.py), and what the library actually
+    holds is artists — so the row is named for what it is and keyed by the
+    ids that address one.
+
+    `channel_id` is the artist's "<Artist> - Topic" channel: the container
+    YouTube publishes their licensed audio to. It is the *key* rather than
+    `browse_id` because it is what a track carries — a song grabbed from
+    Explore hangs off the Topic channel, and it has to land on the same row
+    as a deliberate follow of the same artist rather than making a second one.
+
+    `browse_id` is how YouTube Music addresses their page, which for an
+    artist with an official channel is that channel's id. It opens their
+    profile and it is what the sync asks about. Null only on the placeholder
+    rows below, which are created from a track and never resolved further.
+    """
+
+    __tablename__ = "artists"
+    __table_args__ = (UniqueConstraint("user_id", "channel_id", name="uq_artist_user_channel"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    rss_url: Mapped[str] = mapped_column(String(500))
-    channel_title: Mapped[str | None] = mapped_column(String(200), default=None)
+    channel_id: Mapped[str] = mapped_column(String(64))
+    name: Mapped[str | None] = mapped_column(String(200), default=None)
     avatar_url: Mapped[str | None] = mapped_column(String(500), default=None)
     added_at: Mapped[datetime] = mapped_column(default=utcnow)
-    # False only for placeholder feeds auto-created to hold a single video
-    # added via Explore (see routers/explore.py's _get_or_create_placeholder_feed)
+    # False only for placeholder rows auto-created to hold a single track
+    # added via Explore (see routers/explore.py's _get_or_create_placeholder)
     # — invisible in Library, skipped by the background refresh scheduler,
-    # until the user actually follows the channel for real.
+    # until the user actually follows the artist for real.
     followed: Mapped[bool] = mapped_column(default=True)
-    # Set when this feed was followed from an artist's profile, and null for
-    # every other feed — which makes it both the "is this an artist" flag and
-    # the id that opens their page. The feed itself points at the artist's
-    # "<Artist> - Topic" channel, so this could in principle be read back out
-    # of rss_url; kept explicit because "we followed this as an artist" is a
-    # decision worth recording rather than re-deriving from a URL shape.
-    artist_browse_id: Mapped[str | None] = mapped_column(String(32), default=None)
+    browse_id: Mapped[str | None] = mapped_column(String(32), default=None)
     # Every release browse id YouTube Music listed for this artist last time
     # we looked, as a JSON array. The whole change-detection mechanism: what
     # is on the page now and not in here is something they put out since (see
@@ -108,8 +121,8 @@ class Feed(Base):
     # a first sync record the catalogue without importing it.
     release_snapshot: Mapped[str | None] = mapped_column(Text, default=None)
 
-    user: Mapped["User"] = relationship(back_populates="feeds")
-    content: Mapped[list["Content"]] = relationship(back_populates="feed", cascade="all, delete-orphan")
+    user: Mapped["User"] = relationship(back_populates="artists")
+    content: Mapped[list["Content"]] = relationship(back_populates="artist", cascade="all, delete-orphan")
 
 
 class Content(Base):
@@ -129,10 +142,10 @@ class Content(Base):
         UniqueConstraint("user_id", "video_id", name="uq_content_user_video_id"),
         Index("ix_content_user_status", "user_id", "status"),
         Index("ix_content_user_published_at", "user_id", "published_at"),
-        # A channel's track list and its count: both filter user_id + feed_id
+        # An artist's track list and its count: both filter user_id + artist_id
         # and order by published_at, which the (user_id, published_at) index
         # above could only answer by walking every row the user has.
-        Index("ix_content_user_feed_published", "user_id", "feed_id", "published_at"),
+        Index("ix_content_user_artist_published", "user_id", "artist_id", "published_at"),
         # Looked up by video_id alone — artist_sync.cache_thumbnail, which
         # runs per rendered item. The (user_id, video_id) unique constraint
         # can't serve it: video_id is its second column.
@@ -165,7 +178,7 @@ class Content(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    feed_id: Mapped[int] = mapped_column(ForeignKey("feeds.id"))
+    artist_id: Mapped[int] = mapped_column(ForeignKey("artists.id"))
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     video_id: Mapped[str] = mapped_column(String(20))
     title: Mapped[str] = mapped_column(String(500))
@@ -192,7 +205,7 @@ class Content(Base):
     # is still an errored row, it just has a settled answer rather than a
     # provisional one. What it buys is that nothing re-attempts it — the
     # player skips it instantly instead of spending an extraction to be told
-    # the same thing again, which is request volume that feeds the very
+    # the same thing again, which is request volume that artists the very
     # rate-limiting the retry ladder exists for. Cleared by a successful
     # download and by DELETE /content/{id}, which is the manual "try this
     # again" path.
@@ -202,18 +215,6 @@ class Content(Base):
     is_favorite: Mapped[bool] = mapped_column(default=False)
     is_saved: Mapped[bool] = mapped_column(default=False)
     last_played_at: Mapped[datetime | None] = mapped_column(default=None)
-    # Incremented alongside last_played_at (see routers/content.py's
-    # stream_content) — a play-frequency counter, since last_played_at alone
-    # only says *when* something was last played, not how often.
-    # Approximate by design, not a precise listen counter: a single play can
-    # issue more than one range request as the browser buffers/seeks, and
-    # each one increments this — acceptable for ranking "played a lot" vs.
-    # "played once", not meant for exact counts. Deliberately untouched by
-    # Settings' "Clear recently played" (which only resets last_played_at).
-    # Not currently surfaced anywhere in the UI (the "On Repeat" smart
-    # playlist that read this was removed) — kept as a tracked signal in
-    # case it's worth building on later.
-    play_count: Mapped[int] = mapped_column(default=0)
     # True for a just-added Explore row that hasn't been favorited or saved
     # yet (see routers/content.py's add_favorite/add_saved, which clear this
     # as a side effect) — plays normally but stays out of Library and New
@@ -221,13 +222,12 @@ class Content(Base):
     # played (see routers/pages.py's home_recently_played). No automatic
     # cleanup — it stays around indefinitely otherwise.
     is_preview: Mapped[bool] = mapped_column(default=False)
-    # True for a row inserted by an RSS parse (a channel's initial fetch when
-    # followed, or any later routine refresh — see feed_sync.apply_feed_data,
-    # the only place this is set) — False for services/backfill.py's direct inserts
-    # (the full-history scan) and Explore's add_single_video. This is what
-    # "New releases" (Home shelf and Library's full playlist) actually means:
-    # RSS-sourced content, not a channel's backfilled-in history.
+    # True for a row the sync inserted — a release that appeared after the
+    # artist was followed (see artist_sync.apply_artist_data, the only place
+    # this is set). False for a track added deliberately from Explore. That
+    # is what "New releases" (Home shelf and Library's full playlist) means:
+    # what they put out since, not everything they have.
     is_new_upload: Mapped[bool] = mapped_column(default=False)
 
-    feed: Mapped["Feed"] = relationship(back_populates="content")
+    artist: Mapped["Artist"] = relationship(back_populates="content")
     user: Mapped["User"] = relationship(back_populates="content")

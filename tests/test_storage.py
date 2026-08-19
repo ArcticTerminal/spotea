@@ -9,27 +9,27 @@ still gets measured (once) rather than reporting 0 forever.
 import io
 import zipfile
 
-from app.models import Content, Feed
+from app.models import Artist, Content
 from app.storage import clear_all, collect_usage, usage_summary
 
 USER_ID = 1
 
 
 def _ready_content(db_session, tmp_path, *, video_id, size_bytes, stored_size=None):
-    feed = (
-        db_session.query(Feed).filter(Feed.user_id == USER_ID).first()
-        or Feed(user_id=USER_ID, rss_url="https://example.com/feed", channel_title="Storage Channel")
+    artist = (
+        db_session.query(Artist).filter(Artist.user_id == USER_ID).first()
+        or Artist(user_id=USER_ID, channel_id="https://example.com/artist", name="Storage Channel")
     )
-    if feed.id is None:
-        db_session.add(feed)
+    if artist.id is None:
+        db_session.add(artist)
         db_session.commit()
-        db_session.refresh(feed)
+        db_session.refresh(artist)
 
     audio = tmp_path / f"{video_id}.m4a"
     audio.write_bytes(b"x" * size_bytes)
 
     content = Content(
-        feed_id=feed.id,
+        artist_id=artist.id,
         user_id=USER_ID,
         video_id=video_id,
         title=f"Track {video_id}",
@@ -92,10 +92,10 @@ def test_totals_add_up_across_rows(db_session, tmp_path):
 
 
 def test_usage_summary_matches_collect_usage_for_an_empty_library(db_session):
-    """The whole point of usage_summary: the Settings line it feeds has to
+    """The whole point of usage_summary: the Settings line it artists has to
     read exactly what collect_usage's full item-by-item list would add up
     to, without paying for the per-row work (a StoredItem plus a
-    joinedload(feed)) to get there — this is that agreement, checked across
+    joinedload(artist)) to get there — this is that agreement, checked across
     a few shapes rather than assumed from the SQL alone."""
     summary = usage_summary(db_session, USER_ID)
     full = collect_usage(db_session, USER_ID)
@@ -108,10 +108,10 @@ def test_usage_summary_matches_collect_usage_across_several_rows(db_session, tmp
     _ready_content(db_session, tmp_path, video_id="sum0000001", size_bytes=1, stored_size=1000)
     _ready_content(db_session, tmp_path, video_id="sum0000002", size_bytes=1, stored_size=2000)
     # A not-downloaded row must not be counted by either path.
-    feed = db_session.query(Feed).filter(Feed.user_id == USER_ID).first()
+    artist = db_session.query(Artist).filter(Artist.user_id == USER_ID).first()
     db_session.add(
         Content(
-            feed_id=feed.id, user_id=USER_ID, video_id="notdownld1",
+            artist_id=artist.id, user_id=USER_ID, video_id="notdownld1",
             title="Not downloaded", status="not_downloaded",
         )
     )

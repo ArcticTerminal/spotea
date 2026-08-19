@@ -13,17 +13,17 @@
    visible and letting JS hide the non-scrollable ones after the fact flashes
    a link that then vanishes on every load; starting hidden never does.
 #}
-{% if home_recent_channels %}
+{% if home_recent_artists %}
     <div class="shelf">
       <div class="shelf-header">
         <h2 class="shelf-title">Recently followed</h2>
         <a class="shelf-see-more" href="/#library" hidden>See more ›</a>
       </div>
       <div class="channel-row" id="home-channel-row">
-        {% for feed in home_recent_channels %}
-        <button type="button" class="channel-chip{{ ' has-avatar' if feed.avatar_url else '' }}" data-feed-id="{{ feed.id }}">
-          {% if feed.avatar_url %}<img class="channel-chip-avatar" src="{{ feed.avatar_url }}" alt="" loading="lazy" />{% endif %}
-          <span>{{ feed.channel_title or feed.rss_url }}</span>
+        {% for artist in home_recent_artists %}
+        <button type="button" class="channel-chip{{ ' has-avatar' if artist.avatar_url else '' }}" data-browse-id="{{ artist.browse_id or '' }}">
+          {% if artist.avatar_url %}<img class="channel-chip-avatar" src="{{ artist.avatar_url }}" alt="" loading="lazy" />{% endif %}
+          <span>{{ artist.name or artist.channel_id }}</span>
         </button>
         {% endfor %}
       </div>

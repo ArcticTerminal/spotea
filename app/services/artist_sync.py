@@ -35,7 +35,7 @@ from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
 from app.images import download_avatar, download_thumbnail
-from app.models import Content, Feed
+from app.models import Artist, Content
 from app.timeutil import utcnow
 from app.youtube.models import VideoSearchResult
 from app.youtube.music import fetch_artist, fetch_release
@@ -90,7 +90,7 @@ def fetch_artist_data(browse_id: str, snapshot: str | None, avatar_url: str | No
 
     fetched_avatar_url = None
     if not avatar_url and artist.avatar_url:
-        # Once per artist, ever — skipped as soon as the feed has one, so
+        # Once per artist, ever — skipped as soon as the artist has one, so
         # this never adds a call to the steady-state refresh.
         fetched_avatar_url = download_avatar(browse_id, artist.avatar_url)
 
@@ -121,22 +121,22 @@ def fetch_artist_data(browse_id: str, snapshot: str | None, avatar_url: str | No
     )
 
 
-def apply_artist_data(db: Session, feed: Feed, result: ArtistFetchResult) -> int:
+def apply_artist_data(db: Session, artist: Artist, result: ArtistFetchResult) -> int:
     """The DB half of a sync: store the new snapshot and insert whatever the
     fetch found. Must run on the caller's own session, so always sequential
     (never in the pool)."""
     if not result.ok:
         return 0
 
-    if result.name and not feed.channel_title:
-        feed.channel_title = result.name
+    if result.name and not artist.name:
+        artist.name = result.name
     if result.avatar_url:
-        feed.avatar_url = result.avatar_url
+        artist.avatar_url = result.avatar_url
 
     new_count = 0
     if result.tracks:
-        # user_id-scoped, not feed_id-scoped: a track can already exist under
-        # a different feed for this user (an Explore preview added before the
+        # user_id-scoped, not artist_id-scoped: a track can already exist under
+        # a different artist for this user (an Explore preview added before the
         # artist was followed, or a collaboration credited to two followed
         # artists) — Content's (user_id, video_id) unique constraint is
         # global, so inserting it again would violate it.
@@ -144,7 +144,7 @@ def apply_artist_data(db: Session, feed: Feed, result: ArtistFetchResult) -> int
         existing_ids = {
             video_id
             for (video_id,) in db.query(Content.video_id).filter(
-                Content.user_id == feed.user_id, Content.video_id.in_(incoming_ids)
+                Content.user_id == artist.user_id, Content.video_id.in_(incoming_ids)
             )
         }
         seen = set(existing_ids)
@@ -154,8 +154,8 @@ def apply_artist_data(db: Session, feed: Feed, result: ArtistFetchResult) -> int
             seen.add(track.video_id)
             db.add(
                 Content(
-                    feed_id=feed.id,
-                    user_id=feed.user_id,
+                    artist_id=artist.id,
+                    user_id=artist.user_id,
                     video_id=track.video_id,
                     title=track.title,
                     thumbnail_url=track.thumbnail_url,
@@ -170,39 +170,39 @@ def apply_artist_data(db: Session, feed: Feed, result: ArtistFetchResult) -> int
             )
             new_count += 1
 
-    feed.release_snapshot = json.dumps(result.release_ids)
+    artist.release_snapshot = json.dumps(result.release_ids)
     db.commit()
     return new_count
 
 
-def refresh_feeds(db: Session, feeds: list[Feed]) -> int:
+def refresh_feeds(db: Session, artists: list[Artist]) -> int:
     """Sync every given artist — the fetch half fanned out across a thread
     pool, the DB half applied back sequentially on the caller's session.
 
-    Shared by the on-demand /feeds/refresh endpoint (user-scoped) and the
+    Shared by the on-demand /artists/refresh endpoint (user-scoped) and the
     background scheduler (every artist of every due user). One artist's
     apply failing must not abort every other artist's refresh in the same
     call, so each is isolated below rather than summed in one expression.
     """
-    syncable = [feed for feed in feeds if feed.artist_browse_id]
+    syncable = [artist for artist in artists if artist.browse_id]
     if not syncable:
         return 0
 
     with ThreadPoolExecutor(max_workers=min(len(syncable), REFRESH_POOL_SIZE)) as pool:
         results = list(
             pool.map(
-                lambda f: fetch_artist_data(f.artist_browse_id, f.release_snapshot, f.avatar_url),
+                lambda f: fetch_artist_data(f.browse_id, f.release_snapshot, f.avatar_url),
                 syncable,
             )
         )
 
     new_count = 0
-    for feed, result in zip(syncable, results, strict=True):
+    for artist, result in zip(syncable, results, strict=True):
         try:
-            new_count += apply_artist_data(db, feed, result)
+            new_count += apply_artist_data(db, artist, result)
         except Exception:
             db.rollback()
-            logger.exception("Failed to apply artist data for feed %s (%s)", feed.id, feed.channel_title)
+            logger.exception("Failed to apply artist data for artist %s (%s)", artist.id, artist.name)
     return new_count
 
 

@@ -11,7 +11,7 @@ from datetime import timedelta
 
 import pytest
 
-from app.models import Content, Feed, RecommendationCache, User
+from app.models import Artist, Content, RecommendationCache, User
 from app.services import recommendations as rec
 from app.timeutil import utcnow
 from app.youtube.models import ChannelSearchResult, PlaylistSearchResult, VideoSearchResult
@@ -144,10 +144,10 @@ def test_a_charting_artist_already_followed_is_dropped(client, db_session, fake_
     channels to follow, and one already followed isn't."""
     fake_browse(chart_artists=["UCfollowed", "UCnew"])
     db_session.add(
-        Feed(
+        Artist(
             user_id=USER_ID,
-            rss_url="https://www.youtube.com/feeds/videos.xml?channel_id=UCfollowed",
-            channel_title="Already Followed",
+            channel_id="UCfollowed",
+            name="Already Followed",
             followed=True,
         )
     )
@@ -160,12 +160,12 @@ def test_a_charting_artist_already_followed_is_dropped(client, db_session, fake_
 
 def test_a_video_already_in_the_library_is_dropped_from_the_batch(client, db_session, fake_search):
     _set_interests(db_session, "jazz")
-    feed = Feed(user_id=USER_ID, rss_url="https://example.com/already-owned-feed", channel_title="Owner")
-    db_session.add(feed)
+    artist = Artist(user_id=USER_ID, channel_id="https://example.com/already-owned-artist", name="Owner")
+    db_session.add(artist)
     db_session.commit()
-    db_session.refresh(feed)
+    db_session.refresh(artist)
     db_session.add(
-        Content(feed_id=feed.id, user_id=USER_ID, video_id="jazz-1", title="Already have this")
+        Content(artist_id=artist.id, user_id=USER_ID, video_id="jazz-1", title="Already have this")
     )
     db_session.commit()
 
@@ -179,10 +179,10 @@ def test_a_followed_channel_is_dropped_from_the_batch(client, db_session, fake_s
     already followed."""
     _set_interests(db_session, "jazz")
     db_session.add(
-        Feed(
+        Artist(
             user_id=USER_ID,
-            rss_url="https://www.youtube.com/feeds/videos.xml?channel_id=jazz-0",
-            channel_title="Already Followed",
+            channel_id="jazz-0",
+            name="Already Followed",
             followed=True,
         )
     )
@@ -199,10 +199,10 @@ def test_an_unfollowed_placeholder_feed_does_not_hide_a_channel(client, db_sessi
     actually-followed channel does."""
     _set_interests(db_session, "jazz")
     db_session.add(
-        Feed(
+        Artist(
             user_id=USER_ID,
-            rss_url="https://www.youtube.com/feeds/videos.xml?channel_id=jazz-0",
-            channel_title="Just A Preview",
+            channel_id="jazz-0",
+            name="Just A Preview",
             followed=False,
         )
     )
@@ -225,10 +225,10 @@ def test_the_library_filter_is_reapplied_on_every_read_even_from_cache(client, d
     fake_search.clear()
 
     db_session.add(
-        Feed(
+        Artist(
             user_id=USER_ID,
-            rss_url="https://www.youtube.com/feeds/videos.xml?channel_id=jazz-0",
-            channel_title="Followed After The Batch Was Built",
+            channel_id="jazz-0",
+            name="Followed After The Batch Was Built",
             followed=True,
         )
     )
@@ -289,9 +289,9 @@ def test_reordering_the_interests_does_not_invalidate_the_cache(client, db_sessi
 
 
 def test_a_batch_older_than_the_refresh_interval_is_rebuilt(client, db_session, fake_search):
-    # The TTL is whatever Settings' feed-refresh interval is set to, rather
+    # The TTL is whatever Settings' artist-refresh interval is set to, rather
     # than a cadence of its own — see routers/recommendations.py.
-    client.put("/settings", json={"feed_refresh_interval_minutes": 15})
+    client.put("/settings", json={"refresh_interval_minutes": 15})
     _set_interests(db_session, "jazz")
     client.get("/recommendations")
     fake_search.clear()
@@ -305,7 +305,7 @@ def test_a_batch_older_than_the_refresh_interval_is_rebuilt(client, db_session, 
 
 
 def test_a_batch_inside_the_refresh_interval_is_not_rebuilt(client, db_session, fake_search):
-    client.put("/settings", json={"feed_refresh_interval_minutes": 120})
+    client.put("/settings", json={"refresh_interval_minutes": 120})
     _set_interests(db_session, "jazz")
     client.get("/recommendations")
     fake_search.clear()

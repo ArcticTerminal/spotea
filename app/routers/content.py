@@ -8,12 +8,12 @@ from app.content_query import query_content_ids
 from app.database import SessionLocal
 from app.deps import get_current_user, get_db, require_login
 from app.downloader import DownloadError, VideoUnavailableError, download_audio
-from app.services.artist_sync import cache_thumbnail
 from app.formatting import safe_filename
-from app.models import Content, Feed, User
+from app.models import Content, User
 from app.page_context import playlist_filter
 from app.progress import ProgressRegistry
 from app.schemas import ContentOut, FavoriteOut, QueueOut, SavedOut, StatusOut
+from app.services.artist_sync import cache_thumbnail
 from app.timeutil import utcnow
 from app.youtube.urls import VIDEO_ID_RE
 
@@ -113,24 +113,6 @@ def _run_download(content_id: int, video_id: str, quality: str) -> None:
 # /recently-played is (see its comment below) — three path segments can't
 # collide with a one-segment route, but keeping every literal-prefixed route
 # above the catch-all is what stops the next one from being subtly shadowed.
-@router.get("/queue/channel/{feed_id}", response_model=QueueOut)
-def channel_queue(
-    feed_id: int,
-    user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-) -> QueueOut:
-    """Every track in one channel, in the order its detail panel lists them.
-
-    The detail panel is paginated and the queue deliberately isn't: "Play
-    all" on a channel means the channel, not the twenty rows that happen to
-    be on screen.
-    """
-    exists = db.query(Feed.id).filter(Feed.id == feed_id, Feed.user_id == user.id).first()
-    if exists is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Channel not found")
-    return QueueOut(ids=query_content_ids(db, user.id, feed_id=feed_id))
-
-
 @router.get("/queue/playlist/{kind}", response_model=QueueOut)
 def playlist_queue(
     kind: str,
@@ -154,10 +136,10 @@ def get_content(
     """Single-item fetch — used by the Home player overlay (see home/overlay.js's
     openPlayer) to populate itself for a track without a full page
     navigation. joinedload's needed here (unlike _get_content_or_404, whose
-    other callers never touch .feed) since channel_title comes from it."""
+    other callers never touch .artist) since channel_title comes from it."""
     content = (
         db.query(Content)
-        .options(joinedload(Content.feed))
+        .options(joinedload(Content.artist))
         .filter(Content.id == content_id, Content.user_id == user.id)
         .first()
     )
@@ -325,7 +307,6 @@ def stream_content(
     # listening to that.
     if not download:
         content.last_played_at = utcnow()
-        content.play_count += 1
         db.commit()
 
     media_type = AUDIO_MEDIA_TYPES.get(file_path.suffix, "application/octet-stream")

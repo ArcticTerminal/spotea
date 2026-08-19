@@ -5,7 +5,7 @@ def utcnow() -> datetime:
     """Naive UTC "now" — the single datetime convention across the app.
 
     Every datetime column here (Content.published_at/added_at/downloaded_at/
-    last_played_at, Feed.added_at, User.created_at) holds naive UTC.
+    last_played_at, Artist.added_at, User.created_at) holds naive UTC.
     SQLite has no timezone type and SQLAlchemy's DATETIME storage format
     drops tzinfo when writing, so a tz-aware value ends up stored as naive
     anyway — but only after having been compared against naive ones in

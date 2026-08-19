@@ -6,8 +6,8 @@ only thing that separates them is `force`: GET takes whatever is cached,
 POST /refresh insists on a rebuild.
 
 A separate router rather than more of routers/explore.py: those routes all
-live under /feeds because they're about feeds the user might add, and these
-aren't about feeds at all.
+live under /artists because they're about artists the user might add, and these
+aren't about artists at all.
 """
 
 from datetime import timedelta
@@ -28,9 +28,9 @@ router = APIRouter(
 
 def _recommendations_out(db: Session, user: User, *, force: bool) -> RecommendationsOut:
     # The batch goes stale on the same interval the user picked for background
-    # feed refreshes, rather than on a cadence of its own — see
+    # artist refreshes, rather than on a cadence of its own — see
     # services/recommendations.py.
-    ttl = timedelta(minutes=user.feed_refresh_interval_minutes)
+    ttl = timedelta(minutes=user.refresh_interval_minutes)
     batch, generated_at = get_recommendations(db, user, ttl=ttl, force=force)
     return RecommendationsOut(
         interests=parse_interests(user.interests),
@@ -59,6 +59,6 @@ def refresh_recommendations(
     this way.
 
     There is no dedicated refresh control in the UI: this is what the app-wide
-    "Refresh feeds" button calls alongside POST /feeds/refresh, so the one
+    "Refresh artists" button calls alongside POST /artists/refresh, so the one
     button means "go and look at everything again"."""
     return _recommendations_out(db, user, force=True)

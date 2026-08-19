@@ -2061,45 +2061,6 @@ button.track-link {
   padding: 4rem 0;
 }
 
-.backfill-overlay-content {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 1rem;
-  text-align: center;
-  padding: 0 1.5rem;
-}
-
-.backfill-overlay-text {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-}
-
-#backfill-overlay-title {
-  color: var(--text-primary);
-  font-size: 0.95rem;
-  line-height: 1.4;
-  margin: 0;
-  max-width: 320px;
-  /* Reserves room for 2 lines up front, for long channel names — without a
-     fixed height the whole spinner+text block would visibly jump up each
-     time it wraps, since it's vertically centered on the screen. */
-  min-height: 2.8em;
-}
-
-#backfill-overlay-detail {
-  /* A separate line (not just appended text) specifically so a number like
-     "page 7" or "412/1037" is never split mid-phrase by the title's own
-     line wrap — nowrap keeps it atomic since it's always short. */
-  color: var(--text-secondary);
-  font-size: 0.85rem;
-  line-height: 1.4;
-  margin: 0;
-  white-space: nowrap;
-  min-height: 1.4em;
-}
-
 /* Confirm dialog */
 
 .modal-overlay {

@@ -207,7 +207,7 @@ export function setupSettings() {
   refreshIntervalSelect?.addEventListener("change", () => {
     api("/settings", {
       method: "PUT",
-      body: { feed_refresh_interval_minutes: Number(refreshIntervalSelect.value) },
+      body: { refresh_interval_minutes: Number(refreshIntervalSelect.value) },
       errorMessage: "Could not update refresh interval",
     });
   });

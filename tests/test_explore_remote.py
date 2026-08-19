@@ -5,7 +5,7 @@ page playable.
 
 The fetch is monkeypatched out, same as test_recommendations.py. What's
 under test is the id validation guarding the routes, the fact that
-*browsing* one writes nothing, and that POST /feeds/videos/batch turns a
+*browsing* one writes nothing, and that POST /explore/tracks/batch turns a
 whole listing into an ordered queue without a single network call.
 """
 
@@ -13,16 +13,12 @@ from pathlib import Path
 
 import pytest
 
-from app.models import Content, Feed
+from app.models import Artist, Content
 from app.youtube.models import PlaylistDetail, VideoSearchResult
 
 PLAYLIST_ID = "PLcQNVKi2yvHREvYwLPBMWEAyuq4AERnrm"
 CHANNEL_ID = "UCYLY-BIq0sSOdNXGm1FPR-w"
 OTHER_CHANNEL_ID = "UCR5wZcXtOUka8jTA57flzMg"
-
-
-def _feed_url(channel_id):
-    return f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
 
 
 def _track(video_id, channel_id=CHANNEL_ID):
@@ -90,8 +86,8 @@ def test_a_remote_playlist_has_no_pagination(client, fake_playlist):
 def test_browsing_stores_nothing(client, db_session, fake_playlist):
     client.get(f"/partials/detail/yt-playlist/{PLAYLIST_ID}")
 
-    # Rows appear only when playback starts (POST /feeds/videos/batch).
-    assert db_session.query(Feed).count() == 0
+    # Rows appear only when playback starts (POST /explore/tracks/batch).
+    assert db_session.query(Artist).count() == 0
     assert db_session.query(Content).count() == 0
 
 
@@ -142,7 +138,7 @@ def _batch_item(video_id, channel_id=CHANNEL_ID):
 
 def test_batch_creates_preview_rows_in_the_order_given(client, db_session):
     res = client.post(
-        "/feeds/videos/batch",
+        "/explore/tracks/batch",
         json={"items": [_batch_item("aaaaaaaaaaa"), _batch_item("bbbbbbbbbbb", OTHER_CHANNEL_ID)]},
     )
 
@@ -156,29 +152,29 @@ def test_batch_creates_preview_rows_in_the_order_given(client, db_session):
 
 def test_batch_attaches_each_row_to_its_own_placeholder_feed(client, db_session):
     client.post(
-        "/feeds/videos/batch",
+        "/explore/tracks/batch",
         json={"items": [_batch_item("aaaaaaaaaaa"), _batch_item("bbbbbbbbbbb", OTHER_CHANNEL_ID)]},
     )
 
-    feeds = db_session.query(Feed).all()
-    assert len(feeds) == 2
-    assert all(feed.followed is False for feed in feeds)
-    assert {feed.rss_url for feed in feeds} == {_feed_url(CHANNEL_ID), _feed_url(OTHER_CHANNEL_ID)}
+    artists = db_session.query(Artist).all()
+    assert len(artists) == 2
+    assert all(artist.followed is False for artist in artists)
+    assert {artist.channel_id for artist in artists} == {CHANNEL_ID, OTHER_CHANNEL_ID}
 
 
 def test_batch_reuses_one_placeholder_feed_across_a_channels_tracks(client, db_session):
     client.post(
-        "/feeds/videos/batch",
+        "/explore/tracks/batch",
         json={"items": [_batch_item("aaaaaaaaaaa"), _batch_item("bbbbbbbbbbb")]},
     )
 
-    assert db_session.query(Feed).count() == 1
+    assert db_session.query(Artist).count() == 1
 
 
 def test_batch_reuses_rows_that_already_exist(client, db_session):
-    first = client.post("/feeds/videos/batch", json={"items": [_batch_item("aaaaaaaaaaa")]}).json()
+    first = client.post("/explore/tracks/batch", json={"items": [_batch_item("aaaaaaaaaaa")]}).json()
     second = client.post(
-        "/feeds/videos/batch",
+        "/explore/tracks/batch",
         json={"items": [_batch_item("aaaaaaaaaaa"), _batch_item("bbbbbbbbbbb")]},
     ).json()
 
@@ -191,7 +187,7 @@ def test_batch_handles_the_same_video_listed_twice(client, db_session):
     # to the same row — the unique (user_id, video_id) constraint leaves no
     # other option.
     ids = client.post(
-        "/feeds/videos/batch",
+        "/explore/tracks/batch",
         json={"items": [_batch_item("aaaaaaaaaaa"), _batch_item("aaaaaaaaaaa")]},
     ).json()["content_ids"]
 
@@ -214,13 +210,13 @@ def test_batch_makes_no_network_calls(client):
         f"came back with the listing. Found: {network_imports}"
     )
 
-    res = client.post("/feeds/videos/batch", json={"items": [_batch_item("aaaaaaaaaaa")]})
+    res = client.post("/explore/tracks/batch", json={"items": [_batch_item("aaaaaaaaaaa")]})
     assert res.status_code == 201
 
 
 def test_batch_drops_items_with_an_unusable_channel_id(client, db_session):
     ids = client.post(
-        "/feeds/videos/batch",
+        "/explore/tracks/batch",
         json={"items": [_batch_item("aaaaaaaaaaa"), _batch_item("bbbbbbbbbbb", "nonsense")]},
     ).json()["content_ids"]
 
@@ -229,33 +225,33 @@ def test_batch_drops_items_with_an_unusable_channel_id(client, db_session):
 
 
 def test_batch_with_nothing_usable_is_a_400(client):
-    res = client.post("/feeds/videos/batch", json={"items": [_batch_item("aaaaaaaaaaa", "nope")]})
+    res = client.post("/explore/tracks/batch", json={"items": [_batch_item("aaaaaaaaaaa", "nope")]})
     assert res.status_code == 400
 
 
 def test_batch_leaves_a_followed_channels_own_content_alone(client, db_session):
-    feed = Feed(user_id=1, rss_url=_feed_url(CHANNEL_ID), channel_title="Duman")
-    db_session.add(feed)
+    artist = Artist(user_id=1, channel_id=CHANNEL_ID, name="Duman")
+    db_session.add(artist)
     db_session.commit()
-    db_session.refresh(feed)
-    existing = Content(feed_id=feed.id, user_id=1, video_id="aaaaaaaaaaa", title="Already here")
+    db_session.refresh(artist)
+    existing = Content(artist_id=artist.id, user_id=1, video_id="aaaaaaaaaaa", title="Already here")
     db_session.add(existing)
     db_session.commit()
     db_session.refresh(existing)
     existing_id = existing.id
 
-    ids = client.post("/feeds/videos/batch", json={"items": [_batch_item("aaaaaaaaaaa")]}).json()[
+    ids = client.post("/explore/tracks/batch", json={"items": [_batch_item("aaaaaaaaaaa")]}).json()[
         "content_ids"
     ]
 
     db_session.expire_all()
     assert ids == [existing_id]
     # Reused, not turned back into a preview, re-titled, or duplicated behind
-    # a second placeholder feed.
+    # a second placeholder artist.
     reused = db_session.get(Content, existing_id)
     assert reused.is_preview is False
     assert reused.title == "Already here"
-    assert db_session.query(Feed).count() == 1
+    assert db_session.query(Artist).count() == 1
 
 
 def test_batch_requires_login():
@@ -265,7 +261,7 @@ def test_batch_requires_login():
 
     with TestClient(app) as anonymous:
         res = anonymous.post(
-            "/feeds/videos/batch",
+            "/explore/tracks/batch",
             json={"items": [_batch_item("aaaaaaaaaaa")]},
             follow_redirects=False,
         )

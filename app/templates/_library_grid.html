@@ -1,13 +1,13 @@
 {# Library's channel grid: four pinned virtual-playlist tiles, then one card
-   per followed channel.
+   per followed artist.
 
    Rendered inside index.html and on its own by GET /partials/library. The
    search input above it deliberately stays in index.html: it holds what the
    user has typed, and the only things that would change its presence (the
-   first channel ever added, or unfollowing the last one) both navigate away
+   first artist ever followed, or unfollowing the last one) both navigate away
    anyway.
 #}
-{% if feeds %}
+{% if artists %}
     <div class="channel-grid">
       <a class="channel-card" href="/#favorites" data-detail-kind="favorites">
         <span class="channel-card-avatar channel-card-icon is-favorites">
@@ -45,24 +45,21 @@
           <span class="channel-card-count">{{ recently_played_count }} video{{ '' if recently_played_count == 1 else 's' }}</span>
         </span>
       </a>
-      {% for feed in feeds %}
-      {% set video_count = channel_video_counts.get(feed.id, 0) %}
+      {% for artist in artists %}
+      {% set video_count = artist_track_counts.get(artist.id, 0) %}
       {# A channel added minutes ago is still having its upload history
          scanned in the background (services/backfill.py). It is already
          openable and already has whatever the first sync found, so
          this replaces the count rather than blocking anything — and it is
          why nothing else in the app waits for a backfill any more. The
          data-preparing attribute is what home/library.js polls on. #}
-      {% set is_preparing = feed.id in preparing_feed_ids %}
-      {# A feed followed from an artist's profile opens that profile rather
-         than its own track list — albums, singles and what they just
-         released, which is what the card is standing for. Their downloaded
-         and saved tracks are still one click away: the profile's hero
-         offers "In your library", which lands on the list this card used to
-         open. Nothing in home/library.js needed changing for this — the
-         card already says which kind it opens. #}
-      {% set detail_kind = "yt-artist" if feed.artist_browse_id else "channel" %}
-      {% set detail_id = feed.artist_browse_id or feed.id %}
+      {% set is_preparing = artist.id in preparing_artist_ids %}
+      {# The card opens the artist's own profile — albums, singles and what
+         they just released, which is what the card stands for. There is no
+         local per-artist track list any more: what the library holds of
+         theirs is on Home's shelves and the pinned playlists. #}
+      {% set detail_kind = "yt-artist" %}
+      {% set detail_id = artist.browse_id %}
       <a
         class="channel-card{{ ' is-preparing' if is_preparing }}"
         href="/#{{ detail_kind }}/{{ detail_id }}"
@@ -70,13 +67,13 @@
         data-detail-id="{{ detail_id }}"
         {% if is_preparing %}data-preparing="true"{% endif %}
       >
-        {% if feed.avatar_url %}
-        <img class="channel-card-avatar" src="{{ feed.avatar_url }}" alt="" loading="lazy" />
+        {% if artist.avatar_url %}
+        <img class="channel-card-avatar" src="{{ artist.avatar_url }}" alt="" loading="lazy" />
         {% else %}
         <span class="channel-card-avatar"></span>
         {% endif %}
         <span class="channel-card-info">
-          <span class="channel-card-title" title="{{ feed.channel_title or feed.rss_url }}">{{ feed.channel_title or feed.rss_url }}</span>
+          <span class="channel-card-title" title="{{ artist.name or artist.channel_id }}">{{ artist.name or artist.channel_id }}</span>
           {% if is_preparing %}
           <span class="channel-card-count channel-card-preparing">
             <span class="spinner"></span><span class="channel-card-preparing-text">Fetching releases…</span>

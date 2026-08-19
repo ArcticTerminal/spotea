@@ -46,7 +46,7 @@ async function toggleSaved(contentId, button) {
  * place — and `onConfirmed` fires right after the user confirms but before
  * the request, so a caller can put up a covering overlay first.
  */
-export async function unfollowChannel(feedId, onConfirmed) {
+export async function unfollowArtist(artistId, onConfirmed) {
   const confirmed = await confirmDialog(
     "Unfollow this channel? Its videos will be removed from your library.",
     "Unfollow"
@@ -55,7 +55,7 @@ export async function unfollowChannel(feedId, onConfirmed) {
 
   if (onConfirmed) onConfirmed();
 
-  const { ok } = await api(`/feeds/${feedId}`, {
+  const { ok } = await api(`/artists/${artistId}`, {
     method: "DELETE",
     errorMessage: "Could not unfollow this channel",
   });

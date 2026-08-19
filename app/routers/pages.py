@@ -44,7 +44,7 @@ def home(
             # Labels the Settings panel — the login is otherwise never shown
             # anywhere in the app after registration.
             "account_email": user.email,
-            "feed_refresh_interval_minutes": user.feed_refresh_interval_minutes,
+            "refresh_interval_minutes": user.refresh_interval_minutes,
             # Server-rendered rather than fetched by home/settings.js on boot:
             # the interest chips are part of the Settings panel's first paint,
             # and filling them in afterwards flashes an empty editor on every
@@ -80,11 +80,6 @@ def new_uploads_redirect() -> RedirectResponse:
 @router.get("/recently-played")
 def recently_played_redirect() -> RedirectResponse:
     return RedirectResponse("/#recently-played")
-
-
-@router.get("/channel/{feed_id}")
-def channel_redirect(feed_id: int) -> RedirectResponse:
-    return RedirectResponse(f"/#channel/{feed_id}")
 
 
 @router.get("/player/{content_id}")

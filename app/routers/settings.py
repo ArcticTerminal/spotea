@@ -23,7 +23,7 @@ def _settings_out(user: User) -> SettingsOut:
     normalizes on the way in)."""
     return SettingsOut(
         audio_quality=user.audio_quality,
-        feed_refresh_interval_minutes=user.feed_refresh_interval_minutes,
+        refresh_interval_minutes=user.refresh_interval_minutes,
         interests=parse_interests(user.interests),
     )
 
@@ -56,12 +56,12 @@ def update_settings(
         # means editing interests back to a previous set still hits its
         # cached batch instead of paying for a rebuild.
 
-    if payload.feed_refresh_interval_minutes is not None:
-        if payload.feed_refresh_interval_minutes not in FEED_REFRESH_INTERVALS:
+    if payload.refresh_interval_minutes is not None:
+        if payload.refresh_interval_minutes not in FEED_REFRESH_INTERVALS:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid refresh interval")
         # Picked up by the scheduler on its next tick — at most
         # scheduler.TICK_SECONDS later — rather than needing an interrupt.
-        user.feed_refresh_interval_minutes = payload.feed_refresh_interval_minutes
+        user.refresh_interval_minutes = payload.refresh_interval_minutes
 
     db.commit()
     return _settings_out(user)

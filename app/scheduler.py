@@ -4,10 +4,10 @@ import logging
 
 from sqlalchemy.orm import Session
 
-from app.content_query import followed_feeds
+from app.content_query import followed_artists
 from app.database import SessionLocal
-from app.services.artist_sync import refresh_feeds
 from app.models import User
+from app.services.artist_sync import refresh_feeds
 from app.storage import sweep_orphans, sweep_stale_previews
 from app.timeutil import utcnow
 
@@ -26,7 +26,7 @@ ERROR_BACKOFF_SECONDS = 60
 
 # How often the loop wakes to check which users are due. The cadence a
 # given user actually experiences is still whatever it chose in Settings
-# (User.feed_refresh_interval_minutes) — this is just the clock that choice
+# (User.refresh_interval_minutes) — this is just the clock that choice
 # is checked against. Short enough that even the shortest preset (15 minutes) is checked several
 # times within its own window, so a settings change takes effect within a
 # few minutes rather than needing an interrupt; long enough that a user
@@ -38,17 +38,17 @@ TICK_SECONDS = 5 * 60
 def _due_users(db: Session) -> list[User]:
     """Users whose own interval has elapsed since their own last refresh.
 
-    A never-refreshed user (feeds_refreshed_at is None — brand new) is
+    A never-refreshed user (refreshed_at is None — brand new) is
     always due.
     """
     now = utcnow()
     due = []
     for user in db.query(User).all():
-        if user.feeds_refreshed_at is None:
+        if user.refreshed_at is None:
             due.append(user)
             continue
-        elapsed_minutes = (now - user.feeds_refreshed_at).total_seconds() / 60
-        if elapsed_minutes >= user.feed_refresh_interval_minutes:
+        elapsed_minutes = (now - user.refreshed_at).total_seconds() / 60
+        if elapsed_minutes >= user.refresh_interval_minutes:
             due.append(user)
     return due
 
@@ -56,15 +56,15 @@ def _due_users(db: Session) -> list[User]:
 def _refresh_due_users() -> None:
     with SessionLocal() as db:
         for user in _due_users(db):
-            feeds = followed_feeds(db, user_id=user.id).all()
-            new_count = refresh_feeds(db, feeds)
-            user.feeds_refreshed_at = utcnow()
+            artists = followed_artists(db, user_id=user.id).all()
+            new_count = refresh_feeds(db, artists)
+            user.refreshed_at = utcnow()
             db.commit()
             if new_count:
                 logger.info(
-                    "Background refresh added %d new item(s) across %d feed(s) for user %d",
+                    "Background refresh added %d new item(s) across %d artist(s) for user %d",
                     new_count,
-                    len(feeds),
+                    len(artists),
                     user.id,
                 )
 
@@ -83,7 +83,7 @@ async def run_scheduler() -> None:
     """Runs for the lifetime of the app (started/stopped via start/stop
     below), checking on TICK_SECONDS which users are due for their own
     configured interval and refreshing just those — see _due_users and
-    User.feed_refresh_interval_minutes — then sweeping disk/DB leftovers
+    User.refresh_interval_minutes — then sweeping disk/DB leftovers
     (see _sweep_disk) regardless of which, if any, accounts were due.
 
     The whole cycle is guarded, not just the refresh. It used to be only the
@@ -102,7 +102,7 @@ async def run_scheduler() -> None:
             await asyncio.to_thread(_refresh_due_users)
             await asyncio.to_thread(_sweep_disk)
         except Exception:
-            logger.exception("Feed refresh cycle failed; retrying in %ds", ERROR_BACKOFF_SECONDS)
+            logger.exception("Artist refresh cycle failed; retrying in %ds", ERROR_BACKOFF_SECONDS)
             await asyncio.sleep(ERROR_BACKOFF_SECONDS)
             continue
         await asyncio.sleep(TICK_SECONDS)

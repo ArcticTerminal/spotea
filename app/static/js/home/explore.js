@@ -12,7 +12,7 @@
 import { api, debounce, escapeHtml, formatDuration } from "../core.js";
 import { openDetail } from "./detail.js";
 import { wireScrollers } from "./scrollers.js";
-import { followChannel, playRemoteVideo } from "./remote.js";
+import { followArtist, playRemoteVideo } from "./remote.js";
 import { activate, onTabActivated } from "./tabs.js";
 
 function formatSubscribers(count) {
@@ -418,7 +418,7 @@ export function setupRecommendations() {
     // (preview it) but carries its own Add button (follow it outright).
     const addButton = event.target.closest(".btn-add-channel");
     if (addButton) {
-      followChannel(addButton.dataset.channelUrl, addButton);
+      followArtist(addButton.dataset.channelUrl, addButton);
       return;
     }
 
@@ -481,8 +481,8 @@ export function setupExploreSearch() {
     channelResults.innerHTML = loadingHtml;
 
     const [videos, channels] = await Promise.all([
-      api(`/feeds/search-videos?q=${encodeURIComponent(query)}`),
-      api(`/feeds/search?q=${encodeURIComponent(query)}`),
+      api(`/explore/songs?q=${encodeURIComponent(query)}`),
+      api(`/explore/artists?q=${encodeURIComponent(query)}`),
     ]);
 
     if (videos.ok) {
@@ -499,7 +499,7 @@ export function setupExploreSearch() {
     // sits inside that row.
     const btn = event.target.closest(".btn-add-channel");
     if (btn) {
-      followChannel(btn.dataset.channelUrl, btn);
+      followArtist(btn.dataset.channelUrl, btn);
       return;
     }
 

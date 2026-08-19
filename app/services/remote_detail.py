@@ -11,7 +11,7 @@ video with no `Content` row.
 
 The rows are still playable, and "Play all" still works: the client
 materializes the list into preview `Content` rows in one batch when playback
-actually starts (POST /feeds/videos/batch), which costs no YouTube requests
+actually starts (POST /artists/videos/batch), which costs no YouTube requests
 at all because every field those rows need is already in the response below.
 
 Kept out of page_context.py deliberately — everything there is DB queries,
@@ -20,18 +20,18 @@ and these two builders make network calls that take seconds.
 
 from sqlalchemy.orm import Session
 
-from app.images import cached_avatar_path
-from app.models import Feed
+from app.images import cached_avatar_or_hotlink
+from app.models import Artist
 from app.timeutil import utcnow
 from app.youtube.music import ARTIST_PREVIEW_SONGS, fetch_artist, fetch_playlist, fetch_release
-from app.images import cached_avatar_or_hotlink
-from app.youtube.urls import CHANNEL_PAGE_URL_TEMPLATE, channel_feed_url
+from app.youtube.urls import CHANNEL_PAGE_URL_TEMPLATE
+
 
 def _base_context(kind: str, remote_id: str, title: str, items: list) -> dict:
     return {
         "kind": kind,
         "remote": True,
-        "feed": None,
+        "artist": None,
         "title": title,
         "content": items,
         "empty_message": "Nothing playable here.",
@@ -76,13 +76,13 @@ def remote_playlist_context(playlist_id: str) -> dict | None:
     return context
 
 
-def _followed_feed_id(db: Session, user_id: int, channel_id: str) -> int | None:
+def _followed_artist_id(db: Session, user_id: int, channel_id: str) -> int | None:
     followed = (
-        db.query(Feed)
+        db.query(Artist)
         .filter(
-            Feed.user_id == user_id,
-            Feed.rss_url == channel_feed_url(channel_id),
-            Feed.followed.is_(True),
+            Artist.user_id == user_id,
+            Artist.channel_id == channel_id,
+            Artist.followed.is_(True),
         )
         .first()
     )
@@ -100,7 +100,7 @@ def _artist_or_channel(db: Session, user_id: int, browse_id: str):
     The follow target is the artist's **"<Artist> - Topic" channel**, which
     is what "following an artist" means in a music app: that channel
     carries their releases and nothing else, while their official channel's
-    feed would deliver vlogs and interviews alongside it.
+    artist would deliver vlogs and interviews alongside it.
 
     Falls back to the official channel, then to the browse id, for the
     artists with no Topic channel behind them: a worse answer than the
@@ -115,16 +115,16 @@ def _artist_or_channel(db: Session, user_id: int, browse_id: str):
         "hero_image": cached_avatar_or_hotlink(follow_channel_id, artist.avatar_url),
         "hero_is_avatar": True,
         "channel_url": CHANNEL_PAGE_URL_TEMPLATE.format(channel_id=follow_channel_id),
-        "followed_feed_id": _followed_feed_id(db, user_id, follow_channel_id),
-        # Sent back with the follow so the feed can be recorded as this
-        # artist's — see routers/feeds.py. The browse id rather than the
+        "followed_artist_id": _followed_artist_id(db, user_id, follow_channel_id),
+        # Sent back with the follow so the artist can be recorded as this
+        # artist's — see routers/artists.py. The browse id rather than the
         # channel it targets: it's what reopens this page.
         #
         # The profile's own browse id, not the one this was asked for. They
         # differ when a VEVO channel was followed through to the page that
         # actually has the music (see music._redirected_artist), and sending
-        # the VEVO id back would record the feed against the songless page.
-        "artist_browse_id": artist.browse_id,
+        # the VEVO id back would record the artist against the songless page.
+        "browse_id": artist.browse_id,
     }
 
 
@@ -152,7 +152,7 @@ def remote_artist_context(
     context = {
         "kind": "yt-artist",
         "remote": True,
-        "feed": None,
+        "artist": None,
         "title": artist.name,
         "back_label": "Explore",
         "description": artist.description,

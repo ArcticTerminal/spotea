@@ -105,7 +105,7 @@ def test_a_song_becomes_a_video_search_result(client):
 
 
 def test_a_songs_artists_become_its_channel(client):
-    """The Topic channel id is what a preview row hangs its placeholder feed
+    """The Topic channel id is what a preview row hangs its placeholder artist
     off (routers/explore.py), so it has to survive the mapping — and the
     artist names are what the card prints where a video would print its
     uploader."""
@@ -139,7 +139,7 @@ def test_several_artists_are_joined_into_one_line(client):
 def test_a_compilation_with_no_real_artist_channel_keeps_none(client):
     """"Various Artists" comes back with a name but no id. A None channel_id
     is the honest answer — the batch endpoint refuses those rows rather than
-    inventing a feed for them."""
+    inventing a artist for them."""
     client(search=[{**SONG, "artists": [{"name": "Various Artists", "id": None}]}])
 
     (result,) = music.search_songs("compilation")
@@ -497,7 +497,7 @@ def test_a_short_catalogue_is_not_reported_as_truncated(client):
 
 def test_all_songs_false_does_not_pay_for_the_track_list(client):
     """A follow click wants the ids off the page header (see
-    feed_add._as_artist_follow). The second request the track list costs
+    artist_follow._as_artist_follow). The second request the track list costs
     would buy nothing there."""
     fake = client(
         get_artist={

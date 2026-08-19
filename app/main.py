@@ -16,11 +16,11 @@ from app.database import Base, SessionLocal, engine
 from app.deps import NotAuthenticated, require_login
 from app.images import fetch_image_bytes
 from app.middleware import install as install_middleware
+from app.routers import artists as artists_router
 from app.routers import auth as auth_router
 from app.routers import content as content_router
 from app.routers import debug as debug_router
 from app.routers import explore as explore_router
-from app.routers import feeds as feeds_router
 from app.routers import pages as pages_router
 from app.routers import partials as partials_router
 from app.routers import recommendations as recommendations_router
@@ -129,7 +129,7 @@ class RevalidatingStaticFiles(StaticFiles):
 app.mount("/static", RevalidatingStaticFiles(directory="app/static"), name="static")
 
 app.include_router(auth_router.router)
-app.include_router(feeds_router.router)
+app.include_router(artists_router.router)
 app.include_router(explore_router.router)
 app.include_router(content_router.router)
 app.include_router(storage_router.router)

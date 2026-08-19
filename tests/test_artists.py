@@ -15,16 +15,15 @@ from datetime import datetime
 
 import pytest
 
-import app.routers.feeds as feeds_router
+import app.routers.artists as artists_router
+import app.services.artist_follow as artist_follow_module
 import app.services.artist_sync as artist_sync
-import app.services.backfill as backfill_module
-import app.services.feed_add as feed_add_module
-from app.models import Content, Feed, User
+import app.services.initial_sync as initial_sync_module
+from app.models import Artist, Content, User
+from app.services.artist_follow import NotAnArtistError, follow_artist
 from app.services.artist_sync import ArtistFetchResult, apply_artist_data
-from app.services.feed_add import NotAnArtistError, create_feed_from_rss_url
 from app.youtube.models import VideoSearchResult
 from app.youtube.music import ArtistProfile, ArtistRelease, ReleaseDetail
-from app.youtube.urls import channel_feed_url
 
 USER_ID = 1
 
@@ -72,7 +71,7 @@ def _stub_artist_lookup(monkeypatch, profile, calls=None):
             calls.append((browse_id, all_songs))
         return profile
 
-    monkeypatch.setattr(feed_add_module, "fetch_artist", fake)
+    monkeypatch.setattr(artist_follow_module, "fetch_artist", fake)
 
 
 # --------------------------------------------------------------------------
@@ -86,13 +85,13 @@ def test_following_a_musicians_own_channel_keys_on_their_topic_channel(db_sessio
     row, or following the same artist twice makes two."""
     _stub_artist_lookup(monkeypatch, _artist())
 
-    feed, _ = create_feed_from_rss_url(
+    artist, _ = follow_artist(
         db_session, f"https://www.youtube.com/channel/{OFFICIAL_ID}", USER_ID, sync=False
     )
 
-    assert feed.rss_url == channel_feed_url(TOPIC_ID)
-    assert feed.artist_browse_id == OFFICIAL_ID
-    assert feed.channel_title == "Shirin David"
+    assert artist.channel_id == TOPIC_ID
+    assert artist.browse_id == OFFICIAL_ID
+    assert artist.name == "Shirin David"
 
 
 def test_the_card_is_titled_with_the_artists_name(db_session, monkeypatch):
@@ -101,11 +100,11 @@ def test_the_card_is_titled_with_the_artists_name(db_session, monkeypatch):
     strip in the first place."""
     _stub_artist_lookup(monkeypatch, _artist())
 
-    feed, _ = create_feed_from_rss_url(
+    artist, _ = follow_artist(
         db_session, f"https://www.youtube.com/channel/{OFFICIAL_ID}", USER_ID, sync=False
     )
 
-    assert feed.channel_title == "Shirin David"
+    assert artist.name == "Shirin David"
 
 
 def test_a_channel_that_is_not_an_artist_cannot_be_followed(db_session, monkeypatch):
@@ -114,63 +113,63 @@ def test_a_channel_that_is_not_an_artist_cannot_be_followed(db_session, monkeypa
     _stub_artist_lookup(monkeypatch, None)
 
     with pytest.raises(NotAnArtistError):
-        create_feed_from_rss_url(
+        follow_artist(
             db_session, f"https://www.youtube.com/channel/{OFFICIAL_ID}", USER_ID, sync=False
         )
 
-    assert db_session.query(Feed).count() == 0
+    assert db_session.query(Artist).count() == 0
 
 
 def test_a_url_with_no_channel_in_it_never_reaches_youtube_music(db_session, monkeypatch):
     def explode(*args, **kwargs):
         raise AssertionError("must not ask YouTube Music about a URL with no channel id")
 
-    monkeypatch.setattr(feed_add_module, "fetch_artist", explode)
+    monkeypatch.setattr(artist_follow_module, "fetch_artist", explode)
 
     with pytest.raises(NotAnArtistError):
-        create_feed_from_rss_url(db_session, "https://www.youtube.com/playlist?list=PLx", USER_ID, sync=False)
+        follow_artist(db_session, "https://www.youtube.com/playlist?list=PLx", USER_ID, sync=False)
 
 
 def test_a_non_artist_channel_is_a_400_not_a_500(client, monkeypatch):
-    monkeypatch.setattr(feed_add_module, "fetch_artist", lambda browse_id, all_songs=True: None)
+    monkeypatch.setattr(artist_follow_module, "fetch_artist", lambda browse_id, all_songs=True: None)
 
-    res = client.post("/feeds", json={"channel_url": f"https://www.youtube.com/channel/{OFFICIAL_ID}"})
+    res = client.post("/artists", json={"channel_url": f"https://www.youtube.com/channel/{OFFICIAL_ID}"})
 
     assert res.status_code == 400
 
 
 def test_following_the_channel_of_an_artist_already_followed_is_a_duplicate(db_session, monkeypatch, client):
-    """Both ids reduce to the same feed, so the second follow has to be
+    """Both ids reduce to the same artist, so the second follow has to be
     caught — and it can only be caught *after* the artist resolution, which
     is why that runs before the duplicate check."""
     _stub_artist_lookup(monkeypatch, _artist())
-    create_feed_from_rss_url(db_session, f"https://www.youtube.com/channel/{TOPIC_ID}", USER_ID, sync=False)
+    follow_artist(db_session, f"https://www.youtube.com/channel/{TOPIC_ID}", USER_ID, sync=False)
 
     monkeypatch.setattr(
-        "app.services.feed_add.fetch_artist", lambda browse_id, all_songs=True: _artist()
+        "app.services.artist_follow.fetch_artist", lambda browse_id, all_songs=True: _artist()
     )
-    res = client.post("/feeds", json={"channel_url": f"https://www.youtube.com/channel/{OFFICIAL_ID}"})
+    res = client.post("/artists", json={"channel_url": f"https://www.youtube.com/channel/{OFFICIAL_ID}"})
 
     assert res.status_code == 409
-    assert db_session.query(Feed).count() == 1
+    assert db_session.query(Artist).count() == 1
 
 
 def test_following_a_previously_previewed_artist_upgrades_the_placeholder(db_session, monkeypatch):
     """A track grabbed from Explore leaves a followed=False row behind (see
-    _get_or_create_placeholder_feed). Following for real upgrades it in place
+    _get_or_create_placeholder). Following for real upgrades it in place
     rather than bouncing the user with "already exists"."""
-    placeholder = Feed(user_id=USER_ID, rss_url=channel_feed_url(TOPIC_ID), followed=False)
+    placeholder = Artist(user_id=USER_ID, channel_id=TOPIC_ID, followed=False)
     db_session.add(placeholder)
     db_session.commit()
     _stub_artist_lookup(monkeypatch, _artist())
 
-    feed, _ = create_feed_from_rss_url(
+    artist, _ = follow_artist(
         db_session, f"https://www.youtube.com/channel/{OFFICIAL_ID}", USER_ID, sync=False
     )
 
-    assert feed.id == placeholder.id
-    assert feed.followed is True
-    assert db_session.query(Feed).count() == 1
+    assert artist.id == placeholder.id
+    assert artist.followed is True
+    assert db_session.query(Artist).count() == 1
 
 
 def test_the_track_list_is_not_paid_for_on_a_follow(db_session, monkeypatch):
@@ -179,29 +178,29 @@ def test_the_track_list_is_not_paid_for_on_a_follow(db_session, monkeypatch):
     calls = []
     _stub_artist_lookup(monkeypatch, _artist(), calls=calls)
 
-    create_feed_from_rss_url(db_session, f"https://www.youtube.com/channel/{OFFICIAL_ID}", USER_ID, sync=False)
+    follow_artist(db_session, f"https://www.youtube.com/channel/{OFFICIAL_ID}", USER_ID, sync=False)
 
     assert calls == [(OFFICIAL_ID, False)]
 
 
 # --------------------------------------------------------------------------
-# Syncing. What a release-snapshot diff does that an upload feed didn't.
+# Syncing. What a release-snapshot diff does that an upload artist didn't.
 # --------------------------------------------------------------------------
 
 
 def _followed(db_session, **kwargs):
     defaults = {
         "user_id": USER_ID,
-        "rss_url": channel_feed_url(TOPIC_ID),
-        "channel_title": "Shirin David",
-        "artist_browse_id": OFFICIAL_ID,
+        "channel_id": TOPIC_ID,
+        "name": "Shirin David",
+        "browse_id": OFFICIAL_ID,
     }
     defaults.update(kwargs)
-    feed = Feed(**defaults)
-    db_session.add(feed)
+    artist = Artist(**defaults)
+    db_session.add(artist)
     db_session.commit()
-    db_session.refresh(feed)
-    return feed
+    db_session.refresh(artist)
+    return artist
 
 
 def test_a_first_sync_records_the_catalogue_without_importing_it(db_session, monkeypatch):
@@ -219,13 +218,13 @@ def test_a_first_sync_records_the_catalogue_without_importing_it(db_session, mon
 
     monkeypatch.setattr(artist_sync, "fetch_release", explode)
 
-    feed = _followed(db_session)
-    result = artist_sync.fetch_artist_data(feed.artist_browse_id, feed.release_snapshot, None)
-    new_count = apply_artist_data(db_session, feed, result)
+    artist = _followed(db_session)
+    result = artist_sync.fetch_artist_data(artist.browse_id, artist.release_snapshot, None)
+    new_count = apply_artist_data(db_session, artist, result)
 
     assert new_count == 0
     assert db_session.query(Content).count() == 0
-    assert feed.release_snapshot == '["MPREb_aaaaaaaaaaa", "MPREb_bbbbbbbbbbb"]'
+    assert artist.release_snapshot == '["MPREb_aaaaaaaaaaa", "MPREb_bbbbbbbbbbb"]'
 
 
 def test_a_later_sync_imports_only_what_appeared_since(db_session, monkeypatch):
@@ -247,9 +246,9 @@ def test_a_later_sync_imports_only_what_appeared_since(db_session, monkeypatch):
 
     monkeypatch.setattr(artist_sync, "fetch_release", fake_release)
 
-    feed = _followed(db_session, release_snapshot='["MPREb_aaaaaaaaaaa"]')
-    result = artist_sync.fetch_artist_data(feed.artist_browse_id, feed.release_snapshot, None)
-    new_count = apply_artist_data(db_session, feed, result)
+    artist = _followed(db_session, release_snapshot='["MPREb_aaaaaaaaaaa"]')
+    result = artist_sync.fetch_artist_data(artist.browse_id, artist.release_snapshot, None)
+    new_count = apply_artist_data(db_session, artist, result)
 
     assert opened == ["MPREb_new00000000"], "an already-known release was opened again"
     assert new_count == 1
@@ -270,20 +269,20 @@ def test_a_release_that_will_not_open_is_retried_next_time(db_session, monkeypat
     )
     monkeypatch.setattr(artist_sync, "fetch_release", lambda browse_id: None)
 
-    feed = _followed(db_session, release_snapshot="[]")
-    result = artist_sync.fetch_artist_data(feed.artist_browse_id, feed.release_snapshot, None)
-    apply_artist_data(db_session, feed, result)
+    artist = _followed(db_session, release_snapshot="[]")
+    result = artist_sync.fetch_artist_data(artist.browse_id, artist.release_snapshot, None)
+    apply_artist_data(db_session, artist, result)
 
-    assert feed.release_snapshot == "[]"
+    assert artist.release_snapshot == "[]"
 
 
 def test_a_track_already_in_the_library_is_not_inserted_twice(db_session, monkeypatch):
     """Content's (user_id, video_id) constraint is global — a collaboration
     can arrive on two followed artists' releases, and an Explore preview can
     predate the follow entirely."""
-    other = _followed(db_session, rss_url="https://example.com/other", artist_browse_id="UCother")
+    other = _followed(db_session, channel_id="https://example.com/other", browse_id="UCother")
     db_session.add(
-        Content(feed_id=other.id, user_id=USER_ID, video_id="shared00001", title="Already here")
+        Content(artist_id=other.id, user_id=USER_ID, video_id="shared00001", title="Already here")
     )
     db_session.commit()
 
@@ -299,9 +298,9 @@ def test_a_track_already_in_the_library_is_not_inserted_twice(db_session, monkey
         ),
     )
 
-    feed = _followed(db_session, rss_url=channel_feed_url("UCanother0000000000000"))
-    result = artist_sync.fetch_artist_data(feed.artist_browse_id, "[]", None)
-    new_count = apply_artist_data(db_session, feed, result)
+    artist = _followed(db_session, channel_id="UCanother0000000000000")
+    result = artist_sync.fetch_artist_data(artist.browse_id, "[]", None)
+    new_count = apply_artist_data(db_session, artist, result)
 
     assert new_count == 1
     assert db_session.query(Content).count() == 2
@@ -310,20 +309,20 @@ def test_a_track_already_in_the_library_is_not_inserted_twice(db_session, monkey
 def test_an_unreadable_artist_page_is_a_skip_not_a_failure(db_session, monkeypatch, caplog):
     monkeypatch.setattr(artist_sync, "fetch_artist", lambda browse_id, all_songs=True: None)
 
-    feed = _followed(db_session, release_snapshot="[]")
+    artist = _followed(db_session, release_snapshot="[]")
     with caplog.at_level(logging.WARNING):
-        result = artist_sync.fetch_artist_data(feed.artist_browse_id, feed.release_snapshot, None)
+        result = artist_sync.fetch_artist_data(artist.browse_id, artist.release_snapshot, None)
 
     assert result.ok is False
-    assert apply_artist_data(db_session, feed, result) == 0
+    assert apply_artist_data(db_session, artist, result) == 0
     assert "no page to read" in caplog.text
 
 
 def test_refresh_isolates_one_failing_artist(db_session, monkeypatch):
     """One artist's apply blowing up must not abort every other artist's
     refresh in the same call."""
-    good = _followed(db_session, rss_url="https://example.com/good")
-    bad = _followed(db_session, rss_url="https://example.com/bad", artist_browse_id="UCbad")
+    good = _followed(db_session, channel_id="https://example.com/good")
+    bad = _followed(db_session, channel_id="https://example.com/bad", browse_id="UCbad")
 
     monkeypatch.setattr(
         artist_sync,
@@ -333,26 +332,26 @@ def test_refresh_isolates_one_failing_artist(db_session, monkeypatch):
 
     real_apply = artist_sync.apply_artist_data
 
-    def flaky(db, feed, result):
-        if feed.id == bad.id:
+    def flaky(db, artist, result):
+        if artist.id == bad.id:
             raise RuntimeError("boom")
-        return real_apply(db, feed, result)
+        return real_apply(db, artist, result)
 
     monkeypatch.setattr(artist_sync, "apply_artist_data", flaky)
 
     artist_sync.refresh_feeds(db_session, [bad, good])
 
     db_session.expire_all()
-    assert db_session.get(Feed, good.id).release_snapshot == "[]", "the good artist was skipped too"
+    assert db_session.get(Artist, good.id).release_snapshot == "[]", "the good artist was skipped too"
 
 
 def test_a_feed_with_no_artist_behind_it_is_skipped(db_session, monkeypatch):
     """Explore placeholders have no browse id and are not followed — there is
     nothing to sync from them."""
-    placeholder = _followed(db_session, artist_browse_id=None, followed=False)
+    placeholder = _followed(db_session, browse_id=None, followed=False)
 
     def explode(*args, **kwargs):
-        raise AssertionError("a placeholder feed must not be synced")
+        raise AssertionError("a placeholder artist must not be synced")
 
     monkeypatch.setattr(artist_sync, "fetch_artist_data", explode)
 
@@ -365,64 +364,64 @@ def test_a_feed_with_no_artist_behind_it_is_skipped(db_session, monkeypatch):
 
 
 def _seed_feed_with_content(db_session, **content_kwargs):
-    feed = Feed(user_id=USER_ID, rss_url="https://example.com/unfollow-me", channel_title="Unfollow Me")
-    db_session.add(feed)
+    artist = Artist(user_id=USER_ID, channel_id="https://example.com/unfollow-me", name="Unfollow Me")
+    db_session.add(artist)
     db_session.commit()
-    db_session.refresh(feed)
+    db_session.refresh(artist)
 
     defaults = {"status": "not_downloaded"}
     defaults.update(content_kwargs)
     content = Content(
-        feed_id=feed.id, user_id=USER_ID, video_id="untouched1", title="Untouched video", **defaults
+        artist_id=artist.id, user_id=USER_ID, video_id="untouched1", title="Untouched video", **defaults
     )
     db_session.add(content)
     db_session.commit()
     db_session.refresh(content)
-    return feed, content
+    return artist, content
 
 
 def test_unfollowing_an_artist_with_no_engaged_content_deletes_it_entirely(client, db_session):
-    feed, _content = _seed_feed_with_content(db_session)
+    artist, _content = _seed_feed_with_content(db_session)
 
-    res = client.delete(f"/feeds/{feed.id}")
+    res = client.delete(f"/artists/{artist.id}")
 
     assert res.status_code == 204
-    assert db_session.query(Feed).filter(Feed.id == feed.id).first() is None
-    assert db_session.query(Content).filter(Content.feed_id == feed.id).count() == 0
+    assert db_session.query(Artist).filter(Artist.id == artist.id).first() is None
+    assert db_session.query(Content).filter(Content.artist_id == artist.id).count() == 0
 
 
 def test_unfollowing_keeps_downloaded_content_and_downgrades_the_feed(client, db_session):
-    feed, content = _seed_feed_with_content(db_session, status="ready", file_path=None)
+    artist, content = _seed_feed_with_content(db_session, status="ready", file_path=None)
 
-    res = client.delete(f"/feeds/{feed.id}")
+    res = client.delete(f"/artists/{artist.id}")
     # client's request runs on its own Session — db_session's identity map
     # otherwise keeps serving the pre-delete cached attribute values.
     db_session.expire_all()
 
     assert res.status_code == 204
-    kept_feed = db_session.query(Feed).filter(Feed.id == feed.id).first()
+    kept_feed = db_session.query(Artist).filter(Artist.id == artist.id).first()
     assert kept_feed is not None
     assert kept_feed.followed is False
     assert db_session.query(Content).filter(Content.id == content.id).first() is not None
 
 
 def test_unfollowing_keeps_recently_played_content(client, db_session):
-    feed, content = _seed_feed_with_content(db_session, last_played_at=datetime(2026, 1, 1))
+    artist, content = _seed_feed_with_content(db_session, last_played_at=datetime(2026, 1, 1))
 
-    res = client.delete(f"/feeds/{feed.id}")
+    res = client.delete(f"/artists/{artist.id}")
 
     assert res.status_code == 204
-    assert db_session.query(Feed).filter(Feed.id == feed.id).first() is not None
+    assert db_session.query(Artist).filter(Artist.id == artist.id).first() is not None
     assert db_session.query(Content).filter(Content.id == content.id).first() is not None
 
 
 def test_unfollowing_keeps_favorited_and_saved_content(client, db_session):
-    feed, content = _seed_feed_with_content(db_session, is_favorite=True)
+    artist, content = _seed_feed_with_content(db_session, is_favorite=True)
 
-    res = client.delete(f"/feeds/{feed.id}")
+    res = client.delete(f"/artists/{artist.id}")
 
     assert res.status_code == 204
-    assert db_session.query(Feed).filter(Feed.id == feed.id).first() is not None
+    assert db_session.query(Artist).filter(Artist.id == artist.id).first() is not None
     assert db_session.query(Content).filter(Content.id == content.id).first() is not None
 
 
@@ -437,36 +436,36 @@ def _stub_initial_fetch(monkeypatch, spy=None):
             spy()
         return ArtistFetchResult(ok=True, release_ids=[])
 
-    monkeypatch.setattr(backfill_module, "fetch_artist_data", fake)
+    monkeypatch.setattr(initial_sync_module, "fetch_artist_data", fake)
 
 
 def test_a_new_feed_says_it_is_filling_in_before_it_fetches_anything(db_session, monkeypatch):
-    """Library renders a card the moment POST /feeds answers, and without
+    """Library renders a card the moment POST /artists answers, and without
     this it would render a confident "0 songs" for as long as the fetch takes
     — which reads as an artist that failed to add, not one still arriving."""
     seen: list[set[int]] = []
-    feed = _followed(db_session)
-    backfill_module.mark_syncing(feed.id)
-    _stub_initial_fetch(monkeypatch, spy=lambda: seen.append(backfill_module.backfilling_feed_ids([feed.id])))
+    artist = _followed(db_session)
+    initial_sync_module.mark_syncing(artist.id)
+    _stub_initial_fetch(monkeypatch, spy=lambda: seen.append(initial_sync_module.syncing_artist_ids([artist.id])))
 
-    backfill_module.run_initial_sync(feed.id, db_session)
+    initial_sync_module.run_initial_sync(artist.id, db_session)
 
-    assert seen == [{feed.id}]
-    backfill_module.backfill_progress.discard(feed.id)
+    assert seen == [{artist.id}]
+    initial_sync_module.sync_progress.discard(artist.id)
 
 
 def test_a_failed_initial_sync_does_not_leave_the_card_stuck(db_session, monkeypatch):
-    feed = _followed(db_session)
+    artist = _followed(db_session)
 
     def explode(*args, **kwargs):
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(backfill_module, "fetch_artist_data", explode)
+    monkeypatch.setattr(initial_sync_module, "fetch_artist_data", explode)
 
-    backfill_module.run_initial_sync(feed.id, db_session)
+    initial_sync_module.run_initial_sync(artist.id, db_session)
 
-    assert backfill_module.backfill_progress.get(feed.id)[0] == "done"
-    backfill_module.backfill_progress.discard(feed.id)
+    assert initial_sync_module.sync_progress.get(artist.id)[0] == "done"
+    initial_sync_module.sync_progress.discard(artist.id)
 
 
 def test_adding_a_feed_answers_before_it_fetches_anything(client, monkeypatch):
@@ -476,19 +475,19 @@ def test_adding_a_feed_answers_before_it_fetches_anything(client, monkeypatch):
     scheduled: list[int] = []
 
     monkeypatch.setattr(
-        feed_add_module, "fetch_artist", lambda browse_id, all_songs=True: _artist()
+        artist_follow_module, "fetch_artist", lambda browse_id, all_songs=True: _artist()
     )
     monkeypatch.setattr(
         artist_sync, "fetch_artist_data",
         lambda browse_id, snapshot, avatar_url: fetched.append(browse_id) or ArtistFetchResult(ok=True),
     )
-    monkeypatch.setattr(feeds_router, "run_initial_sync_task", lambda feed_id: scheduled.append(feed_id))
+    monkeypatch.setattr(artists_router, "run_initial_sync_task", lambda artist_id: scheduled.append(artist_id))
 
-    res = client.post("/feeds", json={"channel_url": f"https://www.youtube.com/channel/{TOPIC_ID}"})
+    res = client.post("/artists", json={"channel_url": f"https://www.youtube.com/channel/{TOPIC_ID}"})
 
     assert res.status_code == 201
     assert fetched == [], "the route fetched the catalogue before answering"
-    assert scheduled == [res.json()["feed"]["id"]]
+    assert scheduled == [res.json()["artist"]["id"]]
 
 
 def test_the_card_is_already_filling_in_when_the_response_lands(client, monkeypatch):
@@ -496,63 +495,63 @@ def test_the_card_is_already_filling_in_when_the_response_lands(client, monkeypa
     request is not guaranteed — losing that race would leave the card
     claiming zero and never polling."""
     monkeypatch.setattr(
-        feed_add_module, "fetch_artist", lambda browse_id, all_songs=True: _artist()
+        artist_follow_module, "fetch_artist", lambda browse_id, all_songs=True: _artist()
     )
-    monkeypatch.setattr(feeds_router, "run_initial_sync_task", lambda feed_id: None)
+    monkeypatch.setattr(artists_router, "run_initial_sync_task", lambda artist_id: None)
 
-    feed_id = client.post(
-        "/feeds", json={"channel_url": f"https://www.youtube.com/channel/{TOPIC_ID}"}
-    ).json()["feed"]["id"]
+    artist_id = client.post(
+        "/artists", json={"channel_url": f"https://www.youtube.com/channel/{TOPIC_ID}"}
+    ).json()["artist"]["id"]
 
     try:
-        assert client.get("/feeds/backfilling").json() == [feed_id]
+        assert client.get("/artists/syncing").json() == [artist_id]
     finally:
-        backfill_module.backfill_progress.discard(feed_id)
+        initial_sync_module.sync_progress.discard(artist_id)
 
 
-# -------------------------------------------------------- GET /feeds/backfilling
+# -------------------------------------------------------- GET /artists/syncing
 
 
 def test_backfilling_lists_only_this_users_running_syncs(client, db_session):
-    mine = Feed(user_id=USER_ID, rss_url="https://example.com/mine", channel_title="Mine")
+    mine = Artist(user_id=USER_ID, channel_id="https://example.com/mine", name="Mine")
     other_user = User(email="someone-else@example.com", password_hash="x")
     db_session.add_all([mine, other_user])
     db_session.commit()
-    theirs = Feed(
-        user_id=other_user.id, rss_url="https://example.com/theirs", channel_title="Theirs"
+    theirs = Artist(
+        user_id=other_user.id, channel_id="https://example.com/theirs", name="Theirs"
     )
     db_session.add(theirs)
     db_session.commit()
 
-    backfill_module.backfill_progress.set(mine.id, ("syncing", 0, 0))
-    backfill_module.backfill_progress.set(theirs.id, ("syncing", 0, 0))
+    initial_sync_module.sync_progress.set(mine.id, ("syncing", 0, 0))
+    initial_sync_module.sync_progress.set(theirs.id, ("syncing", 0, 0))
     try:
-        assert client.get("/feeds/backfilling").json() == [mine.id]
+        assert client.get("/artists/syncing").json() == [mine.id]
 
         # A finished sync keeps its registry entry readable for a while (see
         # progress.py), so "has an entry" is not "is running" — a card left
         # saying "fetching" forever is exactly what confusing the two causes.
-        backfill_module.backfill_progress.set(mine.id, ("done", 0, 0))
-        assert client.get("/feeds/backfilling").json() == []
+        initial_sync_module.sync_progress.set(mine.id, ("done", 0, 0))
+        assert client.get("/artists/syncing").json() == []
     finally:
-        backfill_module.backfill_progress.discard(mine.id)
-        backfill_module.backfill_progress.discard(theirs.id)
+        initial_sync_module.sync_progress.discard(mine.id)
+        initial_sync_module.sync_progress.discard(theirs.id)
 
 
 def test_library_marks_a_feed_that_is_still_being_fetched(client, db_session):
-    feed = Feed(
-        user_id=USER_ID, rss_url="https://example.com/preparing", channel_title="Still Filling In"
+    artist = Artist(
+        user_id=USER_ID, channel_id="https://example.com/preparing", name="Still Filling In"
     )
-    db_session.add(feed)
+    db_session.add(artist)
     db_session.commit()
 
-    backfill_module.backfill_progress.set(feed.id, ("syncing", 0, 0))
+    initial_sync_module.sync_progress.set(artist.id, ("syncing", 0, 0))
     try:
         body = client.get("/partials/library").text
         assert 'data-preparing="true"' in body
         assert "Fetching releases" in body
     finally:
-        backfill_module.backfill_progress.discard(feed.id)
+        initial_sync_module.sync_progress.discard(artist.id)
 
     body = client.get("/partials/library").text
     assert "data-preparing" not in body, "the card kept saying it was fetching after the sync ended"

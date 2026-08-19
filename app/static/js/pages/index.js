@@ -5,12 +5,12 @@ import { setupSaveButtons } from "../content-actions.js";
 import { handleInitialRoute, setupDetailPanel } from "../home/detail.js";
 import { refreshRecommendations, setupExploreSearch, setupRecommendations } from "../home/explore.js";
 import {
-  setupHomeChannels,
+  setupHomeArtists,
   setupHorizontalScrollers,
-  setupLibraryChannelGrid,
+  setupLibraryArtistGrid,
   setupLibrarySearch,
   setupMobileMenu,
-  setupPreparingChannels,
+  setupPreparingArtists,
   setupRefreshButton,
 } from "../home/library.js";
 import { resumeOverlayIfNeeded, setupPlayerOverlay } from "../home/overlay.js";
@@ -44,10 +44,10 @@ setupDownloadsOverlay();
 setupStorage();
 setupSettings();
 setupInterests();
-setupHomeChannels();
-setupLibraryChannelGrid();
+setupHomeArtists();
+setupLibraryArtistGrid();
 setupLibrarySearch();
-setupPreparingChannels();
+setupPreparingArtists();
 setupHorizontalScrollers();
 // The one Refresh control covers Explore's recommendations too — passed in
 // rather than imported inside library.js, which explore.js already imports

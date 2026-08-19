@@ -17,13 +17,13 @@
 // first. The artist profile is the one body that isn't a track list at all
 // (see templates/_artist_panel.html); its shelves are wired below.
 
-import { unfollowChannel } from "../content-actions.js";
+import { unfollowArtist } from "../content-actions.js";
 import { classifyHash, showToast } from "../core.js";
 import { refreshFragments, swapFragmentHtml } from "../fragments.js";
 import { openPlayer } from "./overlay.js";
 import { QUEUE_CHANGED, isShuffled, loadQueue, queueSource, toggleShuffle } from "./queue.js";
 import { wireScrollers } from "./scrollers.js";
-import { CHANNEL_FOLLOWED, followChannel, playRemoteList, playRemoteVideo } from "./remote.js";
+import { ARTIST_FOLLOWED, followArtist, playRemoteList, playRemoteVideo } from "./remote.js";
 import { activate } from "./tabs.js";
 
 // Detail kinds whose rows come from YouTube rather than the database.
@@ -60,7 +60,7 @@ let current = null;
 
 // Kinds that carry an id put it in the path; the four pinned playlists are
 // the kind itself, and take the /playlist/{kind} route.
-const hasId = (kind) => kind === "channel" || isRemoteKind(kind);
+const hasId = isRemoteKind;
 
 function detailUrl(kind, id, page) {
   const base = hasId(kind) ? `/partials/detail/${kind}/${id}` : `/partials/detail/playlist/${kind}`;
@@ -84,7 +84,7 @@ function showLoading() {
 
 /**
  * Opens one of the four sources listed at the top of this file. `id` is a
- * feed id for "channel", a YouTube id for the two remote kinds, and null for
+ * a YouTube id for the remote kinds, and null for
  * a pinned playlist (whose kind is its whole identity).
  *
  * `replace` is for callers syncing to a URL that's already current (initial
@@ -217,9 +217,9 @@ function closeDetail() {
   else activate(home);
 }
 
-async function handleUnfollow(feedId, button) {
+async function handleUnfollow(artistId, button) {
   button.disabled = true;
-  const ok = await unfollowChannel(feedId);
+  const ok = await unfollowArtist(artistId);
   if (!ok) {
     button.disabled = false;
     return;
@@ -248,27 +248,15 @@ export function setupDetailPanel() {
       return;
     }
 
-    const unfollowBtn = event.target.closest("#unfollow-channel-btn");
+    const unfollowBtn = event.target.closest("#unfollow-artist-btn");
     if (unfollowBtn) {
-      handleUnfollow(unfollowBtn.dataset.feedId, unfollowBtn);
+      handleUnfollow(unfollowBtn.dataset.artistId, unfollowBtn);
       return;
     }
 
-    const followBtn = event.target.closest("#follow-channel-btn");
+    const followBtn = event.target.closest("#follow-artist-btn");
     if (followBtn) {
-      // Doesn't navigate here — the CHANNEL_FOLLOWED listener below opens the
-      // real (library) channel page once the history backfill has finished,
-      // which is the same place adding from a search result lands.
-      // An artist profile's button carries who it is; every other hero's
-      // doesn't, and undefined leaves the request exactly as it was.
-      followChannel(followBtn.dataset.channelUrl, followBtn, {
-      });
-      return;
-    }
-
-    const openFollowedBtn = event.target.closest("#open-followed-channel-btn");
-    if (openFollowedBtn) {
-      openDetail("channel", openFollowedBtn.dataset.feedId);
+      followArtist(followBtn.dataset.channelUrl, followBtn);
       return;
     }
 
@@ -374,24 +362,18 @@ export function setupDetailPanel() {
   // preference — whichever one is pressed, this panel's button has to follow.
   document.addEventListener(QUEUE_CHANGED, syncShuffleButton);
 
-  // A channel just finished being followed — from an Explore search result, a
-  // recommendation card, or the Follow button on its own preview page. All
-  // three land on the real channel page, which is this module's to open (see
-  // home/remote.js for why it announces rather than calls).
-  document.addEventListener(CHANNEL_FOLLOWED, (event) => {
+  // An artist just finished being followed — from an Explore search result, a
+  // recommendation card, or the Follow button on their own page.
+  document.addEventListener(ARTIST_FOLLOWED, (event) => {
     // A cached artist view's Follow button would otherwise still say
-    // "Follow" if reopened later — the event only carries the new feed id,
-    // not the remote channel_id its cache entry would be keyed on, so
-    // dropping the whole cache is simpler than tracking that mapping for a
-    // follow action that isn't a frequent occurrence to begin with.
+    // "Follow" if reopened later — the event carries the new row's id, not
+    // the browse id its cache entry is keyed on, so dropping the whole cache
+    // is simpler than tracking that mapping for an action this infrequent.
     remoteFragmentCache.clear();
-    // An artist lands on their profile, which is the page their library card
+    // Straight back to their profile, which is the page their library card
     // opens too (see _library_grid.html) — following someone and then
-    // clicking them a minute later should not show two different pages. The
-    // server is what decided this was an artist, so the id comes from its
-    // response and not from whichever button was pressed.
-    if (event.detail.artistBrowseId) openDetail("yt-artist", event.detail.artistBrowseId);
-    else openDetail("channel", event.detail.feedId);
+    // clicking them a minute later must not show two different pages.
+    if (event.detail.browseId) openDetail("yt-artist", event.detail.browseId);
   });
 
   window.addEventListener("popstate", () => {

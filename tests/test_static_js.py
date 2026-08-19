@@ -366,33 +366,28 @@ def test_a_release_card_opens_by_browse_id() -> None:
     assert 'openDetail("yt-release", releaseCard.dataset.releaseId)' in source
 
 
-def test_a_new_follow_lands_on_the_artists_profile_when_it_is_one() -> None:
-    """Following used to always land on the plain channel listing, because
-    that was the only page the client knew it had made. The server now
-    decides whether a follow is an artist's (see feed_add._as_artist_follow)
-    and says so in the response, so the landing page can match the one the
-    library card opens for the very same feed."""
+def test_a_new_follow_lands_on_the_artists_profile() -> None:
+    """The landing page has to match the one the library card opens for the
+    very same artist — following someone and clicking them a minute later
+    must not show two different pages."""
     source = (JS_DIR / "home" / "detail.js").read_text()
 
-    assert 'openDetail("yt-artist", event.detail.artistBrowseId)' in source
-    assert 'openDetail("channel", event.detail.feedId)' in source
+    assert 'openDetail("yt-artist", event.detail.browseId)' in source
 
 
 def test_the_follow_event_carries_what_the_server_decided() -> None:
     """Off the response, not off the request: the caller sends a channel URL
-    and finds out afterwards that it was an artist's."""
+    and the server says whose page that turned out to be."""
     source = (JS_DIR / "home" / "remote.js").read_text()
 
-    assert "artistBrowseId: data.feed.artist_browse_id || null" in source
-    assert "detail: { feedId, title, artistBrowseId }" in source
+    assert "browseId: data.artist.browse_id || null" in source
 
-def test_the_first_sync_counts_as_a_channel_still_filling_in() -> None:
-    """"syncing" is the only phase there is, on both sides: the server puts
-    a feed in it before fetching anything, and a client waiting on a follow
-    has to recognise it as activity or it gives up on the poll (see
-    NEVER_STARTED_GRACE_MS)."""
-    backfill = Path("app/services/backfill.py").read_text()
-    remote = (JS_DIR / "home" / "remote.js").read_text()
 
-    assert 'ACTIVE_PHASES = frozenset({"syncing"})' in backfill
-    assert 'phase === "syncing"' in remote
+def test_the_first_sync_counts_as_an_artist_still_filling_in() -> None:
+    """"syncing" is the only phase there is: the server puts an artist in it
+    before fetching anything, and Library's card polls on exactly that."""
+    initial_sync = Path("app/services/initial_sync.py").read_text()
+    library = (JS_DIR / "home" / "library.js").read_text()
+
+    assert 'ACTIVE_PHASES = frozenset({"syncing"})' in initial_sync
+    assert "/artists/syncing" in library

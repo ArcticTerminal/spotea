@@ -2,7 +2,7 @@
 
 Isolation from the real database is the whole point of this file: the app
 was already hit by an accidental full data loss once (empty `content`/
-`feeds` tables, no backup) — a test run must never be able to touch
+`artists` tables, no backup) — a test run must never be able to touch
 `data/spotea.db` or `data/storage`/`data/avatars`, even indirectly.
 
 `app/config.py`'s `Settings()` is a module-level singleton instantiated the
@@ -45,7 +45,7 @@ from app.config import settings
 from app.database import Base, SessionLocal, engine
 from app.main import app
 from app.models import User
-from app.services import feed_add
+from app.services import artist_follow
 
 
 def _assert_paths_isolated() -> None:
@@ -127,8 +127,8 @@ def _clean_tables(_init_schema):
                     .values(
                         interests=None,
                         audio_quality="high",
-                        feed_refresh_interval_minutes=30,
-                        feeds_refreshed_at=None,
+                        refresh_interval_minutes=30,
+                        refreshed_at=None,
                     )
                 )
                 conn.execute(table.delete().where(table.c.id != DEFAULT_USER_ID))
@@ -139,9 +139,9 @@ def _clean_tables(_init_schema):
 @pytest.fixture(autouse=True)
 def _no_artist_lookup(monkeypatch):
     """Following anything asks YouTube Music whether the channel belongs to
-    a musician (see services/feed_add._as_artist_follow). That is a live
+    a musician (see services/artist_follow._as_artist_follow). That is a live
     request on a code path dozens of tests take incidentally — every "add a
-    feed and check X" test in the suite — so the default answer here is
+    artist and check X" test in the suite — so the default answer here is
     "not an artist", which is also what leaves those tests asserting the
     behaviour they were written for.
 
@@ -150,7 +150,7 @@ def _no_artist_lookup(monkeypatch):
     off centrally, or the suite quietly goes online. The tests that are
     *about* artist detection install their own answer over this one.
     """
-    monkeypatch.setattr(feed_add, "fetch_artist", lambda browse_id, all_songs=True: None)
+    monkeypatch.setattr(artist_follow, "fetch_artist", lambda browse_id, all_songs=True: None)
 
 
 @pytest.fixture

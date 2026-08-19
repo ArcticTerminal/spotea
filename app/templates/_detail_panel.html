@@ -1,10 +1,9 @@
 {# One track list, four sources — swapped into index.html's #detail-panel by
    home/detail.js:
 
-     GET /partials/detail/channel/{id}       a followed channel   (feed set)
-     GET /partials/detail/playlist/{kind}    a pinned playlist    (feed None)
+     GET /partials/detail/playlist/{kind}    a pinned playlist
+     GET /partials/detail/playlist/{kind}    a pinned playlist    (artist None)
      GET /partials/detail/yt-playlist/{id}   a YouTube playlist   (remote)
-     GET /partials/detail/yt-channel/{id}    an unfollowed channel (remote)
      GET /partials/detail/yt-artist/{id}     a YouTube Music artist (remote)
 
    The last three are Explore drilling into something the library doesn't have
@@ -26,7 +25,7 @@
 {% include "_detail_hero.html" %}
 
 {% if content %}
-{% set show_channel = (feed is none) %}
+{% set show_channel = (artist is none) %}
 <div class="track-list">
   {% for item in content %}
   {% set index = start_index + loop.index0 %}

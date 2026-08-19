@@ -11,7 +11,7 @@ to catch "the page 500s", not to assert layout.
 
 from datetime import datetime, timedelta
 
-from app.models import Content, Feed, User
+from app.models import Artist, Content
 from app.timeutil import utcnow
 
 USER_ID = 1
@@ -20,20 +20,20 @@ USER_ID = 1
 def _seed(db_session, *, followed=True):
     """One followed channel with three items, each hitting a different
     Library surface: a new upload, a favorite, and a saved+downloaded one."""
-    feed = Feed(
+    artist = Artist(
         user_id=USER_ID,
-        rss_url="https://www.youtube.com/feeds/videos.xml?channel_id=UCpagetest00000000000000",
-        channel_title="Page Test Channel",
+        channel_id="UCpagetest00000000000000",
+        name="Page Test Channel",
         followed=followed,
     )
-    db_session.add(feed)
+    db_session.add(artist)
     db_session.commit()
-    db_session.refresh(feed)
+    db_session.refresh(artist)
 
     now = utcnow()
     items = [
         Content(
-            feed_id=feed.id,
+            artist_id=artist.id,
             user_id=USER_ID,
             video_id="newupload01",
             title="Fresh Upload",
@@ -42,7 +42,7 @@ def _seed(db_session, *, followed=True):
             is_new_upload=True,
         ),
         Content(
-            feed_id=feed.id,
+            artist_id=artist.id,
             user_id=USER_ID,
             video_id="favorite001",
             title="A Favorite",
@@ -51,7 +51,7 @@ def _seed(db_session, *, followed=True):
             is_favorite=True,
         ),
         Content(
-            feed_id=feed.id,
+            artist_id=artist.id,
             user_id=USER_ID,
             video_id="savedplay01",
             title="Saved And Played",
@@ -64,7 +64,7 @@ def _seed(db_session, *, followed=True):
     ]
     db_session.add_all(items)
     db_session.commit()
-    return feed, items
+    return artist, items
 
 
 def test_home_renders_every_shelf_and_the_library_grid(client, db_session):
@@ -93,13 +93,14 @@ def test_channel_avatars_are_lazy_loaded(client, db_session):
     avatars in the Library grid and Home's "Recently followed" chips were
     the two spots that never got the loading="lazy" every content thumbnail
     already has."""
-    feed = Feed(
+    artist = Artist(
         user_id=USER_ID,
-        rss_url="https://www.youtube.com/feeds/videos.xml?channel_id=UCavatarlazy00000000000",
-        channel_title="Avatar Lazy Channel",
+        channel_id="UCavatarlazy00000000000",
+        browse_id="UCavatarlazy00000000000",
+        name="Avatar Lazy Artist",
         avatar_url="/avatars/UCavatarlazy00000000000.jpg",
     )
-    db_session.add(feed)
+    db_session.add(artist)
     db_session.commit()
 
     body = client.get("/").text
@@ -121,7 +122,7 @@ def test_home_applies_the_duration_and_filesize_template_filters(client, db_sess
 
 
 def test_channel_and_playlist_pages_redirect_to_their_hash_route(client):
-    """Favorites/Saved/New releases/Recently Played/a channel/a track all moved
+    """Favorites/Saved/New releases/Recently Played/a track all moved
     in-page (see app/static/js/home/detail.js, home/overlay.js) — these
     routes exist only so an old link or bookmark still lands somewhere real.
     The actual rendering is now GET /partials/detail/... — see
@@ -131,7 +132,6 @@ def test_channel_and_playlist_pages_redirect_to_their_hash_route(client):
         ("/saved", "/#saved"),
         ("/new-uploads", "/#new-uploads"),
         ("/recently-played", "/#recently-played"),
-        ("/channel/1", "/#channel/1"),
         ("/player/1", "/#player/1"),
     ]:
         res = client.get(path, follow_redirects=False)
@@ -148,7 +148,7 @@ def test_page_routes_require_login():
     from app.main import app
 
     with TestClient(app) as anonymous:
-        for path in ["/", "/favorites", "/saved", "/new-uploads", "/recently-played", "/channel/1", "/player/1"]:
+        for path in ["/", "/favorites", "/saved", "/new-uploads", "/recently-played", "/player/1"]:
             res = anonymous.get(path, follow_redirects=False)
             assert res.status_code == 303, path
             assert res.headers["location"] == "/login", path

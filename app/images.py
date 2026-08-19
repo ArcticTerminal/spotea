@@ -95,7 +95,7 @@ def download_thumbnail(video_id: str, thumbnail_url: str) -> str | None:
     """Same deal as download_avatar, for a video's thumbnail — re-served from
     our own origin instead of every Home/Library/Explore render hitting
     i*.ytimg.com directly for every card on screen. Safe to call for videos
-    already known (e.g. every entry in a freshly-fetched RSS feed, not just
+    already known (e.g. every entry in a freshly-fetched RSS artist, not just
     new ones) — _download_image's on-disk check makes repeat calls a no-op
     file stat rather than a redundant fetch."""
     return _download_image(settings.thumbnails_dir, f"{video_id}.jpg", thumbnail_url, "/thumbnails")

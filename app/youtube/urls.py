@@ -29,11 +29,6 @@ CHANNEL_ID_PARAM_RE = re.compile(r"channel_id=([\w-]+)")
 
 YOUTUBE_WATCH_URL = "https://www.youtube.com/watch?v={video_id}"
 
-# The shape a Feed row is keyed by. Nothing fetches it any more — the sync
-# reads YouTube Music, not RSS (see services/artist_sync.py) — but it is
-# still the canonical string two different routes into the same artist have
-# to agree on, which is what stops one artist becoming two rows.
-RSS_FEED_URL_TEMPLATE = "https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
 
 PLAYLIST_PAGE_URL_TEMPLATE = "https://www.youtube.com/playlist?list={playlist_id}"
 
@@ -43,8 +38,8 @@ CHANNEL_PAGE_URL_TEMPLATE = "https://www.youtube.com/channel/{channel_id}"
 # Every URL this package is handed can end up being fetched, and the only
 # thing standing between "follow this channel" and
 # a request-forgery primitive is the host. Without this check an authenticated
-# user could point POST /feeds at 127.0.0.1 or a LAN address and read the
-# failure text back; no Feed row could survive it (a real one needs a
+# user could point POST /artists at 127.0.0.1 or a LAN address and read the
+# failure text back; no Artist row could survive it (a real one needs a
 # yt_channelid in the response), so it was a probe rather than a breach, but
 # the probe is itself the leak. Checked at both entry points — resolve_feed_url,
 # so the error arrives before any network call, and fetch_feed, which is what
@@ -81,20 +76,11 @@ def is_youtube_url(url: str) -> bool:
 
 
 def extract_channel_id(url: str) -> str | None:
-    """The channel id out of either shape this app passes around: the feed
-    URL a Feed row is keyed by ("…?channel_id=UC…") and the channel page URL
+    """The channel id out of either shape this app passes around: the artist
+    URL a Artist row is keyed by ("…?channel_id=UC…") and the channel page URL
     the Follow button carries ("youtube.com/channel/UC…")."""
     match = CHANNEL_ID_PARAM_RE.search(url) or CHANNEL_ID_URL_RE.search(url)
     return match.group(1) if match else None
-
-
-def channel_feed_url(channel_id: str) -> str:
-    """The canonical key for a channel — the single place this shape is
-    built, so every code path that creates or upgrades a Feed row for a given
-    channel_id agrees on it (see services/feed_add.py and
-    routers/explore.py's _get_or_create_placeholder_feed, whose dedup lookup
-    depends on this being consistent)."""
-    return RSS_FEED_URL_TEMPLATE.format(channel_id=channel_id)
 
 
 def playlist_url(playlist_id: str) -> str:

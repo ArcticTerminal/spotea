@@ -26,7 +26,6 @@ from sqlalchemy.orm import Session
 from app.deps import get_current_user, get_db, require_login
 from app.models import User
 from app.page_context import (
-    channel_detail_context,
     downloads_context,
     home_context,
     library_context,
@@ -95,22 +94,6 @@ def storage_summary_fragment(
     return templates.TemplateResponse(
         request, "_fragment_storage_summary.html", storage_summary_context(db, user.id)
     )
-
-
-@router.get("/detail/channel/{feed_id}", response_class=HTMLResponse)
-def channel_detail_fragment(
-    feed_id: int,
-    request: Request,
-    background_tasks: BackgroundTasks,
-    page: int = 1,
-    user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-) -> HTMLResponse:
-    context = channel_detail_context(db, user.id, feed_id, page)
-    if context is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Channel not found")
-    queue_thumbnail_caching(background_tasks, context["content"])
-    return templates.TemplateResponse(request, "_fragment_detail.html", context)
 
 
 @router.get("/detail/playlist/{kind}", response_class=HTMLResponse)

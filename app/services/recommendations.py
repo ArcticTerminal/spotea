@@ -18,7 +18,7 @@ service that rate-limits an unauthenticated residential IP. So:
     what the interests hashed to, and reused until it expires or the interests
     change — opening the Explore tab costs nothing;
   * "expires" means the same interval the user already chose for background
-    feed refreshes (Settings → Feed updates), rather than a second cadence
+    artist refreshes (Settings → Artist updates), rather than a second cadence
     nobody asked for. There is deliberately no separate refresh control:
     recommendations go stale on that interval, when the interest list is
     edited, and when the app-wide Refresh button is pressed — the same three
@@ -43,7 +43,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.interests import interests_signature, parse_interests
-from app.models import Content, Feed, RecommendationCache, User
+from app.models import Artist, Content, RecommendationCache, User
 from app.timeutil import utcnow
 from app.youtube.music import (
     fetch_charts,
@@ -53,13 +53,12 @@ from app.youtube.music import (
     search_songs,
 )
 from app.youtube.music import search_playlists as search_music_playlists
-from app.youtube.urls import extract_channel_id
 
 logger = logging.getLogger(__name__)
 
 # Floor on how old a batch can be before the next visit to Explore rebuilds
 # it. Not a constant of its own: callers pass the user's
-# configured feed refresh interval (see User.feed_refresh_interval_minutes),
+# configured artist refresh interval (see User.refresh_interval_minutes),
 # so "how often does this app go and look at YouTube again" stays one setting
 # rather than two. This is only the fallback for a caller that passes no ttl.
 DEFAULT_TTL = timedelta(minutes=30)
@@ -290,21 +289,25 @@ def _drop_already_in_library(db: Session, user: User, batch: dict) -> dict:
     owned_video_ids = {
         video_id for (video_id,) in db.query(Content.video_id).filter(Content.user_id == user.id)
     }
-    followed_channel_ids = {
-        channel_id
-        for (channel_id,) in (
-            db.query(Feed.rss_url).filter(Feed.user_id == user.id, Feed.followed.is_(True))
+    # Both the Topic channel a follow is keyed by and the browse id an
+    # artist's page is addressed by: a search result carries the browse id,
+    # a chart entry can carry either, and a shelf that still offers someone
+    # already in the library is the bug this exists to stop.
+    followed_ids = {
+        value
+        for row in db.query(Artist.channel_id, Artist.browse_id).filter(
+            Artist.user_id == user.id, Artist.followed.is_(True)
         )
-        for channel_id in [extract_channel_id(channel_id)]
-        if channel_id is not None
+        for value in row
+        if value is not None
     }
 
     return {
         **batch,
         "videos": [v for v in batch["videos"] if v["video_id"] not in owned_video_ids],
-        "channels": [c for c in batch["channels"] if c["channel_id"] not in followed_channel_ids],
+        "channels": [c for c in batch["channels"] if c["channel_id"] not in followed_ids],
         "chart_artists": [
-            c for c in batch["chart_artists"] if c["channel_id"] not in followed_channel_ids
+            c for c in batch["chart_artists"] if c["channel_id"] not in followed_ids
         ],
     }
 

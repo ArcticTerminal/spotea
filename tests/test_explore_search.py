@@ -56,7 +56,7 @@ def sources(monkeypatch):
 def test_songs_come_from_youtube_music(client, sources):
     calls = sources(songs=[SONG], artists=[ARTIST])
 
-    res = client.get("/feeds/search-videos", params={"q": "sezen aksu"})
+    res = client.get("/explore/songs", params={"q": "sezen aksu"})
 
     assert res.status_code == 200
     assert [row["video_id"] for row in res.json()] == ["_efHZg9D9iE"]
@@ -64,11 +64,11 @@ def test_songs_come_from_youtube_music(client, sources):
 
 
 def test_a_song_row_carries_what_playing_it_needs(client, sources):
-    """The row is handed straight back to POST /feeds/videos, so the
+    """The row is handed straight back to POST /explore/tracks, so the
     artist's channel and the duration have to survive the round trip."""
     sources(songs=[SONG])
 
-    row = client.get("/feeds/search-videos", params={"q": "biliyorsun"}).json()[0]
+    row = client.get("/explore/songs", params={"q": "biliyorsun"}).json()[0]
 
     assert row["channel_id"] == "UCNaGLJRPE3ohleIDM7RFtlQ"
     assert row["channel_title"] == "Sezen Aksu"
@@ -80,7 +80,7 @@ def test_a_query_with_no_songs_is_an_empty_list(client, sources):
     so a query YouTube Music can't answer has no answer here either."""
     calls = sources(songs=[])
 
-    res = client.get("/feeds/search-videos", params={"q": "keynote how we built it"})
+    res = client.get("/explore/songs", params={"q": "keynote how we built it"})
 
     assert res.status_code == 200
     assert res.json() == []
@@ -90,7 +90,7 @@ def test_a_query_with_no_songs_is_an_empty_list(client, sources):
 def test_artist_search_never_reaches_for_the_song_index(client, sources):
     calls = sources(songs=[SONG], artists=[ARTIST])
 
-    res = client.get("/feeds/search", params={"q": "tarkan"})
+    res = client.get("/explore/artists", params={"q": "tarkan"})
 
     assert [row["channel_id"] for row in res.json()] == ["UCQm-Fc8TAF3c1hJffBPjxgw"]
     assert calls == ["artists"]
@@ -101,14 +101,14 @@ def test_an_artist_row_survives_a_missing_subscriber_count(client, sources):
     live). The card just prints a name; the row must not 500 over it."""
     sources(artists=[ARTIST])
 
-    row = client.get("/feeds/search", params={"q": "tarkan"}).json()[0]
+    row = client.get("/explore/artists", params={"q": "tarkan"}).json()[0]
 
     assert row["title"] == "Tarkan"
     assert row["subscriber_count"] is None
 
 
 @pytest.mark.parametrize("query", ["", "   "])
-@pytest.mark.parametrize("path", ["/feeds/search-videos", "/feeds/search"])
+@pytest.mark.parametrize("path", ["/explore/songs", "/explore/artists"])
 def test_an_empty_query_searches_nothing(client, sources, path, query):
     calls = sources(songs=[SONG], artists=[ARTIST])
 

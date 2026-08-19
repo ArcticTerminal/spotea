@@ -3,8 +3,8 @@ sweep_stale_previews).
 
 Measured live before any of this existed: thumbnails 1237 files/22MB with 22
 orphans; avatars 1060 files/25MB with 977 orphans (92%, 16.4MB); one orphaned
-.part file at 40.6MB; 491 stale preview rows; 217 followed=0 feeds (75% of
-all feeds) with nothing ever cleaning any of it up. Every test here pins one
+.part file at 40.6MB; 491 stale preview rows; 217 followed=0 artists (75% of
+all artists) with nothing ever cleaning any of it up. Every test here pins one
 piece of that down.
 """
 
@@ -13,10 +13,9 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
-from sqlalchemy import event
 
 from app.config import settings
-from app.models import Content, Feed, User
+from app.models import Artist, Content
 from app.storage import (
     PREVIEW_RETENTION,
     STALE_EXPORT_AGE,
@@ -29,22 +28,22 @@ from app.timeutil import utcnow
 USER_ID = 1
 
 
-def _feed(db_session, rss_url, **kwargs):
-    feed = Feed(user_id=USER_ID, rss_url=rss_url, channel_title="Lifecycle Channel", **kwargs)
-    db_session.add(feed)
+def _feed(db_session, channel_id, **kwargs):
+    artist = Artist(user_id=USER_ID, channel_id=channel_id, name="Lifecycle Channel", **kwargs)
+    db_session.add(artist)
     db_session.commit()
-    db_session.refresh(feed)
-    return feed
+    db_session.refresh(artist)
+    return artist
 
 
-def _feed_row_exists(db_session, feed_id) -> bool:
-    """Not db_session.get(Feed, feed_id): a prior sweep_stale_previews commit
+def _feed_row_exists(db_session, artist_id) -> bool:
+    """Not db_session.get(Artist, artist_id): a prior sweep_stale_previews commit
     in the same session expires every loaded object, and a bulk `.delete()`
-    is synchronize_session=False (it never marks the in-memory Feed as
+    is synchronize_session=False (it never marks the in-memory Artist as
     gone) — so .get() tries to refresh an object whose row is already gone
     and raises ObjectDeletedError instead of just returning None. A fresh
     query sidesteps the identity map entirely."""
-    return db_session.query(Feed).filter(Feed.id == feed_id).first() is not None
+    return db_session.query(Artist).filter(Artist.id == artist_id).first() is not None
 
 
 @pytest.fixture(autouse=True)
@@ -77,12 +76,12 @@ def test_sweep_orphans_removes_audio_no_row_points_at(db_session):
 
 
 def test_sweep_orphans_keeps_audio_a_row_still_references(db_session):
-    feed = _feed(db_session, "https://example.com/orphan-audio-kept")
+    artist = _feed(db_session, "https://example.com/orphan-audio-kept")
     referenced = settings.storage_dir / "kept00001.m4a"
     referenced.write_bytes(b"x")
     db_session.add(
         Content(
-            feed_id=feed.id, user_id=USER_ID, video_id="kept00001", title="Kept",
+            artist_id=artist.id, user_id=USER_ID, video_id="kept00001", title="Kept",
             status="ready", file_path=str(referenced),
         )
     )
@@ -104,12 +103,12 @@ def test_sweep_orphans_keeps_audio_a_row_spells_differently(db_session):
     scheduler tick, then deletes the whole audio library. Reproduced against
     the real code, and it is what emptied a live storage directory once.
     """
-    feed = _feed(db_session, "https://example.com/orphan-audio-relative")
+    artist = _feed(db_session, "https://example.com/orphan-audio-relative")
     referenced = settings.storage_dir / "spelled0001.m4a"
     referenced.write_bytes(b"x")
     db_session.add(
         Content(
-            feed_id=feed.id, user_id=USER_ID, video_id="spelled0001", title="Kept",
+            artist_id=artist.id, user_id=USER_ID, video_id="spelled0001", title="Kept",
             status="ready", file_path=os.path.relpath(referenced, Path.cwd()),
         )
     )
@@ -133,11 +132,11 @@ def test_sweep_orphans_keeps_a_thumbnail_any_row_still_references(db_session):
     """Keyed by video_id alone (see unlink_thumbnail_if_unshared) — a row
     doesn't need to be downloaded, favorited, or anything else to keep its
     thumbnail; just existing is enough."""
-    feed = _feed(db_session, "https://example.com/orphan-thumb-kept")
+    artist = _feed(db_session, "https://example.com/orphan-thumb-kept")
     kept = settings.thumbnails_dir / "keptthumb01.jpg"
     kept.write_bytes(b"x")
     db_session.add(
-        Content(feed_id=feed.id, user_id=USER_ID, video_id="keptthumb01", title="Kept")
+        Content(artist_id=artist.id, user_id=USER_ID, video_id="keptthumb01", title="Kept")
     )
     db_session.commit()
 
@@ -161,7 +160,7 @@ def test_sweep_orphans_keeps_an_avatar_a_followed_feed_references(db_session):
     kept = settings.avatars_dir / f"{channel_id}.jpg"
     kept.write_bytes(b"x")
     _feed(
-        db_session, f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}",
+        db_session, channel_id,
         avatar_url=f"/avatars/{channel_id}.jpg",
     )
 
@@ -228,21 +227,21 @@ def test_sweep_startup_leftovers_removes_every_part_file(db_session):
 # ------------------------------------------------------------ sweep_stale_previews
 
 
-def _preview(db_session, feed, video_id, *, age_days, **kwargs):
+def _preview(db_session, artist, video_id, *, age_days, **kwargs):
     defaults = {
         "is_preview": True,
         "added_at": utcnow() - timedelta(days=age_days),
     }
     defaults.update(kwargs)
-    content = Content(feed_id=feed.id, user_id=USER_ID, video_id=video_id, title=video_id, **defaults)
+    content = Content(artist_id=artist.id, user_id=USER_ID, video_id=video_id, title=video_id, **defaults)
     db_session.add(content)
     db_session.commit()
     return content
 
 
 def test_an_old_untouched_preview_is_removed(db_session):
-    feed = _feed(db_session, "https://example.com/stale-preview", followed=False)
-    _preview(db_session, feed, "stalepreview1", age_days=PREVIEW_RETENTION.days + 1)
+    artist = _feed(db_session, "https://example.com/stale-preview", followed=False)
+    _preview(db_session, artist, "stalepreview1", age_days=PREVIEW_RETENTION.days + 1)
 
     removed = sweep_stale_previews(db_session)
 
@@ -251,8 +250,8 @@ def test_an_old_untouched_preview_is_removed(db_session):
 
 
 def test_a_recent_preview_is_kept(db_session):
-    feed = _feed(db_session, "https://example.com/fresh-preview", followed=False)
-    _preview(db_session, feed, "freshpreview1", age_days=1)
+    artist = _feed(db_session, "https://example.com/fresh-preview", followed=False)
+    _preview(db_session, artist, "freshpreview1", age_days=1)
 
     removed = sweep_stale_previews(db_session)
 
@@ -261,9 +260,9 @@ def test_a_recent_preview_is_kept(db_session):
 
 
 def test_an_old_but_played_preview_is_kept(db_session):
-    feed = _feed(db_session, "https://example.com/played-preview", followed=False)
+    artist = _feed(db_session, "https://example.com/played-preview", followed=False)
     _preview(
-        db_session, feed, "playedpreview1",
+        db_session, artist, "playedpreview1",
         age_days=PREVIEW_RETENTION.days + 1, last_played_at=utcnow(),
     )
 
@@ -273,8 +272,8 @@ def test_an_old_but_played_preview_is_kept(db_session):
 
 
 def test_an_old_but_favorited_preview_is_kept(db_session):
-    feed = _feed(db_session, "https://example.com/fav-preview", followed=False)
-    _preview(db_session, feed, "favpreview001", age_days=PREVIEW_RETENTION.days + 1, is_favorite=True)
+    artist = _feed(db_session, "https://example.com/fav-preview", followed=False)
+    _preview(db_session, artist, "favpreview001", age_days=PREVIEW_RETENTION.days + 1, is_favorite=True)
 
     removed = sweep_stale_previews(db_session)
 
@@ -282,8 +281,8 @@ def test_an_old_but_favorited_preview_is_kept(db_session):
 
 
 def test_an_old_but_saved_preview_is_kept(db_session):
-    feed = _feed(db_session, "https://example.com/saved-preview", followed=False)
-    _preview(db_session, feed, "savedpreview1", age_days=PREVIEW_RETENTION.days + 1, is_saved=True)
+    artist = _feed(db_session, "https://example.com/saved-preview", followed=False)
+    _preview(db_session, artist, "savedpreview1", age_days=PREVIEW_RETENTION.days + 1, is_saved=True)
 
     removed = sweep_stale_previews(db_session)
 
@@ -291,11 +290,11 @@ def test_an_old_but_saved_preview_is_kept(db_session):
 
 
 def test_an_old_but_downloaded_preview_is_kept(db_session, tmp_path):
-    feed = _feed(db_session, "https://example.com/dl-preview", followed=False)
+    artist = _feed(db_session, "https://example.com/dl-preview", followed=False)
     audio = tmp_path / "dlpreview001.m4a"
     audio.write_bytes(b"x")
     _preview(
-        db_session, feed, "dlpreview0001",
+        db_session, artist, "dlpreview0001",
         age_days=PREVIEW_RETENTION.days + 1, status="ready", file_path=str(audio),
     )
 
@@ -306,42 +305,42 @@ def test_an_old_but_downloaded_preview_is_kept(db_session, tmp_path):
 
 
 def test_a_placeholder_feed_left_empty_by_the_sweep_is_also_removed(db_session):
-    """The other half: 217 followed=0 feeds (75% of all feeds) accumulated
+    """The other half: 217 followed=0 artists (75% of all artists) accumulated
     forever with nothing cleaning them up either."""
-    feed = _feed(db_session, "https://example.com/emptied-placeholder", followed=False)
-    feed_id = feed.id  # captured before the sweep — see _feed_row_exists' docstring
-    _preview(db_session, feed, "emptyplaceh1", age_days=PREVIEW_RETENTION.days + 1)
+    artist = _feed(db_session, "https://example.com/emptied-placeholder", followed=False)
+    artist_id = artist.id  # captured before the sweep — see _feed_row_exists' docstring
+    _preview(db_session, artist, "emptyplaceh1", age_days=PREVIEW_RETENTION.days + 1)
 
     sweep_stale_previews(db_session)
 
-    assert not _feed_row_exists(db_session, feed_id)
+    assert not _feed_row_exists(db_session, artist_id)
 
 
 def test_a_followed_feed_is_never_removed_even_if_emptied(db_session):
     """followed=True is a real subscription, not a placeholder — emptying its
     content (a followed channel whose only content was an old preview,
-    unlikely but possible) must not delete the feed itself."""
-    feed = _feed(db_session, "https://example.com/followed-not-removed", followed=True)
-    feed_id = feed.id
-    _preview(db_session, feed, "followedpre1", age_days=PREVIEW_RETENTION.days + 1)
+    unlikely but possible) must not delete the artist itself."""
+    artist = _feed(db_session, "https://example.com/followed-not-removed", followed=True)
+    artist_id = artist.id
+    _preview(db_session, artist, "followedpre1", age_days=PREVIEW_RETENTION.days + 1)
 
     sweep_stale_previews(db_session)
 
-    assert _feed_row_exists(db_session, feed_id)
+    assert _feed_row_exists(db_session, artist_id)
 
 
 def test_a_placeholder_feed_with_other_content_left_is_not_removed(db_session):
-    feed = _feed(db_session, "https://example.com/placeholder-not-empty", followed=False)
-    feed_id = feed.id
-    _preview(db_session, feed, "sweptaway001", age_days=PREVIEW_RETENTION.days + 1)
+    artist = _feed(db_session, "https://example.com/placeholder-not-empty", followed=False)
+    artist_id = artist.id
+    _preview(db_session, artist, "sweptaway001", age_days=PREVIEW_RETENTION.days + 1)
     db_session.add(
-        Content(feed_id=feed.id, user_id=USER_ID, video_id="stayingsafe1", title="Stays", is_favorite=True)
+        Content(artist_id=artist.id, user_id=USER_ID, video_id="stayingsafe1", title="Stays", is_favorite=True)
     )
     db_session.commit()
 
     sweep_stale_previews(db_session)
 
-    assert _feed_row_exists(db_session, feed_id)
+    assert _feed_row_exists(db_session, artist_id)
 
 
 # ------------------------------------------------------------------ wired at startup

@@ -13,7 +13,7 @@ indexes tracks rather than videos.
 **Deliberately not used for podcasts, and not used for channel search.**
 That is a measured decision, not an oversight. YouTube Music models a
 podcast as an "MPSP…" playlist rather than a channel, which is the wrong
-identity for an app whose entire sync path is a channel's RSS feed — and its
+identity for an app whose entire sync path is a channel's RSS artist — and its
 matching is worse besides: searching it for "The Diary of a CEO" put a
 reupload channel whose episodes have a few hundred views ahead of the real
 19M-subscriber one that youtube.com finds first. Podcast discovery and
@@ -212,8 +212,8 @@ def _artist_names(item: dict) -> tuple[str | None, str | None]:
     auto-generated "<Artist> - Topic" channel rather than the artist's
     official channel. That is the right choice *here* even though the Topic
     channel is not what anyone wants to follow: it arrives free in this same
-    response, it is a real UC id with a working RSS feed, and all it does is
-    give the preview row a placeholder feed to hang off (see
+    response, it is a real UC id with a working RSS artist, and all it does is
+    give the preview row a placeholder artist to hang off (see
     routers/explore.py's add_video_batch). Following is a separate action and
     resolves the official channel properly — see fetch_artist.
     """
@@ -572,14 +572,14 @@ def _topic_channel_id(songs: list[dict], name: str) -> str | None:
     is, that id is their Topic channel — the auto-generated one a label
     uploads licensed audio to. It is the only channel that carries their
     music and nothing else, which is what makes it the right thing to
-    follow: an official channel's feed also carries vlogs and interviews,
+    follow: an official channel's artist also carries vlogs and interviews,
     and those are not what someone following an artist in a music app is
     asking for.
 
     Matched by name rather than taken from the first credit, because a
     collaboration lists the other artist first. Measured on Shirin David and
     Sezen Aksu: the name match finds exactly one id, credited on 56 of 56
-    and 150 of 150 tracks respectively, and its feed is titled "<Artist> -
+    and 150 of 150 tracks respectively, and its artist is titled "<Artist> -
     Topic". Costs nothing — this is the response the page already returned.
 
     Case-insensitively, because the two halves of that match come from

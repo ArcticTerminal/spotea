@@ -4,7 +4,7 @@ Three kinds of cleanup live here, triggered from different places for
 different reasons:
 
   * A user action removing files it just made stale — clear_all,
-    delete_content (routers/content.py), delete_feed (routers/feeds.py) —
+    delete_content (routers/content.py), delete_feed (routers/artists.py) —
     each unlinks exactly the files its own action orphaned.
   * sweep_orphans, a directory-wide catch-all for files *no* row anywhere
     references any more — called after clear_all (so "Clear all" actually
@@ -34,7 +34,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from app.config import settings
-from app.models import Content, Feed
+from app.models import Artist, Content
 from app.timeutil import utcnow
 
 # Suffix for the half-written archive routers/storage.py's export_all builds.
@@ -103,7 +103,7 @@ def collect_usage(db: Session, user_id: int) -> StorageUsage:
     """
     rows = (
         db.query(Content)
-        .options(joinedload(Content.feed))
+        .options(joinedload(Content.artist))
         .filter(Content.user_id == user_id, Content.status == "ready")
         .order_by(Content.downloaded_at.desc())
         .all()
@@ -119,7 +119,7 @@ def collect_usage(db: Session, user_id: int) -> StorageUsage:
             StoredItem(
                 id=row.id,
                 title=row.title,
-                channel_title=row.feed.channel_title,
+                channel_title=row.artist.name,
                 size_bytes=row.file_size_bytes,
             )
         )
@@ -133,7 +133,7 @@ def collect_usage(db: Session, user_id: int) -> StorageUsage:
 def usage_summary(db: Session, user_id: int) -> UsageSummary:
     """Just the two numbers the Settings summary line needs — SUM and COUNT —
     without collect_usage's per-row materialization (a StoredItem, plus a
-    joinedload(feed), built for every ready row). That row-by-row work was
+    joinedload(artist), built for every ready row). That row-by-row work was
     running on every single Home page render and, before this, on every
     save/favorite/play too (see fragments.js's refreshFragments) for a line
     that only ever changes when a download starts or is removed.
@@ -162,9 +162,9 @@ def purge_content(db: Session, content: Content) -> None:
     login there is no second row to protect, so the check went away with the
     profiles that made it necessary.
 
-    Deliberately does not commit: the unfollow path (routers/feeds.py's
+    Deliberately does not commit: the unfollow path (routers/artists.py's
     delete_feed) purges many rows and commits once, and doing it per row
-    would leave a half-purged feed behind if one of them failed.
+    would leave a half-purged artist behind if one of them failed.
 
     Note this is for rows that are genuinely going away — content.py's
     delete_content resets a row's download state in place and keeps the row,
@@ -264,10 +264,10 @@ def sweep_orphans(db: Session) -> None:
             thumbnail.unlink(missing_ok=True)
 
     # Avatar filenames are "{channel_id}.jpg" (see images.download_avatar);
-    # Feed.avatar_url stores the served path built from that same name, so
+    # Artist.avatar_url stores the served path built from that same name, so
     # its basename is exactly what's on disk.
     referenced_avatars = {
-        Path(url).name for (url,) in db.query(Feed.avatar_url).filter(Feed.avatar_url.isnot(None))
+        Path(url).name for (url,) in db.query(Artist.avatar_url).filter(Artist.avatar_url.isnot(None))
     }
     for avatar in settings.avatars_dir.glob("*.jpg"):
         if avatar.name not in referenced_avatars:
@@ -287,7 +287,7 @@ def sweep_orphans(db: Session) -> None:
 # 7 days (not the 30 first proposed — locked decision): long enough to
 # revisit something browsed a few days ago, short enough that idle previews
 # from restless Explore browsing don't accumulate forever. Measured before
-# this: 491 preview rows, and 217 followed=0 feeds (75% of all feeds) with
+# this: 491 preview rows, and 217 followed=0 artists (75% of all artists) with
 # nothing else ever cleaning either up.
 PREVIEW_RETENTION = timedelta(days=7)
 
@@ -295,9 +295,9 @@ PREVIEW_RETENTION = timedelta(days=7)
 def sweep_stale_previews(db: Session) -> int:
     """Removes Explore previews nobody ever did anything with, once they're
     older than PREVIEW_RETENTION — same "did the user do anything with this"
-    test routers/feeds.py's delete_feed uses when deciding what an unfollow
+    test routers/artists.py's delete_feed uses when deciding what an unfollow
     may remove (played, favorited, saved, or actually downloaded keeps a row
-    forever, however old). Also removes any placeholder feed (followed=False)
+    forever, however old). Also removes any placeholder artist (followed=False)
     a swept preview leaves with no content at all — the same cleanup
     delete_feed does on the unfollow path, needed here too for a placeholder
     nobody ever followed or unfollowed, just abandoned. Returns rows removed.
@@ -318,20 +318,20 @@ def sweep_stale_previews(db: Session) -> int:
     if not stale:
         return 0
 
-    touched_feed_ids = {row.feed_id for row in stale}
+    touched_feed_ids = {row.artist_id for row in stale}
     for row in stale:
         purge_content(db, row)
     db.commit()
 
     empty_placeholder_ids = [
-        feed_id
-        for (feed_id,) in db.query(Feed.id)
-        .filter(Feed.id.in_(touched_feed_ids), Feed.followed.is_(False))
-        .filter(~Feed.content.any())
+        artist_id
+        for (artist_id,) in db.query(Artist.id)
+        .filter(Artist.id.in_(touched_feed_ids), Artist.followed.is_(False))
+        .filter(~Artist.content.any())
         .all()
     ]
     if empty_placeholder_ids:
-        db.query(Feed).filter(Feed.id.in_(empty_placeholder_ids)).delete(synchronize_session=False)
+        db.query(Artist).filter(Artist.id.in_(empty_placeholder_ids)).delete(synchronize_session=False)
         db.commit()
 
     return len(stale)

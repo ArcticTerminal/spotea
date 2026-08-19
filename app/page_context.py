@@ -16,13 +16,13 @@ from sqlalchemy.orm import Session, joinedload
 from app.content_query import (
     DEFAULT_PAGE_SIZE,
     count_content,
-    followed_feeds,
+    followed_artists,
     new_upload_filter,
     query_content_page,
 )
+from app.models import Content
 from app.services.artist_sync import cache_thumbnail
-from app.models import Content, Feed
-from app.services.backfill import backfilling_feed_ids
+from app.services.initial_sync import syncing_artist_ids
 from app.storage import collect_usage, usage_summary
 
 HOME_SHELF_LIMIT = 12
@@ -57,7 +57,7 @@ def _shelf_query(db: Session, user_id: int):
     # already saved.
     return (
         db.query(Content)
-        .options(joinedload(Content.feed))
+        .options(joinedload(Content.artist))
         .filter(Content.user_id == user_id, Content.is_preview.is_(False))
     )
 
@@ -73,10 +73,10 @@ def home_context(db: Session, user_id: int) -> dict:
     # Newest-first already; the chip row is just the most recently followed
     # few (with 100+ channels followed, the full list made that row an
     # endless horizontal scroll).
-    recent_channels = followed_feeds(db, user_id).limit(HOME_CHANNEL_LIMIT).all()
+    recent_artists = followed_artists(db, user_id).limit(HOME_CHANNEL_LIMIT).all()
 
     return {
-        "home_recent_channels": recent_channels,
+        "home_recent_artists": recent_artists,
         # Drives the "nothing here yet" branch — a cheap existence check
         # rather than counting anything.
         "has_content": db.query(Content.id).filter(Content.user_id == user_id).first() is not None,
@@ -95,7 +95,7 @@ def home_context(db: Session, user_id: int) -> dict:
         # the user ever listened.
         "home_recently_played": (
             db.query(Content)
-            .options(joinedload(Content.feed))
+            .options(joinedload(Content.artist))
             .filter(Content.user_id == user_id, Content.last_played_at.isnot(None))
             .order_by(Content.last_played_at.desc())
             .limit(HOME_SHELF_LIMIT)
@@ -137,27 +137,27 @@ def library_context(db: Session, user_id: int) -> dict:
     query_content_page) — a tile saying "12 videos" that opens onto a list of
     9 is worse than no count at all.
     """
-    feeds = followed_feeds(db, user_id).all()
+    artists = followed_artists(db, user_id).all()
     return {
-        "feeds": feeds,
+        "artists": artists,
         # Which cards say "Preparing…" — a channel whose one-time history scan
-        # is still running (services/backfill.py). Read straight off the
+        # is still running (services/initial_sync.py). Read straight off the
         # in-memory registry, so this costs a dict lookup per card and no
         # query at all. It is the whole reason the onboarding wizard no
         # longer makes anyone wait for a backfill: the wait moved onto the
         # card of the channel it actually belongs to, where it can be ignored.
-        "preparing_feed_ids": backfilling_feed_ids(feed.id for feed in feeds),
+        "preparing_artist_ids": syncing_artist_ids(artist.id for artist in artists),
         # One grouped count covers every channel's card, rather than a
-        # per-feed query each — count_content can't be reused directly here
-        # for that reason (it's one feed_id at a time), but the filter has to
+        # per-artist query each — count_content can't be reused directly here
+        # for that reason (it's one artist_id at a time), but the filter has to
         # match it anyway: is_preview excludes Explore videos not yet
         # favorited/saved, same as content_query._content_query, or a tile
         # can read a higher count than the channel page it opens onto lists
         # (measured live: 156 vs 154).
-        "channel_video_counts": dict(
-            db.query(Content.feed_id, func.count(Content.id))
+        "artist_track_counts": dict(
+            db.query(Content.artist_id, func.count(Content.id))
             .filter(Content.user_id == user_id, Content.is_preview.is_(False))
-            .group_by(Content.feed_id)
+            .group_by(Content.artist_id)
             .all()
         ),
         "favorites_count": (
@@ -247,7 +247,7 @@ def playlist_detail_context(db: Session, user_id: int, kind: str, page: int) -> 
 
     return {
         "kind": kind,
-        "feed": None,
+        "artist": None,
         "title": title,
         "empty_message": empty_message,
         "video_count": video_count,
@@ -260,28 +260,4 @@ def playlist_detail_context(db: Session, user_id: int, kind: str, page: int) -> 
         # click interception aside, it has to be a real navigable URL on its
         # own (ctrl-click, a JS-disabled fallback).
         "base_url": f"/#{kind}",
-    }
-
-
-def channel_detail_context(db: Session, user_id: int, feed_id: int, page: int) -> dict | None:
-    """One followed channel's track list. Returns None if the feed doesn't
-    exist or isn't this user's, so the caller can 404."""
-    feed = db.query(Feed).filter(Feed.id == feed_id, Feed.user_id == user_id).first()
-    if feed is None:
-        return None
-
-    video_count = count_content(db, user_id, feed_id=feed_id)
-    items, page, total_pages = query_content_page(db, user_id, page=page, feed_id=feed_id)
-
-    return {
-        "kind": "channel",
-        "feed": feed,
-        "title": feed.channel_title or feed.rss_url,
-        "empty_message": "No videos from this channel yet.",
-        "video_count": video_count,
-        "content": items,
-        "page": page,
-        "total_pages": total_pages,
-        "start_index": (page - 1) * DEFAULT_PAGE_SIZE + 1,
-        "base_url": f"/#channel/{feed_id}",
     }

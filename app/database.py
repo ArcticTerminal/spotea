@@ -11,7 +11,7 @@ _is_sqlite = settings.database_url.startswith("sqlite")
 #
 # NullPool, i.e. a fresh connection per session rather than a pooled one. The
 # default QueuePool caps out at pool_size=5 + max_overflow=10, and a single
-# background feed refresh already wants nine of those (one for the scheduler,
+# background artist refresh already wants nine of those (one for the scheduler,
 # eight for the fetch pool — see artist_sync.REFRESH_POOL_SIZE, whose workers
 # each open their own read session). Six left over is fewer than one user
 # action needs: refreshFragments() alone fires three requests, the queue's

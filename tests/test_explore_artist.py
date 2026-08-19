@@ -14,11 +14,11 @@ out.
 
 import pytest
 
-from app.models import Feed
+from app.models import Artist
 from app.services import remote_detail
 from app.timeutil import utcnow
-from app.youtube.music import ArtistProfile, ArtistRelease, ReleaseDetail
 from app.youtube.models import VideoSearchResult
+from app.youtube.music import ArtistProfile, ArtistRelease, ReleaseDetail
 
 USER_ID = 1
 BROWSE_ID = "UCNaGLJRPE3ohleIDM7RFtlQ"
@@ -109,7 +109,7 @@ def test_an_uncapped_track_list_just_counts(client, fake_artist):
 def test_follow_targets_the_topic_channel(client, fake_artist):
     """What "follow an artist" means in a music app: the channel that
     carries their releases and nothing else, so a new single reaches Home
-    while their vlogs don't. Their official channel is the wrong feed for
+    while their vlogs don't. Their official channel is the wrong artist for
     this even though it's the right page to link to."""
     fake_artist(_profile())
 
@@ -142,20 +142,20 @@ def test_an_already_followed_artist_points_at_the_library_copy(client, db_sessio
     """Followed-ness is checked against the same channel the button follows
     — anything else would leave it saying "Follow" forever."""
     fake_artist(_profile())
-    feed = Feed(
+    artist = Artist(
         user_id=USER_ID,
-        rss_url=f"https://www.youtube.com/feeds/videos.xml?channel_id={TOPIC_ID}",
-        channel_title="Sezen Aksu",
+        channel_id=TOPIC_ID,
+        name="Sezen Aksu",
         followed=True,
     )
-    db_session.add(feed)
+    db_session.add(artist)
     db_session.commit()
-    db_session.refresh(feed)
+    db_session.refresh(artist)
 
     res = client.get(f"/partials/detail/yt-artist/{BROWSE_ID}")
 
-    assert "In your library" in res.text
-    assert "Follow" not in res.text
+    assert "Following" in res.text
+    assert "unfollow-artist-btn" in res.text
 
 
 def test_an_id_that_is_not_an_artist_is_a_404(client, fake_artist):

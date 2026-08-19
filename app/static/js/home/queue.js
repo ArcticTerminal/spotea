@@ -89,12 +89,10 @@ function reorder(keepId) {
 }
 
 function queueUrl(source) {
-  return source.kind === "channel"
-    ? `/content/queue/channel/${source.id}`
-    : `/content/queue/playlist/${source.kind}`;
+  return `/content/queue/playlist/${source.kind}`;
 }
 
-/** The channel/playlist the loaded queue came from, or null. */
+/** The playlist the loaded queue came from, or null. */
 export function queueSource() {
   return state.source;
 }

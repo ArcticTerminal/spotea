@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:  # import cycle otherwise — models has no reason to know about schemas
     from app.models import Content
@@ -18,35 +18,34 @@ _CONTENT_TITLE_MAX_LENGTH = 500  # Content.title: String(500)
 # against a pasted list turning into thousands of yt-dlp resolutions.
 
 
-class FeedCreate(BaseModel):
+class ArtistCreate(BaseModel):
     """Following an artist. Only the channel is sent — which artist it is,
     and whether it is one at all, is the server's answer (see
-    services/feed_add.py)."""
+    services/artist_follow.py)."""
 
     channel_url: str = Field(min_length=1, max_length=_URL_MAX_LENGTH)
 
 
-class FeedOut(BaseModel):
+class ArtistOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    rss_url: str
-    channel_title: str | None
+    channel_id: str
+    name: str | None
     avatar_url: str | None
     added_at: datetime
-    # Reported back because the client no longer decides it: a follow can
-    # arrive as a plain channel URL and come out the other side as an
-    # artist's, with the server having worked that out (see
-    # services/feed_add._as_artist_follow). This is how the page that asked
-    # finds out which of the two it got.
-    artist_browse_id: str | None = None
+    # Reported back because the client never decides it: a follow arrives as
+    # a channel URL and the server works out which artist that is (see
+    # services/artist_follow.py). This is how the page that asked finds out
+    # whose profile to open next.
+    browse_id: str | None = None
 
 
 class ContentOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    feed_id: int
+    artist_id: int
     channel_title: str | None
     video_id: str
     title: str
@@ -64,11 +63,11 @@ class ContentOut(BaseModel):
 
     @classmethod
     def from_content(cls, content: "Content") -> "ContentOut":
-        """Build from a Content row. Requires `content.feed` to be loaded —
-        every caller uses joinedload(Content.feed) for exactly this reason.
+        """Build from a Content row. Requires `content.artist` to be loaded —
+        every caller uses joinedload(Content.artist) for exactly this reason.
 
         Not `model_validate`: two of the fields aren't columns. channel_title
-        comes from the related Feed, and is_played is a derived boolean rather
+        comes from the related Artist, and is_played is a derived boolean rather
         than the raw last_played_at timestamp (the client only ever needs
         "has this been played", and the timestamp isn't the client's business).
         This was written out field-by-field at both call sites, which is a
@@ -76,8 +75,8 @@ class ContentOut(BaseModel):
         """
         return cls(
             id=content.id,
-            feed_id=content.feed_id,
-            channel_title=content.feed.channel_title,
+            artist_id=content.artist_id,
+            channel_title=content.artist.name,
             video_id=content.video_id,
             title=content.title,
             thumbnail_url=content.thumbnail_url,
@@ -165,7 +164,7 @@ class RecommendationsOut(BaseModel):
     """Explore's browse shelves. Every result list reuses a shape the search
     box already returns, because they come from the same searches — the
     client renders a recommended song and a searched one identically, and
-    "listen" on either goes through POST /feeds/videos."""
+    "listen" on either goes through POST /artists/videos."""
 
     # Everything the interest list holds, so Explore can say what it's working
     # from (and tell "no interests set" apart from "interests set, nothing
@@ -224,8 +223,8 @@ class VideoBatchResult(BaseModel):
     content_ids: list[int]
 
 
-class FeedAddResult(BaseModel):
-    feed: FeedOut
+class ArtistAddResult(BaseModel):
+    artist: ArtistOut
     new_content_count: int
 
 
@@ -235,13 +234,13 @@ class RefreshResult(BaseModel):
 
 class SettingsOut(BaseModel):
     audio_quality: str
-    feed_refresh_interval_minutes: int
+    refresh_interval_minutes: int
     interests: list[str]
 
 
 class SettingsUpdate(BaseModel):
     audio_quality: str | None = None
-    feed_refresh_interval_minutes: int | None = None
+    refresh_interval_minutes: int | None = None
     # Always the complete list, never a single tag to add or remove: the
     # Settings editor holds the whole list client-side anyway, and a
     # whole-list PUT means add, remove and reorder are one code path instead
