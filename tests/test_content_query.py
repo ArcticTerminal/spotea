@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 
-from app.content_query import CHANNEL_FILTER_PREFIX, query_content_page
+from app.content_query import query_content_page
 from app.models import Content, Feed
 from app.timeutil import utcnow
 
@@ -112,45 +112,6 @@ def test_filter_by_channel_title(db_session):
 
     assert items
     assert all(i.feed.channel_title == "Beta Channel" for i in items)
-
-
-def test_filter_exact_channel_excludes_title_matches(db_session):
-    """The exact-channel filter (CHANNEL_FILTER_PREFIX) must not pick up a
-    video from a *different* channel just because its title happens to
-    mention the target channel's name — that's what the plain substring
-    filter below is for, and conflating the two was the actual bug this
-    guards against."""
-    feeds = [
-        Feed(user_id=USER_ID, rss_url="https://example.com/feedA", channel_title="Linus Tech Tips"),
-        Feed(user_id=USER_ID, rss_url="https://example.com/feedB", channel_title="Brodie Robertson"),
-    ]
-    db_session.add_all(feeds)
-    db_session.commit()
-    for f in feeds:
-        db_session.refresh(f)
-
-    now = datetime(2026, 1, 1)
-    db_session.add_all(
-        [
-            Content(feed_id=feeds[0].id, user_id=USER_ID, video_id="vid00000001", title="A regular video", published_at=now),
-            Content(
-                feed_id=feeds[1].id,
-                user_id=USER_ID,
-                video_id="vid00000002",
-                title="Thank You Linus Tech Tips",
-                published_at=now,
-            ),
-        ]
-    )
-    db_session.commit()
-
-    exact_items, _, _ = query_content_page(
-        db_session, USER_ID, filter=f"{CHANNEL_FILTER_PREFIX}Linus Tech Tips", page_size=100
-    )
-    assert [i.feed.channel_title for i in exact_items] == ["Linus Tech Tips"]
-
-    substring_items, _, _ = query_content_page(db_session, USER_ID, filter="Linus Tech Tips", page_size=100)
-    assert {i.feed.channel_title for i in substring_items} == {"Linus Tech Tips", "Brodie Robertson"}
 
 
 def test_filter_with_no_matches_is_a_valid_empty_page(db_session):

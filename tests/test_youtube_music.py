@@ -365,7 +365,6 @@ def test_an_artist_page_resolves_the_official_channel(client):
     assert artist.channel_id == "UC6OI7Crv96jgra5pwJNDFRQ"
     assert artist.subscriber_count == 3_190_000
     assert [track.video_id for track in artist.tracks] == ["_efHZg9D9iE"]
-    assert music.resolve_artist_channel("UCNaGLJRPE3ohleIDM7RFtlQ") == "UC6OI7Crv96jgra5pwJNDFRQ"
 
 
 def test_the_videos_section_is_left_out(client):
@@ -496,9 +495,10 @@ def test_a_short_catalogue_is_not_reported_as_truncated(client):
     assert artist.track_count == 56
 
 
-def test_resolving_a_channel_does_not_pay_for_the_track_list(client):
-    """A follow click wants one field off the page header. The second
-    request the track list costs would buy nothing there."""
+def test_all_songs_false_does_not_pay_for_the_track_list(client):
+    """A follow click wants the ids off the page header (see
+    feed_add._as_artist_follow). The second request the track list costs
+    would buy nothing there."""
     fake = client(
         get_artist={
             "name": "Sezen Aksu",
@@ -507,7 +507,9 @@ def test_resolving_a_channel_does_not_pay_for_the_track_list(client):
         }
     )
 
-    assert music.resolve_artist_channel("UCNaGLJRPE3ohleIDM7RFtlQ") == "UC6OI7Crv96jgra5pwJNDFRQ"
+    artist = music.fetch_artist("UCNaGLJRPE3ohleIDM7RFtlQ", all_songs=False)
+
+    assert artist.channel_id == "UC6OI7Crv96jgra5pwJNDFRQ"
     assert [call[0] for call in fake.calls] == ["get_artist"]
 
 
@@ -615,7 +617,6 @@ def test_an_unknown_artist_is_none_not_an_empty_profile(client):
     client(get_artist=None)
 
     assert music.fetch_artist("UCnope") is None
-    assert music.resolve_artist_channel("UCnope") is None
 
 
 @pytest.mark.parametrize(

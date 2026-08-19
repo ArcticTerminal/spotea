@@ -196,7 +196,6 @@ def remote_artist_context(
         "songs_url": f"/#yt-artist-songs/{browse_id}",
         "albums": artist.albums,
         "singles": artist.singles,
-        "videos": artist.videos,
         "related": artist.related,
         # See ArtistRelease: the year is the only date this surface reports,
         # so "new" can mean nothing finer than "released this year".

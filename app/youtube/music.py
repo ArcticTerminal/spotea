@@ -468,11 +468,6 @@ class ArtistProfile:
     # one of these costs exactly what a bare track list costs.
     albums: list[ArtistRelease] = field(default_factory=list)
     singles: list[ArtistRelease] = field(default_factory=list)
-    # Music videos. No duration on any of them (their entries carry
-    # title/videoId/artists/playlistId/thumbnails/views and nothing else),
-    # which is why these belong in a shelf of cards and not in the track
-    # list — a card doesn't print a duration in the first place.
-    videos: list[VideoSearchResult] = field(default_factory=list)
     related: list[ChannelSearchResult] = field(default_factory=list)
 
 
@@ -671,7 +666,6 @@ def fetch_artist(browse_id: str, all_songs: bool = True) -> ArtistProfile | None
         track_count=track_count,
         albums=_releases(artist.get("albums"), "Album"),
         singles=_releases(artist.get("singles"), "Single"),
-        videos=_song_results((artist.get("videos") or {}).get("results")),
         related=_related_artists(artist.get("related")),
     )
 
@@ -715,21 +709,3 @@ def fetch_release(browse_id: str) -> ReleaseDetail | None:
         artist_names=", ".join(artists) or None,
         tracks=tracks,
     )
-
-
-def resolve_artist_channel(browse_id: str) -> str | None:
-    """The official YouTube channel behind an artist's Topic channel, for
-    turning "follow this artist" into a channel this app can actually sync.
-
-    Verified live: the Topic id every song result carries
-    ("UCNaGLJRPE3ohleIDM7RFtlQ") resolves to "UC6OI7Crv96jgra5pwJNDFRQ",
-    which is @sezenaksu — 3.19M subscribers and a real upload feed, where
-    the Topic channel is an automated container nobody would choose to
-    follow. Costs one request, which is why it happens on the follow click
-    and not on every search result.
-    """
-    # all_songs=False: this wants one field off the page header, and the full
-    # track list it would otherwise pull costs a second request nobody here
-    # reads.
-    artist = fetch_artist(browse_id, all_songs=False)
-    return artist.channel_id if artist else None

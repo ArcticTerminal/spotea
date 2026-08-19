@@ -185,19 +185,6 @@ def test_report_playback_only_sends_the_unexpected_events() -> None:
     )
 
 
-def test_explore_recommendations_split_by_duration_at_ten_minutes() -> None:
-    """Measured live: Music profile 11/11 recommended videos ran over 10
-    minutes; Podcast 10/12, median 2:18:19. Splitting onto a "Long form"
-    shelf instead of filtering it out matters specifically for the Podcast
-    profile — its own interests (linux, devops) make hour-long content the
-    *correct* result, not noise."""
-    source = (JS_DIR / "home" / "explore.js").read_text()
-
-    assert "const LONG_FORM_THRESHOLD_SECONDS = 10 * 60;" in source
-    assert 'shelfHtml("Contents", contents, recVideoCardHtml)' in source
-    assert 'shelfHtml("Long form", longForm, recVideoCardHtml)' in source
-
-
 def test_wire_scrollers_does_not_leak_a_listener_or_observer_per_row() -> None:
     """wireScrollers() runs again after every fragment swap (Home/Library
     rows get replaced wholesale), and it used to create a brand new

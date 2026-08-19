@@ -231,33 +231,9 @@ function recPlaylistCardHtml(playlist) {
   `;
 }
 
-// Above this, a video goes on the "Long form" shelf instead of "Contents" —
-// matches the ≤10-minute line the audit measured against (Music profile:
-// 11/11 recommended videos ran over this; Podcast: 10/12, median 2:18:19).
-// Naming is deliberately content-type-neutral rather than "Songs"/"Mixes":
-// the Podcast profile's own interests (linux, devops) mean hour-long content
-// there is the *correct* result, not noise to filter out — this only sorts
-// it onto its own shelf instead of hiding it.
-const LONG_FORM_THRESHOLD_SECONDS = 10 * 60;
-
-/** Splits a video list into { contents, longForm } by LONG_FORM_THRESHOLD_
- *  SECONDS. A video with no known duration goes to "Contents" — most
- *  recommended content is short-form, and an unknown duration is rare
- *  (search results carry it from yt-dlp's flat extraction almost always). */
-function splitByDuration(videos) {
-  const contents = [];
-  const longForm = [];
-  for (const video of videos) {
-    const isLongForm = video.duration_seconds != null && video.duration_seconds > LONG_FORM_THRESHOLD_SECONDS;
-    (isLongForm ? longForm : contents).push(video);
-  }
-  return { contents, longForm };
-}
-
 /** A whole shelf, or nothing at all when that kind came back empty — an
- *  empty "Playlists" heading is worse than no heading. Exported for the
- *  onboarding wizard, which builds one per picked genre. */
-export function shelfHtml(title, items, cardHtml) {
+ *  empty "Playlists" heading is worse than no heading. */
+function shelfHtml(title, items, cardHtml) {
   if (!items.length) return "";
   return `
     <div class="shelf">
@@ -285,11 +261,9 @@ function renderRecommendations(data) {
   const body = document.getElementById("recommendations-body");
   if (!body) return;
 
-  const { contents, longForm } = splitByDuration(data.videos);
   const shelves = [
     // Interest-based first, because they're the ones about this profile.
-    shelfHtml("Contents", contents, recVideoCardHtml),
-    shelfHtml("Long form", longForm, recVideoCardHtml),
+    shelfHtml("Songs", data.videos, recVideoCardHtml),
     shelfHtml("Channels", data.channels, channelCardHtml),
     shelfHtml("Playlists", data.playlists, recPlaylistCardHtml),
     // Then what everyone gets: this week's charts and one rotating mood.

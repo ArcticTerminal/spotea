@@ -63,7 +63,6 @@ def _profile(**overrides):
         "albums": [_release()],
         "singles": [_release("Gut Genug", "2026", "Single", "MPREb_5Y3mCZ5XtG3")],
         "related": [],
-        "videos": [],
     }
     fields.update(overrides)
     return ArtistProfile(**fields)

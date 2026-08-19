@@ -79,34 +79,6 @@
 {{ release_shelf("Albums", albums) }}
 {{ release_shelf("Singles", singles) }}
 
-{% if videos %}
-<div class="shelf">
-  <div class="shelf-header"><h3 class="shelf-title">Videos</h3></div>
-  <div class="shelf-row">
-    {% for video in videos %}
-    {# A card, not a row: these carry no duration at all (see
-       music.ArtistProfile.videos), and a card doesn't print one. #}
-    <article
-      class="card rec-card"
-      data-video-id="{{ video.video_id }}"
-      data-title="{{ video.title }}"
-      data-thumbnail-url="{{ video.thumbnail_url or '' }}"
-      data-channel-title="{{ video.channel_title or '' }}"
-      data-channel-id="{{ video.channel_id or '' }}"
-    >
-      <button type="button" class="thumb rec-play" aria-label="Play {{ video.title }}">
-        {% if video.thumbnail_url %}<img src="{{ video.thumbnail_url }}" alt="" loading="lazy" />{% endif %}
-      </button>
-      <div class="card-body">
-        <h3 class="card-title" title="{{ video.title }}">{{ video.title }}</h3>
-        <p class="card-channel">{{ video.channel_title or "" }}</p>
-      </div>
-    </article>
-    {% endfor %}
-  </div>
-</div>
-{% endif %}
-
 {% if related %}
 <div class="shelf">
   <div class="shelf-header"><h3 class="shelf-title">Similar artists</h3></div>

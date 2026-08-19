@@ -90,9 +90,6 @@ def followed_feeds(
 # from a different channel whose title happens to contain the channel's name
 # (e.g. a reaction video titled "... Linus Tech Tips ...") can't sneak in
 # the way it would under the substring title-or-channel search below.
-CHANNEL_FILTER_PREFIX = "__channel__:"
-
-
 def _content_query(
     db: Session, user_id: int, filter: str = "", feed_id: int | None = None
 ) -> Query[Content]:
@@ -143,9 +140,6 @@ def _content_query(
         query = query.filter(Content.last_played_at.isnot(None))
     elif filter == "__new_uploads__":
         query = query.filter(new_upload_filter())
-    elif filter.startswith(CHANNEL_FILTER_PREFIX):
-        channel_title = filter[len(CHANNEL_FILTER_PREFIX) :]
-        query = query.filter(Feed.channel_title == channel_title)
     elif filter:
         # Substring, case-insensitive, against either field: this is the
         # free-text search box, not a channel picklist, so a search for a
