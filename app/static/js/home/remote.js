@@ -147,10 +147,10 @@ function hideBackfillOverlay() {
 // which read as broken. Keeping the count in its own nowrap element keeps it
 // atomic no matter how the title line wraps.
 function backfillPhaseParts(phase, done, total) {
-  // The first RSS read, which POST /feeds used to do before answering and
+  // The first sync, which POST /feeds used to do before answering and
   // now hands to services/backfill.run_initial_sync. It carries no count —
   // nothing knows how many entries there are until it has parsed them.
-  if (phase === "syncing") return { title: "Fetching RSS feed…", detail: "" };
+  if (phase === "syncing") return { title: "Fetching releases…", detail: "" };
   if (phase === "scanning") {
     if (total > 0) return { title: "Fetching channel history…", detail: `${done}/${total} videos found` };
     if (done > 0) return { title: "Fetching channel history…", detail: `Page ${done}` };
@@ -166,7 +166,7 @@ const isActiveBackfillPhase = (phase) =>
 // Polls until a just-added channel's backfill is done, then announces it.
 // Assumes showBackfillOverlay() is already up (callers show it when the add
 // starts, before the POST even resolves, so there's no gap where the screen
-// looks idle while the RSS sync — itself a couple of seconds — is in flight).
+// looks idle while the first sync — itself a second or two — is in flight).
 async function waitForBackfill(
   feedId,
   title,
@@ -239,7 +239,7 @@ async function waitForBackfill(
  * phase/count it would otherwise have shown there.
  *
  * `waitForHistory: false` returns as soon as the channel exists — that is,
- * once POST /feeds has resolved it and applied its RSS feed, which is what
+ * once POST /feeds has resolved the artist and synced them, which is what
  * puts its recent uploads in the library. The one-time full-history scan
  * behind it keeps running server-side either way (it is a background task,
  * not something the client holds open), and for a large channel it is
@@ -250,28 +250,24 @@ async function waitForBackfill(
 export async function followChannel(
   channelUrl,
   button,
-  { announce = true, showOverlay = true, waitForHistory = true, onProgress, artistBrowseId = null } = {}
+  { announce = true, showOverlay = true, waitForHistory = true, onProgress } = {}
 ) {
   const originalLabel = button?.textContent;
   if (button) {
     button.disabled = true;
     button.textContent = "Adding…";
   }
-  // Shown immediately, before the request even starts: add_feed's RSS sync
-  // alone can take a couple of seconds, and leaving the screen looking idle
-  // for that stretch reads as nothing happening yet.
-  if (showOverlay) showBackfillOverlay("Fetching RSS feed…", "");
-  // add_feed resolves the channel and syncs its RSS before it answers, which
-  // is seconds on its own — a caller watching onProgress would otherwise see
-  // nothing at all until the backfill starts.
-  onProgress?.({ phase: "Fetching RSS feed…", detail: "" });
+  // Shown immediately, before the request even starts: resolving the artist
+  // takes about a second, and leaving the screen looking idle for that
+  // stretch reads as nothing happening yet.
+  if (showOverlay) showBackfillOverlay("Finding the artist…", "");
+  onProgress?.({ phase: "Finding the artist…", detail: "" });
 
   const { ok, status, data } = await api("/feeds", {
     method: "POST",
-    // Following from an artist's profile sends who it is, which is what
-    // tells the server to record the feed as that artist and to skip the
-    // history scan — see routers/feeds.py's add_feed.
-    body: { channel_url: channelUrl, artist_browse_id: artistBrowseId },
+    // Only the channel: which artist it is, and whether it is one at all,
+    // is worked out server-side (see services/feed_add.py).
+    body: { channel_url: channelUrl },
   });
 
   if (ok) {
@@ -281,7 +277,7 @@ export async function followChannel(
     }
     if (!waitForHistory) {
       if (showOverlay) hideBackfillOverlay();
-      // The feed row and its RSS videos exist now, which is what Library and
+      // The feed row exists now, which is what Library and
       // Home render from — and the grid needs re-rendering anyway to pick up
       // the new card's "still fetching" state.
       refreshFragments();

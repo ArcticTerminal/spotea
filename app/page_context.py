@@ -20,7 +20,7 @@ from app.content_query import (
     new_upload_filter,
     query_content_page,
 )
-from app.feed_sync import cache_thumbnail
+from app.services.artist_sync import cache_thumbnail
 from app.models import Content, Feed
 from app.services.backfill import backfilling_feed_ids
 from app.storage import collect_usage, usage_summary
@@ -36,7 +36,7 @@ def queue_thumbnail_caching(background_tasks: BackgroundTasks, items: Iterable[C
     prior version of this did that at startup; on a large library it meant
     downloading and storing thumbnails for things nobody was looking at yet).
     This render still goes out with the original YouTube URL for anything
-    not yet cached — the queued task (see feed_sync.cache_thumbnail) only
+    not yet cached — the queued task (see artist_sync.cache_thumbnail) only
     ever benefits the *next* time this same content is rendered, anywhere.
     Deduped per call so a video appearing in more than one shelf here isn't
     queued twice."""
@@ -215,7 +215,7 @@ def storage_summary_context(db: Session, user_id: int) -> dict:
 PLAYLIST_KINDS: dict[str, tuple] = {
     "favorites": ("__favorites__", "Favorites", "No favorites yet."),
     "saved": ("__saved__", "Saved for later", "Nothing saved yet."),
-    "new-uploads": ("__new_uploads__", "New Uploads", "No new uploads yet."),
+    "new-uploads": ("__new_uploads__", "New releases", "Nothing new yet."),
     "recently-played": ("__played__", "Recently Played", "Nothing played yet."),
 }
 

@@ -19,11 +19,11 @@ _CONTENT_TITLE_MAX_LENGTH = 500  # Content.title: String(500)
 
 
 class FeedCreate(BaseModel):
+    """Following an artist. Only the channel is sent — which artist it is,
+    and whether it is one at all, is the server's answer (see
+    services/feed_add.py)."""
+
     channel_url: str = Field(min_length=1, max_length=_URL_MAX_LENGTH)
-    # Present only when following from an artist's profile, where the page
-    # knows both which artist this is and that its channel is a Topic one.
-    # See Feed.artist_browse_id for what that changes.
-    artist_browse_id: str | None = Field(default=None, max_length=32)
 
 
 class FeedOut(BaseModel):

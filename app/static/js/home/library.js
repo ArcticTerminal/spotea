@@ -7,7 +7,7 @@ import { onFragmentsSwapped, refreshFragments } from "../fragments.js";
 import { wireScrollers } from "./scrollers.js";
 import { openDetail } from "./detail.js";
 
-// How often a Library card that says "Fetching uploads…" checks whether
+// How often a Library card that says "Fetching releases…" checks whether
 // that is still true. A history scan is minutes long, so this is about
 // noticing it *ended*, not about tracking its progress — and it only runs at
 // all while such a card is on the page.
@@ -45,11 +45,11 @@ function schedulePreparingCheck() {
 }
 
 /**
- * Keeps Library's "Fetching uploads…" cards honest.
+ * Keeps Library's "Fetching releases…" cards honest.
  *
  * A newly followed channel gets a card as soon as its feed row exists —
  * POST /feeds answers there and leaves the rest to a background job (see
- * services/backfill.run_initial_sync): the RSS content first, seconds, then
+ * services/backfill.run_initial_sync): the catalogue snapshot, then
  * the full upload history, minutes on a large channel. That wait used to be
  * held in front of whoever added it (the onboarding wizard sat on a loading
  * screen for it); now it lives on the card of the channel it belongs to,

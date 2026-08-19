@@ -121,7 +121,7 @@ def test_home_applies_the_duration_and_filesize_template_filters(client, db_sess
 
 
 def test_channel_and_playlist_pages_redirect_to_their_hash_route(client):
-    """Favorites/Saved/New Uploads/Recently Played/a channel/a track all moved
+    """Favorites/Saved/New releases/Recently Played/a channel/a track all moved
     in-page (see app/static/js/home/detail.js, home/overlay.js) — these
     routes exist only so an old link or bookmark still lands somewhere real.
     The actual rendering is now GET /partials/detail/... — see

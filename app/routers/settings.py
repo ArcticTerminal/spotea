@@ -12,7 +12,7 @@ AUDIO_QUALITIES = ("high", "low")
 
 # Presets rather than a free-form number — keeps the control simple (matches
 # the audio-quality radios) and rules out a value aggressive enough to risk
-# YouTube rate-limiting the unauthenticated calls in feed_sync.
+# YouTube rate-limiting the unauthenticated calls in artist_sync.
 FEED_REFRESH_INTERVALS = (15, 30, 60, 120)
 
 

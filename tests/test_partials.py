@@ -272,7 +272,7 @@ def test_empty_playlist_detail_fragments_render_their_empty_message(client):
     for kind, message in [
         ("favorites", "No favorites yet."),
         ("saved", "Nothing saved yet."),
-        ("new-uploads", "No new uploads yet."),
+        ("new-uploads", "Nothing new yet."),
         ("recently-played", "Nothing played yet."),
     ]:
         res = client.get(f"/partials/detail/playlist/{kind}")

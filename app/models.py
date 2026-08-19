@@ -101,6 +101,12 @@ class Feed(Base):
     # of rss_url; kept explicit because "we followed this as an artist" is a
     # decision worth recording rather than re-deriving from a URL shape.
     artist_browse_id: Mapped[str | None] = mapped_column(String(32), default=None)
+    # Every release browse id YouTube Music listed for this artist last time
+    # we looked, as a JSON array. The whole change-detection mechanism: what
+    # is on the page now and not in here is something they put out since (see
+    # services/artist_sync.py). NULL means "never synced", which is what makes
+    # a first sync record the catalogue without importing it.
+    release_snapshot: Mapped[str | None] = mapped_column(Text, default=None)
 
     user: Mapped["User"] = relationship(back_populates="feeds")
     content: Mapped[list["Content"]] = relationship(back_populates="feed", cascade="all, delete-orphan")
@@ -127,7 +133,7 @@ class Content(Base):
         # and order by published_at, which the (user_id, published_at) index
         # above could only answer by walking every row the user has.
         Index("ix_content_user_feed_published", "user_id", "feed_id", "published_at"),
-        # Looked up by video_id alone — feed_sync.cache_thumbnail, which
+        # Looked up by video_id alone — artist_sync.cache_thumbnail, which
         # runs per rendered item. The (user_id, video_id) unique constraint
         # can't serve it: video_id is its second column.
         Index("ix_content_video_id", "video_id"),
@@ -219,7 +225,7 @@ class Content(Base):
     # followed, or any later routine refresh — see feed_sync.apply_feed_data,
     # the only place this is set) — False for services/backfill.py's direct inserts
     # (the full-history scan) and Explore's add_single_video. This is what
-    # "New Uploads" (Home shelf and Library's full playlist) actually means:
+    # "New releases" (Home shelf and Library's full playlist) actually means:
     # RSS-sourced content, not a channel's backfilled-in history.
     is_new_upload: Mapped[bool] = mapped_column(default=False)
 

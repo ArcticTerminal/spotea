@@ -262,7 +262,6 @@ export function setupDetailPanel() {
       // An artist profile's button carries who it is; every other hero's
       // doesn't, and undefined leaves the request exactly as it was.
       followChannel(followBtn.dataset.channelUrl, followBtn, {
-        artistBrowseId: followBtn.dataset.artistBrowseId || null,
       });
       return;
     }

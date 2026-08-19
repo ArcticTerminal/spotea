@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.content_query import followed_feeds
 from app.database import SessionLocal
-from app.feed_sync import refresh_feeds
+from app.services.artist_sync import refresh_feeds
 from app.models import User
 from app.storage import sweep_orphans, sweep_stale_previews
 from app.timeutil import utcnow

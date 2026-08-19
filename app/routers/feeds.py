@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.content_query import followed_feeds
 from app.deps import get_current_user, get_db, require_login
-from app.feed_sync import refresh_feeds as sync_refresh_feeds
+from app.services.artist_sync import refresh_feeds as sync_refresh_feeds
 from app.models import Content, Feed, User
 from app.schemas import (
     FeedAddResult,
@@ -26,10 +26,8 @@ from app.services.backfill import (
     mark_syncing,
     run_initial_sync_task,
 )
-from app.services.feed_add import FeedAlreadyExistsError, add_feed_core
+from app.services.feed_add import FeedAlreadyExistsError, NotAnArtistError, add_feed_core
 from app.storage import purge_content
-from app.youtube.extract import ChannelResolutionError
-from app.youtube.rss import FeedUnavailableError, InvalidFeedError
 
 router = APIRouter(prefix="/feeds", tags=["feeds"], dependencies=[Depends(require_login)])
 
@@ -42,28 +40,18 @@ def add_feed(
     db: Session = Depends(get_db),
 ) -> FeedAddResult:
     try:
-        feed, new_count, _channel_id = add_feed_core(
+        feed, new_count = add_feed_core(
             db,
             payload.channel_url,
             user.id,
-            artist_browse_id=payload.artist_browse_id,
-            # Answer as soon as the feed row exists. Everything after it —
-            # the content, the durations, the avatar — is what
-            # run_initial_sync does in the background, and what Library's
-            # card reports while it happens.
+            # Answer as soon as the feed row exists. The catalogue snapshot
+            # and the avatar behind it are what run_initial_sync does in the
+            # background, and what Library's card reports while it happens.
             sync=False,
         )
     except FeedAlreadyExistsError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Feed already added") from exc
-    except ChannelResolutionError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    # A feed YouTube wouldn't serve us is not a malformed request, and saying
-    # 400 to it tells the user their URL is wrong when it isn't — which is what
-    # rss.FeedError's split exists to stop. Sibling classes, so the order of
-    # these two handlers doesn't matter; the status codes do.
-    except FeedUnavailableError as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
-    except InvalidFeedError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Already following") from exc
+    except NotAnArtistError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     # Marked here rather than inside the task, so the card the client is
@@ -107,7 +95,7 @@ def delete_feed(
     purged. Anything kept stays on the feed row, which is downgraded to
     followed=False (same state as an Explore placeholder — see
     _get_or_create_placeholder_feed) rather than deleted, so it drops out of
-    Library/New Uploads/background refresh but keeps working everywhere else
+    Library/New releases/background refresh but keeps working everywhere else
     (Storage, Recently Played, Favorites/Saved, direct playback — none of
     those filter on Feed.followed). Re-following the same channel later picks
     this same row back up via services/feed_add.py's create_feed_from_rss_url lookup

@@ -119,17 +119,6 @@ def test_follow_targets_the_topic_channel(client, fake_artist):
     assert f"https://www.youtube.com/channel/{OFFICIAL_ID}" not in res.text
 
 
-def test_the_follow_says_which_artist_it_is(client, fake_artist):
-    """That's what marks the feed as an artist's — the library card reads it
-    to open this page instead of a track list, and the server reads it to
-    skip the history scan."""
-    fake_artist(_profile())
-
-    res = client.get(f"/partials/detail/yt-artist/{BROWSE_ID}")
-
-    assert f'data-artist-browse-id="{BROWSE_ID}"' in res.text
-
-
 def test_an_artist_with_no_topic_channel_falls_back(client, fake_artist):
     """A handful of artists have none. Following their official channel is a
     worse answer than the right one, and a better answer than a button that
@@ -280,7 +269,6 @@ def test_the_full_song_list_keeps_the_artists_follow_button(client, fake_artist)
     res = client.get(f"/partials/detail/yt-artist-songs/{BROWSE_ID}")
 
     assert f"https://www.youtube.com/channel/{TOPIC_ID}" in res.text
-    assert f'data-artist-browse-id="{BROWSE_ID}"' in res.text
     assert "detail-play-all" in res.text
 
 
@@ -321,11 +309,11 @@ def test_a_redirected_artist_is_followed_and_reopened_by_the_page_that_has_the_m
     client, fake_artist
 ):
     """A VEVO channel opens the artist page through a redirect (see
-    music._redirected_artist), and the id the hero hands back has to be the
-    page it landed on. Sending the VEVO id back would record the feed
-    against the songless page, so the library card would reopen that."""
+    music._redirected_artist), and everything the panel offers has to belong
+    to the page it landed on — not the songless one that was asked for."""
     fake_artist(_profile(browse_id="UCtxdfwb9wfkoGocVUAJ-Bmg"))
 
     res = client.get("/partials/detail/yt-artist/UClRx3MMyYUyqOxyEqA5F2nQ")
 
-    assert 'data-artist-browse-id="UCtxdfwb9wfkoGocVUAJ-Bmg"' in res.text
+    assert f"https://www.youtube.com/channel/{TOPIC_ID}" in res.text
+    assert "UClRx3MMyYUyqOxyEqA5F2nQ" not in res.text

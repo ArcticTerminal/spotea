@@ -18,7 +18,7 @@ from app.timeutil import utcnow
 
 DEFAULT_PAGE_SIZE = 50
 
-# How far back "New Uploads" reaches — is_new_upload alone (see models.py's
+# How far back "New releases" reaches — is_new_upload alone (see models.py's
 # Content.is_new_upload) only means "RSS-sourced, not backfilled," which
 # without this stays true forever, so a channel's uploads from months ago
 # never age out of the shelf/list.
@@ -34,7 +34,7 @@ def new_upload_cutoff() -> datetime:
 
 
 def new_upload_filter() -> ColumnElement[bool]:
-    """What "New Uploads" means, in one place: RSS-sourced, recent, and from
+    """What "New releases" means, in one place: sync-sourced, recent, and from
     a channel still followed.
 
     All three conditions are load-bearing and none is implied by the others.

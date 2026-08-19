@@ -8,7 +8,7 @@ from app.content_query import query_content_ids
 from app.database import SessionLocal
 from app.deps import get_current_user, get_db, require_login
 from app.downloader import DownloadError, VideoUnavailableError, download_audio
-from app.feed_sync import cache_thumbnail
+from app.services.artist_sync import cache_thumbnail
 from app.formatting import safe_filename
 from app.models import Content, Feed, User
 from app.page_context import playlist_filter

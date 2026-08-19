@@ -12,7 +12,6 @@ jinja2==3.1.6
 python-multipart==0.0.32
 itsdangerous==2.2.0
 bcrypt==5.0.0
-feedparser==6.0.13
 
 # yt-dlp and its PO-token plugin used to be listed here, unpinned, on the
 # reasoning that YouTube changes its player constantly and yt-dlp ships

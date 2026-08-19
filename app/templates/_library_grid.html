@@ -32,7 +32,7 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-upload" /></svg>
         </span>
         <span class="channel-card-info">
-          <span class="channel-card-title">New Uploads</span>
+          <span class="channel-card-title">New releases</span>
           <span class="channel-card-count">{{ new_uploads_count }} video{{ '' if new_uploads_count == 1 else 's' }}</span>
         </span>
       </a>
@@ -49,7 +49,7 @@
       {% set video_count = channel_video_counts.get(feed.id, 0) %}
       {# A channel added minutes ago is still having its upload history
          scanned in the background (services/backfill.py). It is already
-         openable and already has its recent uploads from the RSS sync, so
+         openable and already has whatever the first sync found, so
          this replaces the count rather than blocking anything — and it is
          why nothing else in the app waits for a backfill any more. The
          data-preparing attribute is what home/library.js polls on. #}
@@ -79,7 +79,7 @@
           <span class="channel-card-title" title="{{ feed.channel_title or feed.rss_url }}">{{ feed.channel_title or feed.rss_url }}</span>
           {% if is_preparing %}
           <span class="channel-card-count channel-card-preparing">
-            <span class="spinner"></span><span class="channel-card-preparing-text">Fetching uploads…</span>
+            <span class="spinner"></span><span class="channel-card-preparing-text">Fetching releases…</span>
           </span>
           {% else %}
           <span class="channel-card-count">{{ video_count }} video{{ '' if video_count == 1 else 's' }}</span>

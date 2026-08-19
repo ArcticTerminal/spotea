@@ -16,7 +16,7 @@ from collections.abc import Iterable
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
-from app.feed_sync import apply_feed_data, fetch_feed_data
+from app.services.artist_sync import apply_artist_data, fetch_artist_data
 from app.models import Feed
 from app.progress import ProgressRegistry
 
@@ -84,9 +84,10 @@ def run_initial_sync(feed_id: int, db: Session) -> None:
 
     mark_syncing(feed_id)
     try:
-        apply_feed_data(db, feed, fetch_feed_data(feed.id, feed.rss_url, feed.avatar_url))
+        result = fetch_artist_data(feed.artist_browse_id, feed.release_snapshot, feed.avatar_url)
+        apply_artist_data(db, feed, result)
     except Exception:
-        # fetch_feed_data already swallows a FeedError into "no new content",
+        # fetch_artist_data already flattens an unreadable page into "nothing",
         # so anything reaching here is unexpected — and it must still clear
         # the phase, or the card says "Fetching uploads…" forever.
         logger.exception("Initial sync failed for feed %s", feed_id)
