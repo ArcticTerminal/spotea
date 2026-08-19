@@ -1,6 +1,6 @@
 import pytest
 
-from app.youtube import extract, search
+from app.youtube import extract
 from app.youtube.extract import (
     METADATA_RETRIES,
     METADATA_SOCKET_TIMEOUT_SECONDS,
@@ -134,7 +134,6 @@ def test_resolve_feed_url_passes_a_playlist_feed_through_untouched():
         ("video channel resolve", extract._VIDEO_CHANNEL_RESOLVE_OPTS),
         ("duration fetch", extract._DURATION_FETCH_OPTS),
         ("backfill fetch", extract._BACKFILL_FETCH_OPTS),
-        ("search", search._flat_opts(8)),
     ],
 )
 def test_every_metadata_extraction_is_time_bounded(name, opts):

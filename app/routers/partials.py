@@ -37,7 +37,6 @@ from app.page_context import (
 from app.services.remote_detail import (
     remote_artist_context,
     remote_artist_songs_context,
-    remote_channel_context,
     remote_playlist_context,
     remote_release_context,
 )
@@ -151,33 +150,10 @@ def remote_playlist_fragment(playlist_id: str, request: Request) -> HTMLResponse
     return templates.TemplateResponse(request, "_fragment_detail.html", context)
 
 
-@router.get("/detail/yt-channel/{channel_id}", response_class=HTMLResponse)
-def remote_channel_fragment(
-    channel_id: str,
-    request: Request,
-    avatar: str | None = None,
-    profile: User = Depends(get_current_profile),
-    db: Session = Depends(get_db),
-) -> HTMLResponse:
-    if not CHANNEL_ID_RE.match(channel_id):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Channel not found")
-
-    # Whatever avatar the client already had rendered on the card it clicked
-    # through from — see remote_channel_context's own docstring on why this
-    # route has no avatar of its own to fetch. Untrusted input either way
-    # (remote_channel_context re-validates it against this app's own
-    # same-origin image routes before using it).
-    context = remote_channel_context(db, profile.id, channel_id, avatar_url=avatar)
-    if context is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Could not open this channel")
-    return templates.TemplateResponse(request, "_fragment_detail.html", context)
-
-
 @router.get("/detail/yt-artist/{browse_id}", response_class=HTMLResponse)
 def remote_artist_fragment(
     browse_id: str,
     request: Request,
-    avatar: str | None = None,
     profile: User = Depends(get_current_profile),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
@@ -190,7 +166,7 @@ def remote_artist_fragment(
     if not CHANNEL_ID_RE.match(browse_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artist not found")
 
-    context = remote_artist_context(db, profile.id, browse_id, avatar_url=avatar)
+    context = remote_artist_context(db, profile.id, browse_id)
     if context is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Could not open this artist")
     return templates.TemplateResponse(request, "_fragment_detail.html", context)
@@ -200,7 +176,6 @@ def remote_artist_fragment(
 def remote_artist_songs_fragment(
     browse_id: str,
     request: Request,
-    avatar: str | None = None,
     profile: User = Depends(get_current_profile),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
@@ -211,7 +186,7 @@ def remote_artist_songs_fragment(
     if not CHANNEL_ID_RE.match(browse_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artist not found")
 
-    context = remote_artist_songs_context(db, profile.id, browse_id, avatar_url=avatar)
+    context = remote_artist_songs_context(db, profile.id, browse_id)
     if context is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Could not open this artist")
     return templates.TemplateResponse(request, "_fragment_detail.html", context)

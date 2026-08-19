@@ -264,7 +264,7 @@ function renderRecommendations(data) {
   const shelves = [
     // Interest-based first, because they're the ones about this profile.
     shelfHtml("Songs", data.videos, recVideoCardHtml),
-    shelfHtml("Channels", data.channels, channelCardHtml),
+    shelfHtml("Artists", data.channels, channelCardHtml),
     shelfHtml("Playlists", data.playlists, recPlaylistCardHtml),
     // Then what everyone gets: this week's charts and one rotating mood.
     shelfHtml("Charts", data.charts, recPlaylistCardHtml),
@@ -429,7 +429,7 @@ export function setupRecommendations() {
     // portrait — but the chart card has none to send anyway.
     const channelCard = event.target.closest(".shelf-channel-card");
     if (channelCard) {
-      openDetail("yt-artist", channelCard.dataset.channelId, { avatar: channelCard.dataset.thumbnailUrl || null });
+      openDetail("yt-artist", channelCard.dataset.channelId);
       return;
     }
 
@@ -510,7 +510,7 @@ export function setupExploreSearch() {
     // for a channel that isn't one (a podcast, say).
     const row = event.target.closest(".search-result-channel");
     if (row?.dataset.channelId) {
-      openDetail("yt-artist", row.dataset.channelId, { avatar: row.dataset.thumbnailUrl || null });
+      openDetail("yt-artist", row.dataset.channelId);
     }
   });
 

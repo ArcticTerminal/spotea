@@ -14,7 +14,7 @@ import pytest
 from app.models import Content, Feed, RecommendationCache, User
 from app.services import recommendations as rec
 from app.timeutil import utcnow
-from app.youtube.search import ChannelSearchResult, PlaylistSearchResult, VideoSearchResult
+from app.youtube.models import ChannelSearchResult, PlaylistSearchResult, VideoSearchResult
 
 USER_ID = 1
 

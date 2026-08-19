@@ -361,20 +361,6 @@ def test_a_channel_result_opens_the_artist_route() -> None:
     assert source.count('openDetail("yt-artist", row.dataset.channelId') == 1
 
 
-def test_the_avatar_hint_reaches_both_channel_routes() -> None:
-    """yt-artist is what a channel card opens now, and its fallback is the
-    channel listing — which has no cheap avatar of its own and renders a
-    blank hero without the hint the card already had."""
-    source = (JS_DIR / "home" / "detail.js").read_text()
-
-    assert "CHANNEL_AVATAR_KINDS.includes(kind) && avatar" in source, (
-        "detailUrl no longer forwards the avatar hint"
-    )
-    kinds = source[source.index("const CHANNEL_AVATAR_KINDS") :].split("\n")[0]
-    for kind in ("yt-channel", "yt-artist", "yt-artist-songs"):
-        assert kind in kinds, f"{kind} no longer takes the avatar hint — its fallback hero goes blank"
-
-
 def test_the_scroller_module_has_no_import_cycle() -> None:
     """Drag-to-scroll moved out of home/library.js so home/detail.js could
     wire the artist profile's shelves after a panel swap. Importing it back

@@ -9,7 +9,6 @@
 //   channel/{feed_id}     a followed channel        (from Library)
 //   {playlist kind}       one of the four pinned    (from Library)
 //   yt-playlist/{id}      a YouTube playlist        (from Explore)
-//   yt-channel/{id}       an unfollowed channel     (from Explore)
 //   yt-artist/{id}        an artist's profile       (from Explore)
 //   yt-artist-songs/{id}  that artist's whole list   (from the profile)
 //   yt-release/{id}       one album or single        (from the profile)
@@ -28,15 +27,15 @@ import { CHANNEL_FOLLOWED, followChannel, playRemoteList, playRemoteVideo } from
 import { activate } from "./tabs.js";
 
 // Detail kinds whose rows come from YouTube rather than the database.
-const REMOTE_KINDS = ["yt-channel", "yt-playlist", "yt-artist", "yt-artist-songs", "yt-release"];
+const REMOTE_KINDS = ["yt-playlist", "yt-artist", "yt-artist-songs", "yt-release"];
 const isRemoteKind = (kind) => REMOTE_KINDS.includes(kind);
 
 // Remote fragment HTML already fetched this session, keyed by the exact
-// detailUrl() it came from (page and avatar included, so a different avatar
-// hint or page is correctly a cache miss rather than stale content). Local
-// kinds (channel, the four pinned playlists) always refetch instead — those
-// are a cheap DB read to begin with, and other actions in this app (saving,
-// favoriting) can change what one shows. A remote kind costs a live yt-dlp
+// detailUrl() it came from (page included, so a different page is
+// correctly a cache miss rather than stale content). Local kinds (channel,
+// the four pinned playlists) always refetch instead — those are a cheap DB
+// read to begin with, and other actions in this app (saving, favoriting)
+// can change what one shows. A remote kind costs a live YouTube Music
 // read (see routers/partials.py) and nothing in this app mutates a listing
 // it reads, so re-opening one already visited this session has nothing to
 // gain from asking again. Capped so a long browsing session doesn't grow
@@ -63,22 +62,10 @@ let current = null;
 // the kind itself, and take the /playlist/{kind} route.
 const hasId = (kind) => kind === "channel" || isRemoteKind(kind);
 
-// Which kinds take the avatar hint: the two that can end up rendering a
-// channel listing. Both artist kinds fall back to one when the id turns
-// out not to be an artist, and that listing has no cheap avatar of its own.
-const CHANNEL_AVATAR_KINDS = ["yt-channel", "yt-artist", "yt-artist-songs"];
-
-function detailUrl(kind, id, page, avatar) {
+function detailUrl(kind, id, page) {
   const base = hasId(kind) ? `/partials/detail/${kind}/${id}` : `/partials/detail/playlist/${kind}`;
   const params = new URLSearchParams();
   if (page > 1) params.set("page", page);
-  // The two channel kinds only: what the card the user clicked through from
-  // already had rendered, forwarded so the detail hero doesn't render blank
-  // for a channel nobody's followed yet — see remote_channel_context's
-  // docstring. yt-artist takes it because that's the route a channel card
-  // opens, and it falls back to the channel listing when the id turns out
-  // not to be an artist.
-  if (CHANNEL_AVATAR_KINDS.includes(kind) && avatar) params.set("avatar", avatar);
   const query = params.toString();
   return query ? `${base}?${query}` : base;
 }
@@ -105,12 +92,8 @@ function showLoading() {
  * "the user just clicked into this" open pushes a new history entry instead,
  * so the back button can return where it came from.
  *
- * `avatar` (yt-channel only) is the thumbnail_url already on the card being
- * opened, if any — see detailUrl. Not part of the hash/history state, so a
- * reload or back/forward into this view loses it same as before; it only
- * saves a blank hero on the click path that actually has one to offer.
  */
-export async function openDetail(kind, id, { page = 1, replace = false, avatar = null } = {}) {
+export async function openDetail(kind, id, { page = 1, replace = false } = {}) {
   // A pagination click within the view that's already open keeps whatever
   // "is there a Library entry behind this" answer the original open
   // established — pagination itself always replaces, so it must not flip a
@@ -124,7 +107,7 @@ export async function openDetail(kind, id, { page = 1, replace = false, avatar =
   if (replace) history.replaceState(null, "", hash);
   else history.pushState(null, "", hash);
 
-  const url = detailUrl(kind, id, page, avatar);
+  const url = detailUrl(kind, id, page);
   const cached = isRemoteKind(kind) ? remoteFragmentCache.get(url) : undefined;
   if (cached !== undefined) {
     swapFragmentHtml(cached);
@@ -397,7 +380,7 @@ export function setupDetailPanel() {
   // three land on the real channel page, which is this module's to open (see
   // home/remote.js for why it announces rather than calls).
   document.addEventListener(CHANNEL_FOLLOWED, (event) => {
-    // A cached yt-channel view's Follow button would otherwise still say
+    // A cached artist view's Follow button would otherwise still say
     // "Follow" if reopened later — the event only carries the new feed id,
     // not the remote channel_id its cache entry would be keyed on, so
     // dropping the whole cache is simpler than tracking that mapping for a

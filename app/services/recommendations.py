@@ -45,9 +45,14 @@ from app.config import settings
 from app.interests import interests_signature, parse_interests
 from app.models import Content, Feed, RecommendationCache, User
 from app.timeutil import utcnow
-from app.youtube.music import fetch_charts, fetch_mood_categories, fetch_mood_playlists, search_songs
+from app.youtube.music import (
+    fetch_charts,
+    fetch_mood_categories,
+    fetch_mood_playlists,
+    search_artists,
+    search_songs,
+)
 from app.youtube.music import search_playlists as search_music_playlists
-from app.youtube.search import search_channels
 from app.youtube.urls import extract_channel_id
 
 logger = logging.getLogger(__name__)
@@ -83,16 +88,15 @@ MOOD_SHELF_ATTEMPTS = 3
 # own — which is what keeps this module free to add a shelf without a
 # migration, and without a reader having to defend against a payload written
 # by an older version of itself.
-PAYLOAD_VERSION = "v2"
+PAYLOAD_VERSION = "v3"
 
-# Songs and playlists come from YouTube Music (app/youtube/music.py), which
-# indexes tracks rather than videos — the same reason Explore's search box
-# moved. Channels deliberately do not: that shelf is where a podcast gets
-# found, and YouTube Music is measurably worse at finding one (see
-# routers/explore.py's search_feeds).
+# Every shelf comes from YouTube Music, which indexes tracks and artists
+# rather than videos and channels. The "channels" key is what the cached
+# payload and the client still call the artist shelf; PAYLOAD_VERSION is what
+# lets that name change later without a migration.
 _SEARCHERS = {
     "videos": search_songs,
-    "channels": search_channels,
+    "channels": search_artists,
     "playlists": search_music_playlists,
 }
 

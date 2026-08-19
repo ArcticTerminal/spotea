@@ -25,8 +25,7 @@ from app.schemas import (
 from app.storage import purge_content
 from app.timeutil import utcnow
 from app.youtube.extract import resolve_video_channel
-from app.youtube.music import search_songs
-from app.youtube.search import search_channels, search_videos
+from app.youtube.music import search_artists, search_songs
 from app.youtube.urls import CHANNEL_ID_RE, channel_feed_url
 
 router = APIRouter(prefix="/feeds", tags=["explore"], dependencies=[Depends(require_login)])
@@ -34,21 +33,17 @@ router = APIRouter(prefix="/feeds", tags=["explore"], dependencies=[Depends(requ
 
 @router.get("/search", response_model=list[ChannelSearchResultOut])
 def search_feeds(q: str) -> list[ChannelSearchResultOut]:
-    """Channels to follow — the half of Explore's search box that finds
-    podcasts, and therefore the half that stays on youtube.com.
+    """Artists to follow.
 
-    Deliberately not moved to YouTube Music alongside the songs below.
-    Measured live: searching YouTube Music for "The Diary of a CEO" put a
-    reupload channel whose episodes have a few hundred views ahead of the
-    real 19M-subscriber one this finds first, and it models a podcast as a
-    playlist rather than a channel — which is the wrong identity for a feed
-    this app syncs over RSS. See app/youtube/music.py's docstring.
+    Asks the music catalogue for musicians rather than youtube.com for
+    channels, which is the whole reason the "<Artist> - Topic" containers
+    that search used to filter back out by name never turn up here.
     """
     query = q.strip()
     if not query:
         return []
 
-    return [ChannelSearchResultOut(**result.__dict__) for result in search_channels(query)]
+    return [ChannelSearchResultOut(**result.__dict__) for result in search_artists(query)]
 
 
 @router.get("/search-videos", response_model=list[VideoSearchResultOut])
@@ -62,20 +57,15 @@ def search_video_feeds(q: str) -> list[VideoSearchResultOut]:
     artist, album and duration already attached instead of leaving the row
     to say nothing but a title.
 
-    The fallback is not a general safety net — it fires only on a query
-    YouTube Music has *no* answer for, which in practice means a query that
-    wasn't about music. Somebody pasting the title of a talk or a one-off
-    upload into the same box should still find it, and an empty list is a
-    worse answer there than an imperfect one. It costs nothing on the
-    common path: the yt-dlp search only runs once the music search has
-    already come back empty.
+    There is no youtube.com fallback any more: this app only holds music,
+    so a query YouTube Music has no answer for is a query with no answer
+    here either, and an empty list says that honestly.
     """
     query = q.strip()
     if not query:
         return []
 
-    results = search_songs(query) or search_videos(query)
-    return [VideoSearchResultOut(**result.__dict__) for result in results]
+    return [VideoSearchResultOut(**result.__dict__) for result in search_songs(query)]
 
 
 def _get_or_create_placeholder_feed(

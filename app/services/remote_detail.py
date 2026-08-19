@@ -23,29 +23,9 @@ from sqlalchemy.orm import Session
 from app.images import cached_avatar_path
 from app.models import Feed
 from app.timeutil import utcnow
-from app.youtube.music import ARTIST_PREVIEW_SONGS, fetch_artist, fetch_release
-from app.youtube.search import (
-    cached_avatar_or_hotlink,
-    fetch_channel_avatar,
-    fetch_channel_uploads,
-    fetch_playlist,
-    proxied_avatar_url,
-)
+from app.youtube.music import ARTIST_PREVIEW_SONGS, fetch_artist, fetch_playlist, fetch_release
+from app.images import cached_avatar_or_hotlink
 from app.youtube.urls import CHANNEL_PAGE_URL_TEMPLATE, channel_feed_url
-
-# What a caller-supplied avatar_url (see remote_channel_context) is allowed
-# to be: one of this app's own same-origin image routes, never an arbitrary
-# URL — the client only ever has one of these two to send in the first place
-# (see youtube/search.py's _cached_avatar_or_hotlink), so anything else means
-# a tampered query string, not a real avatar.
-_TRUSTED_AVATAR_URL_PREFIXES = ("/avatar-proxy?u=", "/avatars/")
-
-
-def _trusted_avatar_url(avatar_url: str | None) -> str | None:
-    if avatar_url and avatar_url.startswith(_TRUSTED_AVATAR_URL_PREFIXES):
-        return avatar_url
-    return None
-
 
 def _base_context(kind: str, remote_id: str, title: str, items: list) -> dict:
     return {
@@ -112,23 +92,15 @@ def _followed_feed_id(db: Session, user_id: int, channel_id: str) -> int | None:
 def _artist_or_channel(db: Session, user_id: int, browse_id: str):
     """The artist behind an id, plus where a Follow on them should land.
 
-    Returns None when the id doesn't name an artist with anything playable
-    — the caller falls back to the channel listing. That fallback is why
-    every channel result can route through the artist surface at all: a
-    podcast, a tech channel or an artist page with nothing on it comes back
-    as the plain listing it would have shown anyway. It costs one extra
-    YouTube Music request on a click the user made deliberately, and never
-    touches youtube.com.
+    Returns None when the id doesn't name an artist with anything playable,
+    which is a 404 on the panel — there is no channel listing to fall back
+    to any more, and an id that came out of an artist search or an artist's
+    own page is one YouTube Music can answer for.
 
     The follow target is the artist's **"<Artist> - Topic" channel**, which
     is what "following an artist" means in a music app: that channel
-    carries their releases and nothing else, so a new single reaches Home's
-    New Uploads through the RSS sync that already runs, while their
-    official channel's feed would deliver vlogs and interviews alongside
-    it. Nothing else in this app follows a Topic channel — channel search
-    drops them by name, since nobody browsing for a channel means to pick
-    one — and this is the single place where following one is the right
-    answer rather than the wrong one.
+    carries their releases and nothing else, while their official channel's
+    feed would deliver vlogs and interviews alongside it.
 
     Falls back to the official channel, then to the browse id, for the
     artists with no Topic channel behind them: a worse answer than the
@@ -157,7 +129,7 @@ def _artist_or_channel(db: Session, user_id: int, browse_id: str):
 
 
 def remote_artist_context(
-    db: Session, user_id: int, browse_id: str, avatar_url: str | None = None
+    db: Session, user_id: int, browse_id: str
 ) -> dict | None:
     """An artist's profile — what YouTube Music's own artist page shows.
 
@@ -174,7 +146,7 @@ def remote_artist_context(
     """
     resolved = _artist_or_channel(db, user_id, browse_id)
     if resolved is None:
-        return remote_channel_context(db, user_id, browse_id, avatar_url=avatar_url)
+        return None
     artist, hero = resolved
 
     context = {
@@ -206,14 +178,14 @@ def remote_artist_context(
 
 
 def remote_artist_songs_context(
-    db: Session, user_id: int, browse_id: str, avatar_url: str | None = None
+    db: Session, user_id: int, browse_id: str
 ) -> dict | None:
     """Everything the artist has, as one track list — the profile's "See
     all". Same hero and the same Follow, so arriving here from the profile
     doesn't feel like leaving the artist."""
     resolved = _artist_or_channel(db, user_id, browse_id)
     if resolved is None:
-        return remote_channel_context(db, user_id, browse_id, avatar_url=avatar_url)
+        return None
     artist, hero = resolved
 
     # Says so explicitly when the list is short of what YouTube Music
@@ -267,49 +239,6 @@ def remote_release_context(browse_id: str) -> dict | None:
                 f"{'' if len(release.tracks) == 1 else 's'}"
             ),
             "hero_image": release.cover_url,
-        }
-    )
-    return context
-
-
-def remote_channel_context(
-    db: Session, user_id: int, channel_id: str, avatar_url: str | None = None
-) -> dict | None:
-    """A channel's latest uploads, for deciding whether to follow it.
-
-    Also reports whether this profile *already* follows the channel — the
-    hero's action is "Follow" if not, and a way back to the real (local)
-    channel page if so, since the library copy is the more useful of the two.
-
-    `avatar_url` is whatever the client already had rendered on the card it
-    clicked through from (see routers/partials.py's remote_channel_fragment)
-    — cheaper than fetching one here, since fetch_channel_uploads' uploads-
-    playlist read carries no channel-level avatar of its own. Absent (a hard
-    refresh, a deep link, browser back/forward landing here with no card
-    behind it) or untrusted, and with no local copy either, this falls back
-    to fetch_channel_avatar's own live fetch rather than rendering with
-    none — a second yt-dlp call, so it's only paid on that cold-entry path.
-    """
-    uploads = fetch_channel_uploads(channel_id)
-    if not uploads.items:
-        return None
-
-    hero_image = cached_avatar_path(channel_id) or _trusted_avatar_url(avatar_url)
-    if hero_image is None:
-        fetched_avatar = fetch_channel_avatar(channel_id)
-        hero_image = proxied_avatar_url(fetched_avatar) if fetched_avatar else None
-
-    context = _base_context(
-        "yt-channel", channel_id, uploads.title or "Channel", uploads.items
-    )
-    context.update(
-        {
-            "video_count": len(uploads.items),
-            "count_label": f"Latest {len(uploads.items)} uploads",
-            "hero_image": hero_image,
-            "hero_is_avatar": True,
-            "channel_url": CHANNEL_PAGE_URL_TEMPLATE.format(channel_id=channel_id),
-            "followed_feed_id": _followed_feed_id(db, user_id, channel_id),
         }
     )
     return context
