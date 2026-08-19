@@ -22,7 +22,8 @@ from sqlalchemy.orm import Session
 
 from app.images import cached_avatar_path
 from app.models import Feed
-from app.youtube.music import fetch_artist
+from app.timeutil import utcnow
+from app.youtube.music import ARTIST_PREVIEW_SONGS, fetch_artist, fetch_release
 from app.youtube.search import (
     cached_avatar_or_hotlink,
     fetch_channel_avatar,
@@ -108,44 +109,101 @@ def _followed_feed_id(db: Session, user_id: int, channel_id: str) -> int | None:
     return followed.id if followed else None
 
 
-def remote_artist_context(
-    db: Session, user_id: int, browse_id: str, avatar_url: str | None = None
-) -> dict | None:
-    """An artist's page as YouTube Music knows it — their tracks, and a
-    Follow that lands on the right channel.
+def _artist_or_channel(db: Session, user_id: int, browse_id: str):
+    """The artist behind an id, plus where a Follow on them should land.
 
-    That last part is the reason this exists as its own kind rather than
-    reusing remote_channel_context. Every song YouTube Music returns is
-    attributed to the artist's auto-generated "<Artist> - Topic" channel,
-    and the charts name artists the same way; following one of those gets
-    you an automated container, not the channel the artist actually uploads
-    to. The artist page is the only place that reports both ids, so this is
-    where the swap can be made — the panel plays the Topic channel's tracks
-    and follows the official channel, which is what someone pressing that
-    button means.
+    Returns None when the id doesn't name an artist with anything playable
+    — the caller falls back to the channel listing. That fallback is why
+    every channel result can route through the artist surface at all: a
+    podcast, a tech channel or an artist page with nothing on it comes back
+    as the plain listing it would have shown anyway. It costs one extra
+    YouTube Music request on a click the user made deliberately, and never
+    touches youtube.com.
 
-    **This is what a channel result opens too**, not just an artist card,
-    which is why the fallback below matters as much as the happy path. An
-    artist whose YouTube channel is mostly vlogs — Shirin David is the case
-    that prompted this — has a channel listing where the music is buried,
-    and the same id opens a clean track list here (YouTube Music accepts the
-    official channel id as a browse id; see fetch_artist). So the id is
-    tried as an artist first, and anything that isn't one — a podcast, a
-    tech channel, an artist page with nothing playable on it — falls through
-    to the plain channel listing it would have shown anyway. The cost of
-    that fallback is one extra YouTube Music request on a click the user
-    made deliberately, and it never touches youtube.com.
+    The follow target is the artist's **official** channel, not the id the
+    tracks are attributed to. Every song YouTube Music returns is credited
+    to the auto-generated "<Artist> - Topic" channel and the charts name
+    artists the same way; following one of those gets you an automated
+    container rather than the channel the artist uploads to. The artist
+    page is the only place that reports both ids, so this is where the swap
+    is made. Where there is no official channel — a handful of artists have
+    none — the browse id is still a real channel with a working RSS feed,
+    so following it is a worse answer than the right one and a better
+    answer than a button that does nothing.
     """
     artist = fetch_artist(browse_id)
     if artist is None or not artist.tracks:
-        return remote_channel_context(db, user_id, browse_id, avatar_url=avatar_url)
+        return None
 
-    # The official channel where there is one. Where there isn't — a handful
-    # of artists exist on YouTube Music with no channel behind them — the
-    # browse id is still a real channel with a working RSS feed, so following
-    # it is a worse answer than the right one but a better answer than a
-    # button that does nothing.
     follow_channel_id = artist.channel_id or browse_id
+    return artist, {
+        "hero_image": cached_avatar_or_hotlink(follow_channel_id, artist.avatar_url),
+        "hero_is_avatar": True,
+        "channel_url": CHANNEL_PAGE_URL_TEMPLATE.format(channel_id=follow_channel_id),
+        "followed_feed_id": _followed_feed_id(db, user_id, follow_channel_id),
+    }
+
+
+def remote_artist_context(
+    db: Session, user_id: int, browse_id: str, avatar_url: str | None = None
+) -> dict | None:
+    """An artist's profile — what YouTube Music's own artist page shows.
+
+    Shelves rather than one long track list, because the two answer
+    different questions. "What did they just release" is a date-ordered
+    question the songs list can't answer (it ranks by popularity, so a new
+    single sits wherever it charts), and "what's their album called" is one
+    a track list buries. Albums, singles, videos and related artists all
+    arrive in the same response the songs come from, so rendering the whole
+    profile costs exactly what the bare list cost.
+
+    The songs here are a preview; remote_artist_songs_context has all of
+    them.
+    """
+    resolved = _artist_or_channel(db, user_id, browse_id)
+    if resolved is None:
+        return remote_channel_context(db, user_id, browse_id, avatar_url=avatar_url)
+    artist, hero = resolved
+
+    context = {
+        "kind": "yt-artist",
+        "remote": True,
+        "feed": None,
+        "title": artist.name,
+        "back_label": "Explore",
+        "description": artist.description,
+        "count_label": (
+            f"{artist.monthly_listeners} monthly listeners"
+            if artist.monthly_listeners
+            else f"{artist.track_count} tracks"
+        ),
+        "songs": artist.tracks[:ARTIST_PREVIEW_SONGS],
+        # Only worth a "See all" when there is more behind it than the
+        # preview already shows.
+        "songs_total": artist.track_count if artist.track_count > ARTIST_PREVIEW_SONGS else 0,
+        "songs_url": f"/#yt-artist-songs/{browse_id}",
+        "albums": artist.albums,
+        "singles": artist.singles,
+        "videos": artist.videos,
+        "related": artist.related,
+        # See ArtistRelease: the year is the only date this surface reports,
+        # so "new" can mean nothing finer than "released this year".
+        "current_year": str(utcnow().year),
+    }
+    context.update(hero)
+    return context
+
+
+def remote_artist_songs_context(
+    db: Session, user_id: int, browse_id: str, avatar_url: str | None = None
+) -> dict | None:
+    """Everything the artist has, as one track list — the profile's "See
+    all". Same hero and the same Follow, so arriving here from the profile
+    doesn't feel like leaving the artist."""
+    resolved = _artist_or_channel(db, user_id, browse_id)
+    if resolved is None:
+        return remote_channel_context(db, user_id, browse_id, avatar_url=avatar_url)
+    artist, hero = resolved
 
     # Says so explicitly when the list is short of what YouTube Music
     # reports, the same way a remote playlist does. ARTIST_TRACK_LIMIT sits
@@ -159,21 +217,45 @@ def remote_artist_context(
         if artist.track_count > shown
         else f"{shown} track{'' if shown == 1 else 's'}"
     )
-    if artist.monthly_listeners:
-        count_label += f" · {artist.monthly_listeners} monthly listeners"
 
-    context = _base_context("yt-artist", browse_id, artist.name, artist.tracks)
+    context = _base_context("yt-artist-songs", browse_id, artist.name, artist.tracks)
+    context.update({"video_count": shown, "count_label": count_label, **hero})
+    # Back to the artist rather than out to Explore: this view is one level
+    # in, and the button pops history, which is where the profile is.
+    context["back_label"] = artist.name
+    return context
+
+
+def remote_release_context(browse_id: str) -> dict | None:
+    """One album or single. Rendered by the same panel a playlist is, since
+    that is what it is once opened — a short ordered list of tracks with a
+    cover."""
+    release = fetch_release(browse_id)
+    if release is None:
+        return None
+
+    subtitle = " · ".join(
+        part for part in (release.kind, release.year, release.artist_names) if part
+    )
+    context = _base_context("yt-release", browse_id, release.title, release.tracks)
     context.update(
         {
-            "video_count": shown,
-            "count_label": count_label,
-            # Routed through /avatar-proxy rather than hotlinked: artist
-            # portraits come off lh3.googleusercontent.com, which the
-            # yt3.ggpht.com rewrite doesn't cover (see urls.py).
-            "hero_image": cached_avatar_or_hotlink(follow_channel_id, artist.avatar_url),
-            "hero_is_avatar": True,
-            "channel_url": CHANNEL_PAGE_URL_TEMPLATE.format(channel_id=follow_channel_id),
-            "followed_feed_id": _followed_feed_id(db, user_id, follow_channel_id),
+            # The one view here that can't name where Back goes. Every other
+            # remote kind is entered from Explore; this one is entered from
+            # an artist profile — but not necessarily *this* release's
+            # artist, since a collaboration single is credited to whoever
+            # released it rather than to the page you clicked from. The
+            # button pops history either way, so the label is all that's in
+            # question, and a wrong name is worse than no name.
+            "back_label": "Back",
+            "video_count": len(release.tracks),
+            # A single is one track, which is the common case here — "1
+            # tracks" on the very shortest release reads as a bug.
+            "count_label": (
+                f"{subtitle} · {len(release.tracks)} track"
+                f"{'' if len(release.tracks) == 1 else 's'}"
+            ),
+            "hero_image": release.cover_url,
         }
     )
     return context

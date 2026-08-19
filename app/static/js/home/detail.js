@@ -10,20 +10,25 @@
 //   {playlist kind}       one of the four pinned    (from Library)
 //   yt-playlist/{id}      a YouTube playlist        (from Explore)
 //   yt-channel/{id}       an unfollowed channel     (from Explore)
-//   yt-artist/{id}        a YouTube Music artist    (from Explore)
-// The last three are "remote": their rows have no Content row yet, so playing
-// from them goes through home/remote.js, which materializes the list first.
+//   yt-artist/{id}        an artist's profile       (from Explore)
+//   yt-artist-songs/{id}  that artist's whole list   (from the profile)
+//   yt-release/{id}       one album or single        (from the profile)
+// All but the first two are "remote": their rows have no Content row yet, so
+// playing from them goes through home/remote.js, which materializes the list
+// first. The artist profile is the one body that isn't a track list at all
+// (see templates/_artist_panel.html); its shelves are wired below.
 
 import { unfollowChannel } from "../content-actions.js";
 import { classifyHash, showToast } from "../core.js";
 import { refreshFragments, swapFragmentHtml } from "../fragments.js";
 import { openPlayer } from "./overlay.js";
 import { QUEUE_CHANGED, isShuffled, loadQueue, queueSource, toggleShuffle } from "./queue.js";
-import { CHANNEL_FOLLOWED, followChannel, playRemoteList } from "./remote.js";
+import { wireScrollers } from "./scrollers.js";
+import { CHANNEL_FOLLOWED, followChannel, playRemoteList, playRemoteVideo } from "./remote.js";
 import { activate } from "./tabs.js";
 
 // Detail kinds whose rows come from YouTube rather than the database.
-const REMOTE_KINDS = ["yt-channel", "yt-playlist", "yt-artist"];
+const REMOTE_KINDS = ["yt-channel", "yt-playlist", "yt-artist", "yt-artist-songs", "yt-release"];
 const isRemoteKind = (kind) => REMOTE_KINDS.includes(kind);
 
 // Remote fragment HTML already fetched this session, keyed by the exact
@@ -58,6 +63,11 @@ let current = null;
 // the kind itself, and take the /playlist/{kind} route.
 const hasId = (kind) => kind === "channel" || isRemoteKind(kind);
 
+// Which kinds take the avatar hint: the two that can end up rendering a
+// channel listing. Both artist kinds fall back to one when the id turns
+// out not to be an artist, and that listing has no cheap avatar of its own.
+const CHANNEL_AVATAR_KINDS = ["yt-channel", "yt-artist", "yt-artist-songs"];
+
 function detailUrl(kind, id, page, avatar) {
   const base = hasId(kind) ? `/partials/detail/${kind}/${id}` : `/partials/detail/playlist/${kind}`;
   const params = new URLSearchParams();
@@ -68,7 +78,7 @@ function detailUrl(kind, id, page, avatar) {
   // docstring. yt-artist takes it because that's the route a channel card
   // opens, and it falls back to the channel listing when the id turns out
   // not to be an artist.
-  if ((kind === "yt-channel" || kind === "yt-artist") && avatar) params.set("avatar", avatar);
+  if (CHANNEL_AVATAR_KINDS.includes(kind) && avatar) params.set("avatar", avatar);
   const query = params.toString();
   return query ? `${base}?${query}` : base;
 }
@@ -118,7 +128,7 @@ export async function openDetail(kind, id, { page = 1, replace = false, avatar =
   const cached = isRemoteKind(kind) ? remoteFragmentCache.get(url) : undefined;
   if (cached !== undefined) {
     swapFragmentHtml(cached);
-    syncShuffleButton();
+    afterPanelSwap();
     return;
   }
 
@@ -143,9 +153,22 @@ export async function openDetail(kind, id, { page = 1, replace = false, avatar =
     }
   }
   swapFragmentHtml(html);
+  afterPanelSwap();
+}
+
+/** Everything the freshly-swapped panel markup needs wiring up.
+ *
+ *  Both swap paths (cache hit and fetch) go through here so neither can
+ *  drift from the other — the cached branch used to only sync the shuffle
+ *  button, which was already one thing too many to keep in two places.
+ */
+function afterPanelSwap() {
   // The swap brings in a brand-new shuffle button, which knows nothing about
   // a preference set on some other view or in the player.
   syncShuffleButton();
+  // An artist profile arrives with shelves in it. Nothing else this panel
+  // renders has a horizontal row, so this is a no-op for every other kind.
+  wireScrollers();
 }
 
 // What the panel currently shows, in the shape queue.js takes: the channel
@@ -279,7 +302,51 @@ export function setupDetailPanel() {
       return;
     }
 
+    // The artist profile's own controls. Checked before the track rows
+    // below because a profile has both: shelves of cards and a preview list.
+    const bioToggle = event.target.closest("#artist-bio-toggle");
+    if (bioToggle) {
+      const expanded = bioToggle.getAttribute("aria-expanded") === "true";
+      bioToggle.setAttribute("aria-expanded", String(!expanded));
+      bioToggle.textContent = expanded ? "More" : "Less";
+      document.getElementById("artist-bio")?.classList.toggle("is-expanded", !expanded);
+      return;
+    }
+
+    const releaseCard = event.target.closest(".release-card");
+    if (releaseCard) {
+      openDetail("yt-release", releaseCard.dataset.releaseId);
+      return;
+    }
+
+    // A "Similar artists" card. Same target as a channel card in Explore:
+    // the id is a browse id, and the artist route works out what it is.
+    const artistCard = event.target.closest(".shelf-channel-card");
+    if (artistCard) {
+      openDetail("yt-artist", artistCard.dataset.channelId);
+      return;
+    }
+
+    // The Videos shelf. A card rather than a row because these carry no
+    // duration (see music.ArtistProfile.videos), so it plays like one of
+    // Explore's song cards rather than going through the row handler.
+    const videoCard = event.target.closest(".rec-card[data-video-id]");
+    if (videoCard) {
+      playRemoteVideo(videoCard.dataset, videoCard.querySelector(".rec-play"));
+      return;
+    }
+
     if (event.ctrlKey || event.metaKey || event.shiftKey || event.button !== 0) return;
+
+    // "All 150 songs". A real link so it survives with JS disabled and
+    // reads as one, but handled here for the same reason pagination is:
+    // a hash change alone wouldn't swap the panel.
+    const seeAll = event.target.closest(".artist-see-all");
+    if (seeAll && current) {
+      event.preventDefault();
+      openDetail("yt-artist-songs", current.id);
+      return;
+    }
 
     const pageLink = event.target.closest(".pagination-btn:not(.is-disabled)");
     if (pageLink && current) {

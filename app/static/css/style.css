@@ -3342,3 +3342,58 @@ audio {
 body.has-mini-player .layout {
   padding-bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px));
 }
+
+/* ---------------------------------------------------------------------------
+   Artist profile (templates/_artist_panel.html)
+   The only detail-panel body that isn't a track list. Everything here sits on
+   top of the shelf and card rules above rather than beside them — a release
+   card is a .card, its shelf is a .shelf, and only the two things a track
+   list has no equivalent for are defined below.
+--------------------------------------------------------------------------- */
+
+/* Cover art is square, unlike every other .thumb in the app (video stills are
+   16:9). Overriding the ratio rather than the whole rule keeps the absolute-
+   positioning fix in .card .thumb img applying here too. */
+.release-card .thumb {
+  aspect-ratio: 1;
+}
+
+/* Long enough to need collapsing — 729 characters for a mid-size artist,
+   measured — but the full text is worth having, so it clamps rather than
+   truncating server-side. */
+.artist-bio {
+  margin: 0 0 0.35rem;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.artist-bio.is-expanded {
+  -webkit-line-clamp: unset;
+  overflow: visible;
+}
+
+.artist-bio-toggle {
+  margin-bottom: 1.25rem;
+  padding: 0;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+/* "Released this year" and nothing finer — YouTube Music reports only a year
+   on the artist page (see music.ArtistRelease). */
+.badge-new {
+  margin-left: 0.4rem;
+  padding: 0.05rem 0.35rem;
+  border-radius: 4px;
+  background: var(--accent);
+  color: var(--bg-base);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}

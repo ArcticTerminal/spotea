@@ -43,7 +43,7 @@ a 500.
 
 import logging
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from ytmusicapi import YTMusic
 
@@ -101,6 +101,22 @@ CHART_ARTIST_LIMIT = 12
 # not a *fetch*: YouTube Music returns the whole list in the same response,
 # so a lower number here would only throw away tracks already in hand.
 ARTIST_TRACK_LIMIT = 200
+
+# How many songs the artist *profile* previews before "See all" hands over
+# to the full list. Ten is a section, not a page — YouTube Music itself
+# shows five, which reads as a teaser rather than something you'd browse.
+#
+# They come from the same Top songs playlist the full list does, not from
+# the preview the artist page carries: those five entries have no duration
+# at all (measured — `duration` and `duration_seconds` are both absent),
+# and a song row with no duration is exactly the wart this section is meant
+# to be free of.
+ARTIST_PREVIEW_SONGS = 10
+
+# How many releases each shelf shows. The artist page hands over ten of
+# each without being asked; the rest sit behind a browse id this app
+# doesn't follow (see ArtistRelease).
+ARTIST_RELEASE_LIMIT = 10
 
 
 # YTMusic wraps a requests.Session, which is not documented as thread-safe,
@@ -398,6 +414,28 @@ def fetch_mood_playlists(
 
 
 @dataclass
+class ArtistRelease:
+    """One album or single off an artist's page.
+
+    `browse_id` is an "MPREb_…" release id rather than a playlist, and it
+    is all a card needs: fetch_release opens either kind with it. Albums
+    also report an `audioPlaylistId` here and singles don't, which is why
+    that isn't the identifier this uses — one id that works for both beats
+    two paths where one of them is sometimes absent.
+
+    `year` is the only date YouTube Music reports on this surface. There is
+    no month or day, which is why "new" here can only ever mean "this
+    year".
+    """
+
+    browse_id: str
+    title: str
+    year: str | None
+    kind: str
+    cover_url: str | None
+
+
+@dataclass
 class ArtistProfile:
     """An artist page as YouTube Music knows it.
 
@@ -424,6 +462,17 @@ class ArtistProfile:
     # How many tracks the artist has in total, which is not always how many
     # are in `tracks` — see ARTIST_TRACK_LIMIT.
     track_count: int = 0
+    # The rest of what the artist page carries. All of it arrives in the
+    # same response as the fields above, so a profile that renders every
+    # one of these costs exactly what a bare track list costs.
+    albums: list[ArtistRelease] = field(default_factory=list)
+    singles: list[ArtistRelease] = field(default_factory=list)
+    # Music videos. No duration on any of them (their entries carry
+    # title/videoId/artists/playlistId/thumbnails/views and nothing else),
+    # which is why these belong in a shelf of cards and not in the track
+    # list — a card doesn't print a duration in the first place.
+    videos: list[VideoSearchResult] = field(default_factory=list)
+    related: list[ChannelSearchResult] = field(default_factory=list)
 
 
 def _artist_songs(songs: dict, all_songs: bool) -> tuple[list[dict], int | None]:
@@ -457,6 +506,35 @@ def _artist_songs(songs: dict, all_songs: bool) -> tuple[list[dict], int | None]
     return tracks, (playlist or {}).get("trackCount")
 
 
+def _releases(section: dict | None, kind: str) -> list[ArtistRelease]:
+    """One of the artist page's release shelves. Entries with no browse id
+    are dropped rather than rendered as a card that leads nowhere, the same
+    way _artist_result drops artists with no channel behind them."""
+    releases = []
+    for item in (section or {}).get("results") or []:
+        browse_id, title = item.get("browseId"), item.get("title")
+        if not browse_id or not title:
+            continue
+        releases.append(
+            ArtistRelease(
+                browse_id=browse_id,
+                title=title,
+                year=item.get("year"),
+                cover_url=_cover_url(item.get("thumbnails")),
+                # Singles report their own ("Single", and "EP" for some);
+                # albums report nothing, so the shelf they came from is the
+                # only thing that knows.
+                kind=item.get("type") or kind,
+            )
+        )
+    return releases[:ARTIST_RELEASE_LIMIT]
+
+
+def _related_artists(section: dict | None) -> list[ChannelSearchResult]:
+    results = (_artist_result(item) for item in (section or {}).get("results") or [])
+    return [result for result in results if result is not None]
+
+
 def fetch_artist(browse_id: str, all_songs: bool = True) -> ArtistProfile | None:
     """One artist's page, or None if YouTube Music has no such artist.
 
@@ -479,9 +557,14 @@ def fetch_artist(browse_id: str, all_songs: bool = True) -> ArtistProfile | None
     videoId, artists, playlistId, thumbnails, views), so every one of them
     rendered as a duration-less row at the bottom of the panel.
 
-    An artist with no songs at all now comes back with nothing playable,
-    which sends the panel to their channel listing (see
+    An artist with no songs at all comes back with nothing playable, which
+    sends the panel to their channel listing (see
     services/remote_detail.py) — where their videos are, in full.
+
+    Everything else on the page — albums, singles, videos, related artists
+    — comes back too, off this same response. The profile renders all of
+    them and pays nothing extra for it; a caller that only wants the track
+    list can ignore them.
     """
     artist = _call("artist", "get_artist", browse_id, level=logging.INFO)
     if not artist or not artist.get("name"):
@@ -515,6 +598,51 @@ def fetch_artist(browse_id: str, all_songs: bool = True) -> ArtistProfile | None
         avatar_url=_cover_url(artist.get("thumbnails")),
         tracks=tracks,
         track_count=track_count,
+        albums=_releases(artist.get("albums"), "Album"),
+        singles=_releases(artist.get("singles"), "Single"),
+        videos=_song_results((artist.get("videos") or {}).get("results")),
+        related=_related_artists(artist.get("related")),
+    )
+
+
+@dataclass
+class ReleaseDetail:
+    """One album or single, opened. The same shape either way — YouTube
+    Music answers a one-track single and a fourteen-track album with the
+    identical structure, so nothing here has to care which it is."""
+
+    title: str
+    year: str | None
+    kind: str
+    cover_url: str | None
+    artist_names: str | None
+    tracks: list[VideoSearchResult]
+
+
+def fetch_release(browse_id: str) -> ReleaseDetail | None:
+    """An album or single's tracks, or None if there's no such release.
+
+    Used for both, and deliberately in preference to opening an album's
+    `audioPlaylistId` through the yt-dlp playlist path: it costs the same
+    one request and answers better, with real durations and the square
+    cover art rather than a video still.
+    """
+    release = _call("release", "get_album", browse_id)
+    if not release or not release.get("title"):
+        return None
+
+    tracks = _song_results(release.get("tracks"))
+    if not tracks:
+        return None
+
+    artists = [artist.get("name") for artist in release.get("artists") or [] if artist.get("name")]
+    return ReleaseDetail(
+        title=release["title"],
+        year=release.get("year"),
+        kind=release.get("type") or "Release",
+        cover_url=_cover_url(release.get("thumbnails")),
+        artist_names=", ".join(artists) or None,
+        tracks=tracks,
     )
 
 

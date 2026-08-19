@@ -11,7 +11,7 @@
 
 import { api, debounce, escapeHtml, formatDuration } from "../core.js";
 import { openDetail } from "./detail.js";
-import { wireScrollers } from "./library.js";
+import { wireScrollers } from "./scrollers.js";
 import { followChannel, playRemoteVideo } from "./remote.js";
 import { activate, onTabActivated } from "./tabs.js";
 

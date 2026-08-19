@@ -206,7 +206,7 @@ def test_wire_scrollers_does_not_leak_a_listener_or_observer_per_row() -> None:
     each at boot, 105 of each after 20 refreshes. The fix is structural
     (module-scope singletons, not per-row), so this checks the structure
     rather than actually leaking memory in a browser this suite can't run."""
-    source = (JS_DIR / "home" / "library.js").read_text()
+    source = (JS_DIR / "home" / "scrollers.js").read_text()
 
     mouseup_registrations = source.count('addEventListener("mouseup"')
     assert mouseup_registrations == 1, (
@@ -457,6 +457,46 @@ def test_the_avatar_hint_reaches_both_channel_routes() -> None:
     blank hero without the hint the card already had."""
     source = (JS_DIR / "home" / "detail.js").read_text()
 
-    assert '(kind === "yt-channel" || kind === "yt-artist") && avatar' in source, (
-        "detailUrl no longer forwards the avatar hint on both channel kinds"
+    assert "CHANNEL_AVATAR_KINDS.includes(kind) && avatar" in source, (
+        "detailUrl no longer forwards the avatar hint"
     )
+    kinds = source[source.index("const CHANNEL_AVATAR_KINDS") :].split("\n")[0]
+    for kind in ("yt-channel", "yt-artist", "yt-artist-songs"):
+        assert kind in kinds, f"{kind} no longer takes the avatar hint — its fallback hero goes blank"
+
+
+def test_the_scroller_module_has_no_import_cycle() -> None:
+    """Drag-to-scroll moved out of home/library.js so home/detail.js could
+    wire the artist profile's shelves after a panel swap. Importing it back
+    from library.js would recreate the cycle the move exists to avoid —
+    library.js already imports openDetail from detail.js."""
+    detail = (JS_DIR / "home" / "detail.js").read_text()
+    scrollers = (JS_DIR / "home" / "scrollers.js").read_text()
+
+    assert 'from "./scrollers.js"' in detail, "detail.js no longer wires the profile's shelves"
+    assert 'from "./library.js"' not in detail, (
+        "detail.js imports library.js, which imports detail.js — an import cycle"
+    )
+    assert not [line for line in scrollers.split("\n") if line.startswith("import ")], (
+        "the scroller module took on a dependency — it is meant to be a leaf"
+    )
+
+
+def test_both_panel_swaps_run_the_same_wiring() -> None:
+    """A cached fragment and a freshly fetched one are the same markup, so
+    anything one needs wired the other does too. They used to diverge."""
+    source = (JS_DIR / "home" / "detail.js").read_text()
+
+    assert source.count("  afterPanelSwap();") == 2, (
+        "a swap path skips afterPanelSwap — its shelves won't drag-scroll, "
+        "or its shuffle button won't match the current preference"
+    )
+
+
+def test_a_release_card_opens_by_browse_id() -> None:
+    """An album carries an audioPlaylistId and a single doesn't, so the
+    browse id is the only identifier that works for both — see
+    music.ArtistRelease."""
+    source = (JS_DIR / "home" / "detail.js").read_text()
+
+    assert 'openDetail("yt-release", releaseCard.dataset.releaseId)' in source
