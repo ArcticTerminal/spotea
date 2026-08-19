@@ -27,7 +27,12 @@ from app.schemas import (
     FeedOut,
     RefreshResult,
 )
-from app.services.backfill import backfill_progress, backfilling_feed_ids, run_backfill_task
+from app.services.backfill import (
+    backfill_progress,
+    backfilling_feed_ids,
+    mark_syncing,
+    run_initial_sync_task,
+)
 from app.services.bulk_import import import_progress, run_bulk_import
 from app.services.feed_add import FeedAlreadyExistsError, add_feed_core
 from app.storage import purge_content
@@ -46,7 +51,15 @@ def add_feed(
 ) -> FeedAddResult:
     try:
         feed, new_count, channel_id = add_feed_core(
-            db, payload.channel_url, profile.id, artist_browse_id=payload.artist_browse_id
+            db,
+            payload.channel_url,
+            profile.id,
+            artist_browse_id=payload.artist_browse_id,
+            # Answer as soon as the feed row exists. Everything after it —
+            # the RSS content, the durations, the avatar, the history scan —
+            # is what run_initial_sync does in the background, and what
+            # Library's card reports while it happens.
+            sync=False,
         )
     except FeedAlreadyExistsError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Feed already added") from exc
@@ -61,21 +74,17 @@ def add_feed(
     except InvalidFeedError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    # No history scan for an artist. The feed points at their Topic channel,
-    # which holds their whole catalogue — 1,064 uploads for Drake, measured
-    # — and a full scan would import all of it to answer a request that only
-    # means "tell me when they release something". The RSS parse above has
-    # already brought in the latest handful, and everything after that
-    # arrives the same way. Their back catalogue stays one click away on the
-    # profile, which is a browse surface and doesn't need library rows.
-    #
-    # Read off the saved feed rather than off the request: the request only
-    # says so when the client already knew, and since services/feed_add.py's
-    # _as_artist_follow the far commoner case is the server working it out
-    # for a client that just sent a channel URL.
-    if channel_id and not feed.artist_browse_id:
-        background_tasks.add_task(run_backfill_task, feed.id, channel_id)
+    # Whether this ends in a history scan is run_initial_sync's decision now,
+    # not this route's — it reads the saved feed, which is the only place that
+    # knows whether the server recognised an artist (see feed_add._as_artist_follow).
+    # Marked here rather than inside the task, so the card the client is
+    # about to render cannot beat it to the question — see mark_syncing.
+    mark_syncing(feed.id)
+    background_tasks.add_task(run_initial_sync_task, feed.id, channel_id)
 
+    # Always 0: nothing has been fetched yet. Kept on the response because a
+    # bulk import's per-line result still means something by it, and no
+    # caller of this route reads it.
     return FeedAddResult(feed=FeedOut.model_validate(feed), new_content_count=new_count)
 
 @router.post("/import", response_model=BulkImportStartOut, status_code=status.HTTP_202_ACCEPTED)
@@ -119,11 +128,15 @@ def get_bulk_import_status(job_id: str) -> BulkImportStatusOut:
 def list_backfilling_feeds(
     profile: User = Depends(get_current_profile), db: Session = Depends(get_db)
 ) -> list[int]:
-    """This profile's feeds whose one-time history scan is running right now.
+    """This profile's feeds still being filled in right now — their first
+    RSS sync, or the one-time history scan behind it (see
+    services/backfill.ACTIVE_PHASES).
 
     What Library's "Fetching uploads…" cards poll on, so they can turn
-    back into a video count once the scan behind them finishes (see
-    home/library.js). One call for the whole grid rather than one
+    back into a video count once the work behind them finishes (see
+    home/library.js). Since POST /feeds stopped syncing inline, a brand-new
+    card is in this list from the moment it appears rather than showing a
+    confident "0 videos" for the couple of seconds that took. One call for the whole grid rather than one
     backfill-status call per card, and it costs a dict lookup each — the
     registry is in memory.
 

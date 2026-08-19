@@ -30,23 +30,24 @@
 // channels meant six waits stacked on top of each other, and pressing
 // Finish early meant watching the app redraw itself afterwards.
 //
-// A job is done once the channel exists — POST /feeds resolves it and applies
-// its RSS feed before answering, so its recent uploads are already in the
-// library at that point. The one-time full-history scan behind it is not
-// waited on by anyone: it runs server-side, it is minutes long for a big
-// channel, and nothing on the screen a new profile lands on needs it. Library
-// says which channels are still filling in, on their own cards (see
-// page_context.library_context) — the wait lives where it can be ignored
-// rather than in front of someone who just wants to start listening.
+// A job is done once the feed row exists. Everything that fills it — the RSS
+// content, the durations, the avatar, the one-time full-history scan — runs
+// server-side afterwards (see services/backfill.run_initial_sync), and
+// nothing here waits on any of it. Library says which channels are still
+// filling in, on their own cards (see page_context.library_context), so the
+// wait lives where it can be ignored rather than in front of someone who
+// just wants to start listening.
 //
-// Finish therefore waits only on RSS syncs still in flight, which is a second
-// or two and usually nothing at all. Everything it changes is still settled
-// before it closes — each add ends in a refreshFragments() sweep, and Finish
-// re-checks Explore's shelves too — and all of it happens behind a
-// full-screen modal, so the app the user is handed is already up to date
-// instead of visibly redrawing itself a second later.
+// Finish therefore waits on nothing at all: it closes on the press. It used
+// to await the queue, and that was the last real wait in the flow — measured
+// per channel, 0.90s to recognise an artist, 1.32s of yt-dlp for the
+// durations and 0.84s for the avatar, drained one channel at a time, so six
+// channels was twenty seconds of "Finishing…". Moving that work behind the
+// answer is what made the button honest; the final refresh is chained off
+// the queue instead, and each add sweeps the fragments on its own way
+// through.
 
-import { api, debounce, setupOverlay, showToast } from "../core.js";
+import { api, debounce, setupOverlay } from "../core.js";
 import { refreshFragments } from "../fragments.js";
 import { BULK_IMPORT_FINISHED } from "./bulk-import.js";
 import { channelCardHtml, reloadRecommendations, renderChannelResults, shelfHtml } from "./explore.js";
@@ -239,11 +240,14 @@ function channelJob(channelUrl, button) {
 /**
  * The channels step: the Add queue, the counter, and the gate on Finish.
  *
- * Returns { loadSuggestions, refreshGate, settled, failedCount,
- * followedCount }. The genre step calls `loadSuggestions(genres)` once it
- * hands off (suggestions can't be fetched until interests are actually saved,
- * so this step fetches nothing on its own); the rest is what Finish needs to
- * know once the queue has drained.
+ * Returns { loadSuggestions, refreshGate, settled }. The genre step calls
+ * `loadSuggestions(genres)` once it hands off (suggestions can't be fetched
+ * until interests are actually saved, so this step fetches nothing on its
+ * own). `settled` is no longer something Finish waits on — it closes on the
+ * press — only something it chains a final refresh onto.
+ *
+ * A failed add therefore reports itself, through followChannel's own toast,
+ * rather than bouncing anyone back into a wizard they have already left.
  */
 function setupChannelStep(onBack) {
   const container = document.getElementById("onboarding-step-channels");
@@ -386,8 +390,6 @@ function setupChannelStep(onBack) {
       if (ok) renderSuggestionShelves(data, suggested);
     },
     refreshGate,
-    failedCount: () => jobs.filter((job) => job.status === "failed").length,
-    followedCount: () => followed,
     settled: () => drained,
   };
 }
@@ -429,40 +431,30 @@ export function setupOnboarding() {
   });
 
   const finishBtn = document.getElementById("onboarding-finish");
-  finishBtn?.addEventListener("click", async () => {
-    finishBtn.disabled = true;
-    finishBtn.textContent = "Finishing…";
+  finishBtn?.addEventListener("click", () => {
+    // Closes on the press, without waiting for the queue. Each add is a
+    // round trip that ends in a feed row, and the queue drains one at a time
+    // on purpose (see setupChannelStep) — six of them is six seconds of
+    // "Finishing…" for work whose result is a card the user is about to be
+    // shown anyway. The card itself reports the rest: a feed still being
+    // filled in says "Fetching uploads…" from the moment it appears (see
+    // services/backfill.run_initial_sync).
+    //
+    // The queue lives in a closure and the overlay only hides, so nothing
+    // here stops when this closes.
+    handle?.close();
 
-    // The only wait left in the flow, and it is a short one: a job is done
-    // once its channel exists, and the queue has been draining since the
-    // first Add. Nothing here waits on a history scan — see the module
-    // comment above.
-    await channelStep?.settled();
-
-    // Both of these are the app the user is about to be handed: Home's
+    // Both of these are the app the user has just been handed: Home's
     // shelves and Library's grid now that there are channels, and Explore's
     // shelves with the just-followed ones filtered back out of them (see
-    // _drop_already_in_library). Cheap — the batch itself was rebuilt in the
-    // background back on the genre step — and still behind the overlay, so
-    // neither is a swap anyone sees.
-    await Promise.all([refreshFragments(), reloadRecommendations()]);
-
-    // Adds are counted when they're pressed, so a failure that came back
-    // while the user was still picking can leave the gate unmet by the time
-    // the queue drains. Landing back on the step with the failed rows
-    // pressable again beats closing on a profile that didn't get what it
-    // was told it needed.
-    if (channelStep && channelStep.followedCount() < REQUIRED_CHANNELS) {
-      const failed = channelStep.failedCount();
-      finishBtn.textContent = "Finish";
-      channelStep.refreshGate();
-      showToast(
-        failed === 1 ? "One channel couldn't be added" : `${failed} channels couldn't be added`
-      );
-      return;
-    }
-
-    handle?.close();
+    // _drop_already_in_library). Deliberately chained off the queue rather
+    // than awaited in front of the user — the last channel to land is the
+    // only one that makes either of them wrong, and every add refreshes the
+    // fragments on its own way through.
+    channelStep?.settled().then(() => {
+      refreshFragments();
+      reloadRecommendations();
+    });
   });
 
   if (overlay.dataset.needsOnboarding === "true") handle?.open();

@@ -146,6 +146,10 @@ function hideBackfillOverlay() {
 // which read as broken. Keeping the count in its own nowrap element keeps it
 // atomic no matter how the title line wraps.
 function backfillPhaseParts(phase, done, total) {
+  // The first RSS read, which POST /feeds used to do before answering and
+  // now hands to services/backfill.run_initial_sync. It carries no count —
+  // nothing knows how many entries there are until it has parsed them.
+  if (phase === "syncing") return { title: "Fetching RSS feed…", detail: "" };
   if (phase === "scanning") {
     if (total > 0) return { title: "Fetching channel history…", detail: `${done}/${total} videos found` };
     if (done > 0) return { title: "Fetching channel history…", detail: `Page ${done}` };
@@ -155,7 +159,8 @@ function backfillPhaseParts(phase, done, total) {
   return { title: "", detail: "" };
 }
 
-const isActiveBackfillPhase = (phase) => phase === "scanning" || phase === "saving";
+const isActiveBackfillPhase = (phase) =>
+  phase === "syncing" || phase === "scanning" || phase === "saving";
 
 // Polls until a just-added channel's backfill is done, then announces it.
 // Assumes showBackfillOverlay() is already up (callers show it when the add

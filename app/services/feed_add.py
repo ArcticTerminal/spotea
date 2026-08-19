@@ -77,7 +77,11 @@ def _as_artist_follow(rss_url: str, artist_browse_id: str | None) -> tuple[str, 
 
 
 def create_feed_from_rss_url(
-    db: Session, rss_url: str, user_id: int, artist_browse_id: str | None = None
+    db: Session,
+    rss_url: str,
+    user_id: int,
+    artist_browse_id: str | None = None,
+    sync: bool = True,
 ) -> tuple[Feed, int, str | None]:
     """DB-and-remaining-fetch half of adding a feed, given an already-resolved
     RSS URL. Split out from add_feed_core so bulk import can resolve many
@@ -106,7 +110,14 @@ def create_feed_from_rss_url(
     video from (see routers/explore.py's _get_or_create_placeholder_feed). Actually following it
     now means upgrading that row in place (flip followed, run the same
     fetch/backfill a brand-new feed gets) rather than bouncing the user with
-    "already exists" for a feed they never knowingly added."""
+    "already exists" for a feed they never knowingly added.
+
+    `sync=False` stops after the row exists, leaving the content sync to
+    services/backfill.run_initial_sync — what a request-serving caller wants,
+    since the durations and avatar behind that sync are two yt-dlp calls and
+    two seconds (measured) that nothing waiting on the response needs. Bulk
+    import keeps the default: it is already off the request thread and wants
+    each channel finished before starting the next."""
     rss_url, artist_browse_id = _as_artist_follow(rss_url, artist_browse_id)
 
     existing = db.query(Feed).filter(Feed.user_id == user_id, Feed.rss_url == rss_url).first()
@@ -136,17 +147,26 @@ def create_feed_from_rss_url(
         db.commit()
         db.refresh(feed)
 
+    channel_id = extract_channel_id(rss_url)
+    if not sync:
+        return feed, 0, channel_id
+
     result = fetch_feed_data(feed.id, feed.rss_url, feed.avatar_url)
     new_count = apply_feed_data(db, feed, result)
-
-    channel_id = extract_channel_id(rss_url)
     return feed, new_count, channel_id
 
 
 def add_feed_core(
-    db: Session, channel_url: str, user_id: int, artist_browse_id: str | None = None
+    db: Session,
+    channel_url: str,
+    user_id: int,
+    artist_browse_id: str | None = None,
+    sync: bool = True,
 ) -> tuple[Feed, int, str | None]:
-    """Resolve, validate, save a feed, and apply its first RSS parse. Shared
-    by the single-add route and bulk import so the two never diverge."""
+    """Resolve, validate, save a feed, and (unless `sync=False`) apply its
+    first RSS parse. Shared by the single-add route and bulk import so the
+    two never diverge."""
     rss_url = resolve_feed_url(channel_url.strip())
-    return create_feed_from_rss_url(db, rss_url, user_id, artist_browse_id=artist_browse_id)
+    return create_feed_from_rss_url(
+        db, rss_url, user_id, artist_browse_id=artist_browse_id, sync=sync
+    )

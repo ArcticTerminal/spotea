@@ -521,3 +521,30 @@ def test_the_follow_event_carries_what_the_server_decided() -> None:
 
     assert "artistBrowseId: data.feed.artist_browse_id || null" in source
     assert "detail: { feedId, title, artistBrowseId }" in source
+
+
+def test_finish_closes_the_wizard_without_waiting_for_the_queue() -> None:
+    """It used to await the whole Add queue, which drains one channel at a
+    time — measured at ~3.25s each, so six channels was twenty seconds of
+    "Finishing…". The work now happens behind the answer (see
+    services/backfill.run_initial_sync) and Library's card reports it."""
+    source = (JS_DIR / "home" / "onboarding.js").read_text()
+
+    assert "await channelStep?.settled()" not in source, (
+        "Finish is waiting for the Add queue again"
+    )
+    assert "channelStep?.settled().then(" in source, (
+        "nothing refreshes the app once the queue finally drains"
+    )
+
+
+def test_the_first_sync_counts_as_a_channel_still_filling_in() -> None:
+    """"syncing" is a phase like the two scan phases, on both sides: the
+    server puts a feed in it before fetching anything, and a client waiting
+    on a follow has to recognise it as activity or it gives up on the poll
+    (see NEVER_STARTED_GRACE_MS)."""
+    backfill = Path("app/services/backfill.py").read_text()
+    remote = (JS_DIR / "home" / "remote.js").read_text()
+
+    assert 'ACTIVE_PHASES = frozenset({"syncing", "scanning", "saving"})' in backfill
+    assert 'phase === "syncing"' in remote
