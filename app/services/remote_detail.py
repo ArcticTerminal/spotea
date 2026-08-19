@@ -147,15 +147,26 @@ def remote_artist_context(
     # button that does nothing.
     follow_channel_id = artist.channel_id or browse_id
 
+    # Says so explicitly when the list is short of what YouTube Music
+    # reports, the same way a remote playlist does. ARTIST_TRACK_LIMIT sits
+    # above anything that surface will hand over, so this is rarely the app
+    # truncating: it's the handful of entries per playlist that don't
+    # survive parsing (see fetch_artist), and a page reading "143 tracks"
+    # would be claiming to be the whole of a 150-track list.
+    shown = len(artist.tracks)
+    count_label = (
+        f"First {shown} of {artist.track_count} tracks"
+        if artist.track_count > shown
+        else f"{shown} track{'' if shown == 1 else 's'}"
+    )
+    if artist.monthly_listeners:
+        count_label += f" · {artist.monthly_listeners} monthly listeners"
+
     context = _base_context("yt-artist", browse_id, artist.name, artist.tracks)
     context.update(
         {
-            "video_count": len(artist.tracks),
-            "count_label": (
-                f"{len(artist.tracks)} tracks · {artist.monthly_listeners} monthly listeners"
-                if artist.monthly_listeners
-                else f"{len(artist.tracks)} tracks"
-            ),
+            "video_count": shown,
+            "count_label": count_label,
             # Routed through /avatar-proxy rather than hotlinked: artist
             # portraits come off lh3.googleusercontent.com, which the
             # yt3.ggpht.com rewrite doesn't cover (see urls.py).

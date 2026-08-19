@@ -365,22 +365,35 @@ def test_an_artist_page_resolves_the_official_channel(client):
     assert music.resolve_artist_channel("UCNaGLJRPE3ohleIDM7RFtlQ") == "UC6OI7Crv96jgra5pwJNDFRQ"
 
 
-def test_an_artists_songs_and_videos_merge_without_repeats(client):
-    """A release exists twice under different ids — the audio track and the
-    official music video. Both are playable; the same id twice is a bug."""
-    video = {**SONG, "videoId": "3q4cJ1G_on8", "title": "Aşk Dansı"}
+def test_the_videos_section_is_left_out(client):
+    """It used to be merged in. Measured on Drake and Shirin David: 8 of the
+    10 videos were the same song as an entry already in the list under a
+    different id (audio track vs official video), and a video entry carries
+    no duration at all — so the merge bought a handful of duplicate,
+    duration-less rows at the bottom of the panel."""
+    music_video = {"videoId": "3q4cJ1G_on8", "title": "Aşk Dansı", "views": "1.7B"}
     client(
         get_artist={
             "name": "Sezen Aksu",
             "channelId": "UC6OI7Crv96jgra5pwJNDFRQ",
             "songs": {"results": [SONG]},
-            "videos": {"results": [SONG, video]},
+            "videos": {"results": [music_video]},
         }
     )
 
     artist = music.fetch_artist("UCNaGLJRPE3ohleIDM7RFtlQ")
 
-    assert [track.video_id for track in artist.tracks] == ["_efHZg9D9iE", "3q4cJ1G_on8"]
+    assert [track.video_id for track in artist.tracks] == ["_efHZg9D9iE"]
+
+
+def test_the_same_id_is_never_listed_twice(client):
+    """A playlist can repeat an entry; the panel shouldn't."""
+    client(
+        get_artist={"name": "Sezen Aksu", "songs": {"browseId": "VLx", "results": []}},
+        get_playlist={"tracks": [SONG, SONG]},
+    )
+
+    assert [track.video_id for track in music.fetch_artist("UCx").tracks] == ["_efHZg9D9iE"]
 
 
 def test_an_artist_page_lists_the_whole_top_songs_playlist(client):
@@ -421,14 +434,63 @@ def test_the_previewed_songs_stand_in_when_the_playlist_cannot_be_read(client):
     assert [track.video_id for track in artist.tracks] == ["_efHZg9D9iE"]
 
 
-def test_an_artist_page_is_capped(client):
-    tracks = [{**SONG, "videoId": f"_efHZg9D{n:03d}"} for n in range(80)]
+def test_the_cap_is_above_anything_youtube_music_serves(client):
+    """A "Top songs" playlist stops at 150 for everyone — Taylor Swift,
+    Drake, Bach — so the longest real page is that plus the music videos.
+    The cap is a bound against an unbounded remote list, not something the
+    catalogue is expected to hit; if it starts biting, the panel needs
+    pagination rather than a bigger number here."""
+    songs = [{**SONG, "videoId": f"_efHZg9D{n:03d}"} for n in range(150)]
     client(
-        get_artist={"name": "Shirin David", "songs": {"browseId": "VLx", "results": []}},
-        get_playlist={"tracks": tracks},
+        get_artist={"name": "Sezen Aksu", "songs": {"browseId": "VLx", "results": []}},
+        get_playlist={"tracks": songs, "trackCount": 150},
+    )
+
+    artist = music.fetch_artist("UCx")
+
+    assert len(artist.tracks) == 150 < music.ARTIST_TRACK_LIMIT
+    assert artist.track_count == 150
+
+
+def test_an_absurd_list_is_still_capped(client):
+    tracks = [{**SONG, "videoId": f"_efHZg9{n:04d}"} for n in range(250)]
+    client(
+        get_artist={"name": "Someone", "songs": {"browseId": "VLx", "results": []}},
+        get_playlist={"tracks": tracks, "trackCount": 250},
     )
 
     assert len(music.fetch_artist("UCx").tracks) == music.ARTIST_TRACK_LIMIT
+
+
+def test_entries_youtube_drops_are_reported_as_missing(client):
+    """Measured: Drake's playlist reports 150 tracks and yields 143, Bach's
+    147. The shortfall is what `track_count` exists to carry — the panel
+    says "first 143 of 150" instead of implying 143 is the whole list."""
+    tracks = [{**SONG, "videoId": f"_efHZg9D{n:03d}"} for n in range(143)]
+    client(
+        get_artist={"name": "Drake", "songs": {"browseId": "VLx", "results": []}},
+        get_playlist={"tracks": tracks, "trackCount": 150},
+    )
+
+    artist = music.fetch_artist("UCx")
+
+    assert len(artist.tracks) == 143
+    assert artist.track_count == 150
+
+
+def test_a_short_catalogue_is_not_reported_as_truncated(client):
+    """56 songs is the whole page — a count higher than the list would put a
+    "first N of M" on a page that is showing all of them."""
+    tracks = [{**SONG, "videoId": f"_efHZg9D{n:03d}"} for n in range(56)]
+    client(
+        get_artist={"name": "Shirin David", "songs": {"browseId": "VLx", "results": []}},
+        get_playlist={"tracks": tracks, "trackCount": 56},
+    )
+
+    artist = music.fetch_artist("UCx")
+
+    assert len(artist.tracks) == 56
+    assert artist.track_count == 56
 
 
 def test_resolving_a_channel_does_not_pay_for_the_track_list(client):

@@ -46,6 +46,7 @@ def _profile(**overrides):
         "monthly_listeners": "28.9M",
         "avatar_url": "https://lh3.googleusercontent.com/x=w544-h544-p-l90-rj",
         "tracks": [_track()],
+        "track_count": 1,
     }
     fields.update(overrides)
     return ArtistProfile(**fields)
@@ -96,6 +97,26 @@ def test_the_panel_lists_the_artists_tracks(client, fake_artist):
     assert "Sezen Aksu" in res.text
     assert "Biliyorsun" in res.text
     assert "28.9M monthly listeners" in res.text
+
+
+def test_a_capped_track_list_says_so(client, fake_artist):
+    """An artist with 150 songs whose page reads "100 tracks" is claiming to
+    be their whole catalogue. Same wording a truncated remote playlist
+    uses."""
+    fake_artist(_profile(tracks=[_track(f"_efHZg9D{n:03d}") for n in range(100)], track_count=157))
+
+    res = client.get(f"/partials/detail/yt-artist/{BROWSE_ID}")
+
+    assert "First 100 of 157 tracks · 28.9M monthly listeners" in res.text
+
+
+def test_an_uncapped_track_list_just_counts(client, fake_artist):
+    fake_artist(_profile(tracks=[_track()], track_count=1))
+
+    res = client.get(f"/partials/detail/yt-artist/{BROWSE_ID}")
+
+    assert "1 track · 28.9M monthly listeners" in res.text
+    assert "First 1" not in res.text
 
 
 def test_follow_targets_the_official_channel_not_the_topic_one(client, fake_artist):
