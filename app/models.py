@@ -145,6 +145,13 @@ class Feed(Base):
     # — invisible in Library, skipped by the background refresh scheduler,
     # until the user actually follows the channel for real.
     followed: Mapped[bool] = mapped_column(default=True)
+    # Set when this feed was followed from an artist's profile, and null for
+    # every other feed — which makes it both the "is this an artist" flag and
+    # the id that opens their page. The feed itself points at the artist's
+    # "<Artist> - Topic" channel, so this could in principle be read back out
+    # of rss_url; kept explicit because "we followed this as an artist" is a
+    # decision worth recording rather than re-deriving from a URL shape.
+    artist_browse_id: Mapped[str | None] = mapped_column(String(32), default=None)
 
     user: Mapped["User"] = relationship(back_populates="feeds")
     content: Mapped[list["Content"]] = relationship(back_populates="feed", cascade="all, delete-orphan")

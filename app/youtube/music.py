@@ -446,13 +446,14 @@ class ArtistProfile:
     `channelId` back. That second half is what lets an ordinary channel
     result open an artist page (see services/remote_detail.py).
 
-    `channel_id` is the artist's **official** YouTube channel, which is the
-    one worth following since it carries the real uploads an RSS feed can
-    sync.
+    `channel_id` is the artist's **official** YouTube channel — the one a
+    person browses. `topic_channel_id` is the auto-generated one their music
+    is published to, and the one this app follows; see _topic_channel_id.
     """
 
     browse_id: str
     channel_id: str | None
+    topic_channel_id: str | None
     name: str
     description: str | None
     subscriber_count: int | None
@@ -530,6 +531,30 @@ def _releases(section: dict | None, kind: str) -> list[ArtistRelease]:
     return releases[:ARTIST_RELEASE_LIMIT]
 
 
+def _topic_channel_id(songs: list[dict], name: str) -> str | None:
+    """The artist's own "<Artist> - Topic" channel, read off their tracks.
+
+    Every song credits its artists by id, and for the artist whose page this
+    is, that id is their Topic channel — the auto-generated one a label
+    uploads licensed audio to. It is the only channel that carries their
+    music and nothing else, which is what makes it the right thing to
+    follow: an official channel's feed also carries vlogs and interviews,
+    and those are not what someone following an artist in a music app is
+    asking for.
+
+    Matched by name rather than taken from the first credit, because a
+    collaboration lists the other artist first. Measured on Shirin David and
+    Sezen Aksu: the name match finds exactly one id, credited on 56 of 56
+    and 150 of 150 tracks respectively, and its feed is titled "<Artist> -
+    Topic". Costs nothing — this is the response the page already returned.
+    """
+    for song in songs:
+        for artist in song.get("artists") or []:
+            if artist.get("name") == name and CHANNEL_ID_RE.match(artist.get("id") or ""):
+                return artist["id"]
+    return None
+
+
 def _related_artists(section: dict | None) -> list[ChannelSearchResult]:
     results = (_artist_result(item) for item in (section or {}).get("results") or [])
     return [result for result in results if result is not None]
@@ -591,6 +616,7 @@ def fetch_artist(browse_id: str, all_songs: bool = True) -> ArtistProfile | None
     return ArtistProfile(
         browse_id=browse_id,
         channel_id=channel_id if channel_id and CHANNEL_ID_RE.match(channel_id) else None,
+        topic_channel_id=_topic_channel_id(songs, artist["name"]),
         name=artist["name"],
         description=artist.get("description"),
         subscriber_count=_parse_count(artist.get("subscribers")),

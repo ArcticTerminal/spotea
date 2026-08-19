@@ -24,6 +24,7 @@ from app.youtube.search import VideoSearchResult
 USER_ID = 1
 BROWSE_ID = "UCNaGLJRPE3ohleIDM7RFtlQ"
 OFFICIAL_ID = "UC6OI7Crv96jgra5pwJNDFRQ"
+TOPIC_ID = "UCDdTH-sn8qG64wK5ChFDQ4Q"
 
 
 def _track(video_id="_efHZg9D9iE"):
@@ -51,6 +52,7 @@ def _profile(**overrides):
     fields = {
         "browse_id": BROWSE_ID,
         "channel_id": OFFICIAL_ID,
+        "topic_channel_id": TOPIC_ID,
         "name": "Sezen Aksu",
         "description": "Turkish singer, songwriter and producer.",
         "subscriber_count": 3_190_000,
@@ -134,22 +136,43 @@ def test_an_uncapped_track_list_just_counts(client, fake_artist):
     assert "First 1" not in res.text
 
 
-def test_follow_targets_the_official_channel_not_the_topic_one(client, fake_artist):
-    """The whole reason this panel is its own kind. The tracks below it are
-    attributed to the Topic channel; the button has to point somewhere
-    else."""
+def test_follow_targets_the_topic_channel(client, fake_artist):
+    """What "follow an artist" means in a music app: the channel that
+    carries their releases and nothing else, so a new single reaches Home
+    while their vlogs don't. Their official channel is the wrong feed for
+    this even though it's the right page to link to."""
     fake_artist(_profile())
 
     res = client.get(f"/partials/detail/yt-artist/{BROWSE_ID}")
 
+    assert f"https://www.youtube.com/channel/{TOPIC_ID}" in res.text
+    assert f"https://www.youtube.com/channel/{OFFICIAL_ID}" not in res.text
+
+
+def test_the_follow_says_which_artist_it_is(client, fake_artist):
+    """That's what marks the feed as an artist's — the library card reads it
+    to open this page instead of a track list, and the server reads it to
+    skip the history scan."""
+    fake_artist(_profile())
+
+    res = client.get(f"/partials/detail/yt-artist/{BROWSE_ID}")
+
+    assert f'data-artist-browse-id="{BROWSE_ID}"' in res.text
+
+
+def test_an_artist_with_no_topic_channel_falls_back(client, fake_artist):
+    """A handful of artists have none. Following their official channel is a
+    worse answer than the right one, and a better answer than a button that
+    does nothing."""
+    fake_artist(_profile(topic_channel_id=None))
+
+    res = client.get(f"/partials/detail/yt-artist/{BROWSE_ID}")
+
     assert f"https://www.youtube.com/channel/{OFFICIAL_ID}" in res.text
-    assert f"https://www.youtube.com/channel/{BROWSE_ID}" not in res.text
 
 
-def test_an_artist_with_no_official_channel_falls_back_to_the_browse_id(client, fake_artist):
-    """A button pointing at the Topic channel is a worse answer than the
-    right one, and a better answer than a button that does nothing."""
-    fake_artist(_profile(channel_id=None))
+def test_an_artist_with_no_channel_at_all_falls_back_to_the_browse_id(client, fake_artist):
+    fake_artist(_profile(topic_channel_id=None, channel_id=None))
 
     res = client.get(f"/partials/detail/yt-artist/{BROWSE_ID}")
 
@@ -157,13 +180,12 @@ def test_an_artist_with_no_official_channel_falls_back_to_the_browse_id(client, 
 
 
 def test_an_already_followed_artist_points_at_the_library_copy(client, db_session, fake_artist):
-    """Followed-ness is checked against the official channel too — following
-    from this panel creates a feed for that id, so anything else would leave
-    the button saying "Follow" forever."""
+    """Followed-ness is checked against the same channel the button follows
+    — anything else would leave it saying "Follow" forever."""
     fake_artist(_profile())
     feed = Feed(
         user_id=USER_ID,
-        rss_url=f"https://www.youtube.com/feeds/videos.xml?channel_id={OFFICIAL_ID}",
+        rss_url=f"https://www.youtube.com/feeds/videos.xml?channel_id={TOPIC_ID}",
         channel_title="Sezen Aksu",
         followed=True,
     )
@@ -349,7 +371,8 @@ def test_the_full_song_list_keeps_the_artists_follow_button(client, fake_artist)
 
     res = client.get(f"/partials/detail/yt-artist-songs/{BROWSE_ID}")
 
-    assert f"https://www.youtube.com/channel/{OFFICIAL_ID}" in res.text
+    assert f"https://www.youtube.com/channel/{TOPIC_ID}" in res.text
+    assert f'data-artist-browse-id="{BROWSE_ID}"' in res.text
     assert "detail-play-all" in res.text
 
 

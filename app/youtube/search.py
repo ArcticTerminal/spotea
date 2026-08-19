@@ -21,6 +21,7 @@ from app.youtube.urls import (
     CHANNEL_SEARCH_URL_TEMPLATE,
     PLAYLIST_ID_RE,
     PLAYLIST_SEARCH_URL_TEMPLATE,
+    TOPIC_CHANNEL_SUFFIX,
     VIDEO_ID_RE,
     VIDEO_SEARCH_URL_TEMPLATE,
     absolute_thumbnail_url,
@@ -225,7 +226,6 @@ def cached_avatar_or_hotlink(channel_id: str, remote_url: str | None) -> str | N
 # is attribution, which is why a song's preview row still hangs off one (see
 # app/youtube/music.py) — that's a placeholder feed nobody sees, not a follow.
 # Same rule scripts/seed_music_artists.py already applies to its own results.
-_TOPIC_CHANNEL_SUFFIX = " - Topic"
 
 
 def search_channels(query: str) -> list[ChannelSearchResult]:
@@ -237,7 +237,7 @@ def search_channels(query: str) -> list[ChannelSearchResult]:
         if not channel_id:
             continue
         title = entry.get("title") or entry.get("channel") or channel_id
-        if title.endswith(_TOPIC_CHANNEL_SUFFIX):
+        if title.endswith(TOPIC_CHANNEL_SUFFIX):
             continue
         remote_thumbnail_url = _best_thumbnail_url(entry.get("thumbnails") or [])
         results.append(

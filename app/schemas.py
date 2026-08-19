@@ -23,6 +23,10 @@ _BULK_IMPORT_MAX_LENGTH = _BULK_IMPORT_MAX_LINES * _URL_MAX_LENGTH
 
 class FeedCreate(BaseModel):
     channel_url: str = Field(min_length=1, max_length=_URL_MAX_LENGTH)
+    # Present only when following from an artist's profile, where the page
+    # knows both which artist this is and that its channel is a Topic one.
+    # See Feed.artist_browse_id for what that changes.
+    artist_browse_id: str | None = Field(default=None, max_length=32)
 
 
 class FeedOut(BaseModel):

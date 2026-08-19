@@ -39,6 +39,17 @@ CHANNEL_ID_RE = re.compile(r"^UC[\w-]{22}$")
 # channel id's is, so this bounds it rather than pinning it.
 RELEASE_ID_RE = re.compile(r"^MPREb_[\w-]{1,32}$")
 
+# YouTube names an artist's auto-generated music channel "<Artist> - Topic".
+# Two places care: channel search drops them (nobody means to follow one by
+# that name), and following an artist targets one deliberately — where the
+# suffix is noise, since the card is meant to read as the artist.
+TOPIC_CHANNEL_SUFFIX = " - Topic"
+
+
+def strip_topic_suffix(title: str | None) -> str | None:
+    return title.removesuffix(TOPIC_CHANNEL_SUFFIX) if title else title
+
+
 CHANNEL_ID_URL_RE = re.compile(r"youtube\.com/channel/(UC[\w-]{22})")
 CHANNEL_ID_PARAM_RE = re.compile(r"channel_id=([\w-]+)")
 
