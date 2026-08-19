@@ -61,6 +61,22 @@ export function renderChannelResults(results, containerId = "channel-search-resu
     .join("");
 }
 
+/** A song's artist, as a way into their page when the result says which
+ *  channel it belongs to.
+ *
+ *  Plain text when it doesn't. The fallback yt-dlp search (see
+ *  routers/explore.py's search_video_feeds) doesn't reliably report a
+ *  channel on a flat search entry, and a link that opens nothing is worse
+ *  than no link. The id itself is the artist's "Topic" channel — the
+ *  yt-artist panel is what turns that into the real artist, and falls back
+ *  to the plain channel view for an id that isn't one at all (see
+ *  services/remote_detail.py). */
+function artistNameHtml(item) {
+  const name = escapeHtml(item.channel_title || "");
+  if (!name || !item.channel_id) return name;
+  return `<button type="button" class="artist-link" data-channel-id="${escapeHtml(item.channel_id)}">${name}</button>`;
+}
+
 // Rows, not a whole list, so the caller owns the empty state.
 function videoRowsHtml(results) {
   return results
@@ -69,8 +85,7 @@ function videoRowsHtml(results) {
         ? `<img class="video-search-thumb" src="${escapeHtml(r.thumbnail_url)}" alt="" />`
         : `<span class="video-search-thumb"></span>`;
       const duration = r.duration_seconds != null ? formatDuration(r.duration_seconds) : "";
-      const channel = r.channel_title ? escapeHtml(r.channel_title) : "";
-      const meta = [channel, duration].filter(Boolean).join(" · ");
+      const meta = [artistNameHtml(r), duration].filter(Boolean).join(" · ");
       return `
         <li
           class="search-result video-search-result"
@@ -79,6 +94,7 @@ function videoRowsHtml(results) {
           data-thumbnail-url="${escapeHtml(r.thumbnail_url || "")}"
           data-duration-seconds="${r.duration_seconds ?? ""}"
           data-channel-title="${escapeHtml(r.channel_title || "")}"
+          data-channel-id="${escapeHtml(r.channel_id || "")}"
         >
           ${thumb}
           <div class="search-result-info">
@@ -118,13 +134,14 @@ function recVideoCardHtml(video) {
       data-thumbnail-url="${escapeHtml(video.thumbnail_url || "")}"
       data-duration-seconds="${video.duration_seconds ?? ""}"
       data-channel-title="${escapeHtml(video.channel_title || "")}"
+      data-channel-id="${escapeHtml(video.channel_id || "")}"
     >
       <button type="button" class="thumb rec-play" aria-label="Play ${escapeHtml(video.title)}">
         ${thumb}${duration}
       </button>
       <div class="card-body">
         <h3 class="card-title" title="${escapeHtml(video.title)}">${escapeHtml(video.title)}</h3>
-        <p class="card-channel">${escapeHtml(video.channel_title || "")}</p>
+        <p class="card-channel">${artistNameHtml(video)}</p>
       </div>
     </article>
   `;
@@ -414,6 +431,15 @@ export function setupRecommendations() {
       return;
     }
 
+    // Checked before anything else: the artist's name sits inside cards that
+    // are themselves clickable, so the outer handler would otherwise swallow
+    // it and start playing the song.
+    const artistLink = event.target.closest(".artist-link");
+    if (artistLink) {
+      openDetail("yt-artist", artistLink.dataset.channelId);
+      return;
+    }
+
     // Checked before the card itself: a channel card is clickable as a whole
     // (preview it) but carries its own Add button (follow it outright).
     const addButton = event.target.closest(".btn-add-channel");
@@ -511,6 +537,12 @@ export function setupExploreSearch() {
   });
 
   videoResults.addEventListener("click", (event) => {
+    const artistLink = event.target.closest(".artist-link");
+    if (artistLink) {
+      openDetail("yt-artist", artistLink.dataset.channelId);
+      return;
+    }
+
     const button = event.target.closest(".video-search-play");
     if (!button) return;
     playRemoteVideo(button.closest(".video-search-result").dataset, button);
