@@ -120,6 +120,12 @@ class Artist(Base):
     # services/artist_sync.py). NULL means "never synced", which is what makes
     # a first sync record the catalogue without importing it.
     release_snapshot: Mapped[str | None] = mapped_column(Text, default=None)
+    # YouTube Music's own bare count string ("1.91M"), refreshed on every
+    # sync — see services/artist_sync.py. Comes back with every get_artist
+    # call a sync already makes, so this costs nothing extra to keep, unlike
+    # subscriber_count and description, which the same response carries but
+    # nothing here persists.
+    monthly_listeners: Mapped[str | None] = mapped_column(String(32), default=None)
 
     user: Mapped["User"] = relationship(back_populates="artists")
     content: Mapped[list["Content"]] = relationship(back_populates="artist", cascade="all, delete-orphan")

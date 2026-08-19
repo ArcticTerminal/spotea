@@ -228,6 +228,26 @@ def test_a_followed_artist_with_neither_count_just_says_following(client, db_ses
     assert "Following</span>" in body
 
 
+def test_a_followed_artists_card_prefers_monthly_listeners(client, db_session):
+    """The top of the fallback chain: YouTube Music's own count outranks
+    both the synced-track count and the release-count fallback, since it's
+    the one figure that's almost always meaningful and never reads as 0."""
+    artist = Artist(
+        user_id=USER_ID,
+        channel_id="UCmonthlylisteners00000",
+        name="Has A Real Following",
+        monthly_listeners="1.91M",
+        release_snapshot='["MPREb_a", "MPREb_b"]',
+    )
+    db_session.add(artist)
+    db_session.commit()
+
+    body = _fragment_body(client.get("/partials/library").text, "library-grid")
+
+    assert "1.91M monthly listeners</span>" in body
+    assert "2 releases</span>" not in body
+
+
 def test_downloads_fragment_reports_stored_sizes(client, db_session):
     """The modal's own list (full collect_usage) and the Settings summary
     line (the cheaper usage_summary) are two separate fragments now — see

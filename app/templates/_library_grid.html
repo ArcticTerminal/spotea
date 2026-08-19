@@ -79,6 +79,12 @@
           <span class="channel-card-count channel-card-preparing">
             <span class="spinner"></span><span class="channel-card-preparing-text">Fetching releases…</span>
           </span>
+          {% elif artist.monthly_listeners %}
+          {# YouTube Music's own count, refreshed on every sync (see
+             services/artist_sync.py) — the same figure Spotify shows under
+             an artist's name, and unlike the counts below it, it doesn't
+             read as 0 for an artist you just followed. #}
+          <span class="channel-card-count">{{ artist.monthly_listeners }} monthly listeners</span>
           {% elif video_count %}
           {# A track from this artist has actually synced in since you
              followed — see page_context.library_context's

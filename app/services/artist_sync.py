@@ -63,6 +63,7 @@ class ArtistFetchResult:
     ok: bool
     name: str | None = None
     avatar_url: str | None = None
+    monthly_listeners: str | None = None
     release_ids: list[str] = field(default_factory=list)
     tracks: list[VideoSearchResult] = field(default_factory=list)
 
@@ -96,7 +97,11 @@ def fetch_artist_data(browse_id: str, snapshot: str | None, avatar_url: str | No
 
     if snapshot is None:
         return ArtistFetchResult(
-            ok=True, name=artist.name, avatar_url=fetched_avatar_url, release_ids=release_ids
+            ok=True,
+            name=artist.name,
+            avatar_url=fetched_avatar_url,
+            monthly_listeners=artist.monthly_listeners,
+            release_ids=release_ids,
         )
 
     known = set(json.loads(snapshot))
@@ -116,6 +121,7 @@ def fetch_artist_data(browse_id: str, snapshot: str | None, avatar_url: str | No
         ok=True,
         name=artist.name,
         avatar_url=fetched_avatar_url,
+        monthly_listeners=artist.monthly_listeners,
         release_ids=release_ids,
         tracks=tracks,
     )
@@ -132,6 +138,11 @@ def apply_artist_data(db: Session, artist: Artist, result: ArtistFetchResult) ->
         artist.name = result.name
     if result.avatar_url:
         artist.avatar_url = result.avatar_url
+    # Unlike name/avatar_url above, overwritten every sync rather than only
+    # once — it's a moving count, not a fact settled the first time we see
+    # it.
+    if result.monthly_listeners:
+        artist.monthly_listeners = result.monthly_listeners
 
     new_count = 0
     if result.tracks:

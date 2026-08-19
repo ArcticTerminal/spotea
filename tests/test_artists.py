@@ -37,7 +37,9 @@ def _release(browse_id="MPREb_aaaaaaaaaaa", title="A Single", year="2026"):
     )
 
 
-def _artist(*, topic_channel_id=TOPIC_ID, browse_id=OFFICIAL_ID, albums=(), singles=()):
+def _artist(
+    *, topic_channel_id=TOPIC_ID, browse_id=OFFICIAL_ID, albums=(), singles=(), monthly_listeners=None
+):
     return ArtistProfile(
         browse_id=browse_id,
         channel_id=OFFICIAL_ID,
@@ -45,7 +47,7 @@ def _artist(*, topic_channel_id=TOPIC_ID, browse_id=OFFICIAL_ID, albums=(), sing
         name="Shirin David",
         description=None,
         subscriber_count=1_000_000,
-        monthly_listeners=None,
+        monthly_listeners=monthly_listeners,
         avatar_url=None,
         tracks=[],
         track_count=0,
@@ -225,6 +227,37 @@ def test_a_first_sync_records_the_catalogue_without_importing_it(db_session, mon
     assert new_count == 0
     assert db_session.query(Content).count() == 0
     assert artist.release_snapshot == '["MPREb_aaaaaaaaaaa", "MPREb_bbbbbbbbbbb"]'
+
+
+def test_a_first_sync_still_records_monthly_listeners(db_session, monkeypatch):
+    """Free off the same response a first sync already makes — see
+    ArtistFetchResult.monthly_listeners — so it lands even though nothing
+    else about the catalogue is imported yet."""
+    monkeypatch.setattr(
+        artist_sync, "fetch_artist", lambda browse_id, all_songs=True: _artist(monthly_listeners="1.91M")
+    )
+
+    artist = _followed(db_session)
+    result = artist_sync.fetch_artist_data(artist.browse_id, artist.release_snapshot, None)
+    apply_artist_data(db_session, artist, result)
+
+    assert artist.monthly_listeners == "1.91M"
+
+
+def test_monthly_listeners_is_refreshed_on_every_sync(db_session, monkeypatch):
+    """Unlike name/avatar_url, this isn't a fact settled once — it moves,
+    so a later sync has to overwrite a stale figure rather than keep the
+    first one it ever saw."""
+    monkeypatch.setattr(
+        artist_sync, "fetch_artist", lambda browse_id, all_songs=True: _artist(monthly_listeners="2.4M")
+    )
+
+    artist = _followed(db_session, release_snapshot="[]")
+    artist.monthly_listeners = "1.91M"
+    result = artist_sync.fetch_artist_data(artist.browse_id, artist.release_snapshot, None)
+    apply_artist_data(db_session, artist, result)
+
+    assert artist.monthly_listeners == "2.4M"
 
 
 def test_a_later_sync_imports_only_what_appeared_since(db_session, monkeypatch):
