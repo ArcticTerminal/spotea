@@ -1,3 +1,8 @@
 -r requirements.txt
 pytest
 ruff
+# Only the test suite needs this: starlette's TestClient is built on httpx.
+# It used to be a runtime dependency too, for the MusicBrainz lookups the
+# onboarding wizard's seed cache made — that wizard and those lookups are
+# gone, and the app now talks to nothing but YouTube.
+httpx==0.28.1
