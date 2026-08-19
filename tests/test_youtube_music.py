@@ -8,6 +8,8 @@ ids that carry a "VL" prefix, 60-pixel cover art, Topic channel ids standing
 in for artists, and counts that arrive as "1.8M" rather than a number.
 """
 
+import logging
+
 import pytest
 
 from app.youtube import music
@@ -71,6 +73,9 @@ class FakeYTMusic:
 
     def get_artist(self, browse_id):
         return self._record("get_artist", browse_id)
+
+    def get_playlist(self, playlist_id, limit=None):
+        return self._record("get_playlist", playlist_id, limit=limit)
 
 
 @pytest.fixture
@@ -376,6 +381,89 @@ def test_an_artists_songs_and_videos_merge_without_repeats(client):
     artist = music.fetch_artist("UCNaGLJRPE3ohleIDM7RFtlQ")
 
     assert [track.video_id for track in artist.tracks] == ["_efHZg9D9iE", "3q4cJ1G_on8"]
+
+
+def test_an_artist_page_lists_the_whole_top_songs_playlist(client):
+    """The page itself previews five songs and keeps the rest behind a
+    browse id — 56 of them for a mid-size artist, measured. Five is not an
+    artist page worth opening, so the playlist is what gets listed."""
+    deep_cut = {**SONG, "videoId": "3q4cJ1G_on8", "title": "Aşk Dansı"}
+    fake = client(
+        get_artist={
+            "name": "Shirin David",
+            "channelId": "UC5ZkRnYd3__WBBGnAnWO9Cg",
+            "songs": {"browseId": "VLOLAK5uy_mcACjdxLHv", "results": [SONG]},
+            "videos": {"results": []},
+        },
+        get_playlist={"title": "Top songs", "tracks": [SONG, deep_cut]},
+    )
+
+    artist = music.fetch_artist("UC5ZkRnYd3__WBBGnAnWO9Cg")
+
+    assert [track.video_id for track in artist.tracks] == ["_efHZg9D9iE", "3q4cJ1G_on8"]
+    assert ("get_playlist", ("VLOLAK5uy_mcACjdxLHv",), {"limit": music.ARTIST_TRACK_LIMIT}) in fake.calls
+
+
+def test_the_previewed_songs_stand_in_when_the_playlist_cannot_be_read(client):
+    """A five-track page is a worse artist page, and an empty one falls
+    through to the channel listing (see services/remote_detail.py) — which
+    for a vlogging artist is the listing this whole route exists to avoid."""
+    client(
+        get_artist={
+            "name": "Shirin David",
+            "songs": {"browseId": "VLOLAK5uy_mcACjdxLHv", "results": [SONG]},
+        },
+        get_playlist=None,
+    )
+
+    artist = music.fetch_artist("UC5ZkRnYd3__WBBGnAnWO9Cg")
+
+    assert [track.video_id for track in artist.tracks] == ["_efHZg9D9iE"]
+
+
+def test_an_artist_page_is_capped(client):
+    tracks = [{**SONG, "videoId": f"_efHZg9D{n:03d}"} for n in range(80)]
+    client(
+        get_artist={"name": "Shirin David", "songs": {"browseId": "VLx", "results": []}},
+        get_playlist={"tracks": tracks},
+    )
+
+    assert len(music.fetch_artist("UCx").tracks) == music.ARTIST_TRACK_LIMIT
+
+
+def test_resolving_a_channel_does_not_pay_for_the_track_list(client):
+    """A follow click wants one field off the page header. The second
+    request the track list costs would buy nothing there."""
+    fake = client(
+        get_artist={
+            "name": "Sezen Aksu",
+            "channelId": "UC6OI7Crv96jgra5pwJNDFRQ",
+            "songs": {"browseId": "VLOLAK5uy_mcACjdxLHv", "results": [SONG]},
+        }
+    )
+
+    assert music.resolve_artist_channel("UCNaGLJRPE3ohleIDM7RFtlQ") == "UC6OI7Crv96jgra5pwJNDFRQ"
+    assert [call[0] for call in fake.calls] == ["get_artist"]
+
+
+def test_a_channel_that_is_not_an_artist_is_none(client, caplog):
+    """Measured live: asking for a podcast or a tech channel raises
+    KeyError('musicImmersiveHeaderRenderer') from inside ytmusicapi. That is
+    what makes it safe to try any channel id here and let the answer decide
+    — see services/remote_detail.py.
+
+    And it must not warn. Every podcast opened from Explore now asks this
+    question first, so a traceback per failure is a log nobody can read."""
+
+    def raise_key_error(browse_id):
+        raise KeyError("musicImmersiveHeaderRenderer")
+
+    client(get_artist=raise_key_error)
+
+    with caplog.at_level(logging.INFO, logger="app.youtube.music"):
+        assert music.fetch_artist("UCGq-a57w-aPwyi3pW7XLiHw") is None
+
+    assert [record.levelno for record in caplog.records] == [logging.INFO]
 
 
 def test_an_unknown_artist_is_none_not_an_empty_profile(client):

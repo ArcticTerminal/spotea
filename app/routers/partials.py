@@ -175,17 +175,20 @@ def remote_channel_fragment(
 def remote_artist_fragment(
     browse_id: str,
     request: Request,
+    avatar: str | None = None,
     profile: User = Depends(get_current_profile),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
     """An artist's YouTube Music page. Same id shape as the channel route
     above — an artist's browse id *is* a channel id — and it falls back to
     that route's context when the id turns out not to name an artist (see
-    remote_artist_context)."""
+    remote_artist_context), which is also why it takes the same untrusted
+    `avatar` hint: a channel card clicks through to *this* route now, and
+    the hint is what keeps the hero from rendering blank on the fallback."""
     if not CHANNEL_ID_RE.match(browse_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artist not found")
 
-    context = remote_artist_context(db, profile.id, browse_id)
+    context = remote_artist_context(db, profile.id, browse_id, avatar_url=avatar)
     if context is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Could not open this artist")
     return templates.TemplateResponse(request, "_fragment_detail.html", context)

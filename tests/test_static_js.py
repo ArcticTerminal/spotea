@@ -433,3 +433,30 @@ def test_the_artist_link_is_handled_before_the_card_it_sits_inside() -> None:
         "the .rec-card branch is checked before .artist-link — clicking an "
         "artist's name plays the song instead of opening their page"
     )
+
+
+def test_a_channel_result_opens_the_artist_route() -> None:
+    """The fix for an artist whose YouTube channel is mostly vlogs: the
+    search result and the shelf card both go to yt-artist, and the server
+    decides whether that id is an artist or falls back to the channel's
+    uploads (see services/remote_detail.py). Sending them to yt-channel
+    instead skips that decision and shows the vlogs again."""
+    source = (JS_DIR / "home" / "explore.js").read_text()
+
+    assert 'openDetail("yt-channel"' not in source, (
+        "a channel result opens yt-channel directly again — an artist's "
+        "track list is never reached, only their uploads"
+    )
+    assert source.count('openDetail("yt-artist", channelCard.dataset.channelId') == 1
+    assert source.count('openDetail("yt-artist", row.dataset.channelId') == 1
+
+
+def test_the_avatar_hint_reaches_both_channel_routes() -> None:
+    """yt-artist is what a channel card opens now, and its fallback is the
+    channel listing — which has no cheap avatar of its own and renders a
+    blank hero without the hint the card already had."""
+    source = (JS_DIR / "home" / "detail.js").read_text()
+
+    assert '(kind === "yt-channel" || kind === "yt-artist") && avatar' in source, (
+        "detailUrl no longer forwards the avatar hint on both channel kinds"
+    )
