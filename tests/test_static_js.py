@@ -391,3 +391,36 @@ def test_the_first_sync_counts_as_an_artist_still_filling_in() -> None:
 
     assert 'ACTIVE_PHASES = frozenset({"syncing"})' in initial_sync
     assert "/artists/syncing" in library
+
+
+def test_every_module_import_resolves() -> None:
+    """The regression this exists for: a rename left home/remote.js exporting
+    neither playRemoteVideo nor playRemoteList while home/explore.js and
+    home/detail.js still imported both. One unresolved import fails the whole
+    module graph, so *nothing* on the page was wired — no tabs, no menu, no
+    play button — and every server-side test still passed.
+
+    There is no JS runner here to catch that by executing it, so this parses
+    the import/export graph instead: every named import has to be exported by
+    the file it names, and that file has to exist.
+    """
+    modules = {path.resolve(): path.read_text() for path in JS_DIR.rglob("*.js")}
+
+    exported = {}
+    for path, source in modules.items():
+        names = set(re.findall(r"^export (?:async )?function (\w+)", source, re.M))
+        names |= set(re.findall(r"^export (?:const|let|class) (\w+)", source, re.M))
+        exported[path] = names
+
+    broken = []
+    for path, source in modules.items():
+        for match in re.finditer(r'import\s*\{([^}]+)\}\s*from\s*"([^"]+)"', source):
+            target = (path.parent / match.group(2)).resolve()
+            if target not in modules:
+                broken.append(f"{path.name} imports a file that doesn't exist: {match.group(2)}")
+                continue
+            for name in (n.strip().split(" as ")[0] for n in match.group(1).split(",") if n.strip()):
+                if name not in exported[target]:
+                    broken.append(f"{path.name} imports {name}, which {target.name} does not export")
+
+    assert not broken, "\n".join(broken)
