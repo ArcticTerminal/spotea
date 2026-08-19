@@ -169,6 +169,30 @@ export function channelCardHtml(channel) {
   `;
 }
 
+/** A charting artist. Same data shape as a channel card and deliberately a
+ *  different card: the id on a chart entry is the artist's auto-generated
+ *  "Topic" channel, not the channel they upload to, so this opens their
+ *  YouTube Music page (which knows both) instead of the channel behind the
+ *  id, and carries no Add button — following from here would follow the
+ *  wrong one. Follow lives on the artist page, where the right id is known. */
+function artistCardHtml(artist) {
+  const avatar = artist.thumbnail_url
+    ? `<img class="shelf-channel-avatar" src="${escapeHtml(artist.thumbnail_url)}" alt="" loading="lazy" />`
+    : `<span class="shelf-channel-avatar"></span>`;
+  return `
+    <article
+      class="card shelf-channel-card shelf-artist-card"
+      data-channel-id="${escapeHtml(artist.channel_id)}"
+    >
+      ${avatar}
+      <div class="card-body">
+        <h3 class="card-title" title="${escapeHtml(artist.title)}">${escapeHtml(artist.title)}</h3>
+        <p class="card-date">${escapeHtml(formatSubscribers(artist.subscriber_count))}</p>
+      </div>
+    </article>
+  `;
+}
+
 function recPlaylistCardHtml(playlist) {
   const thumb = playlist.thumbnail_url
     ? `<img src="${escapeHtml(playlist.thumbnail_url)}" alt="" loading="lazy" />`
@@ -253,7 +277,7 @@ function renderRecommendations(data) {
     shelfHtml("Playlists", data.playlists, recPlaylistCardHtml),
     // Then what everyone gets: this week's charts and one rotating mood.
     shelfHtml("Charts", data.charts, recPlaylistCardHtml),
-    shelfHtml("Charting artists", data.chart_artists, channelCardHtml),
+    shelfHtml("Charting artists", data.chart_artists, artistCardHtml),
     // The only shelf whose heading comes from YouTube rather than from this
     // file, so the only one that needs escaping.
     data.mood
@@ -395,6 +419,12 @@ export function setupRecommendations() {
     const addButton = event.target.closest(".btn-add-channel");
     if (addButton) {
       followChannel(addButton.dataset.channelUrl, addButton);
+      return;
+    }
+
+    const artistCard = event.target.closest(".shelf-artist-card");
+    if (artistCard) {
+      openDetail("yt-artist", artistCard.dataset.channelId);
       return;
     }
 

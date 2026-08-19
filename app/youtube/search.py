@@ -214,6 +214,20 @@ def cached_avatar_or_hotlink(channel_id: str, remote_url: str | None) -> str | N
     return cached_avatar_path(channel_id) or proxied_avatar_url(remote_url)
 
 
+# YouTube auto-generates a "<Artist> - Topic" channel for every artist, to
+# host the licensed audio the labels deliver. They are not channels anyone
+# means to follow: measured live, searching for "sezen aksu" returns the real
+# @sezenaksu channel (3.19M subscribers) first and then three separate Topic
+# channels for the same artist with 587, 12 and 1 subscribers — and following
+# one of those gets an automated container instead of the artist. They carry
+# no uploads a person would recognise as new, either, since the tracks are
+# added by ingestion rather than published. The one thing they *are* good for
+# is attribution, which is why a song's preview row still hangs off one (see
+# app/youtube/music.py) — that's a placeholder feed nobody sees, not a follow.
+# Same rule scripts/seed_music_artists.py already applies to its own results.
+_TOPIC_CHANNEL_SUFFIX = " - Topic"
+
+
 def search_channels(query: str) -> list[ChannelSearchResult]:
     search_url = CHANNEL_SEARCH_URL_TEMPLATE.format(query=urllib.parse.quote(query))
 
@@ -222,11 +236,14 @@ def search_channels(query: str) -> list[ChannelSearchResult]:
         channel_id = entry.get("channel_id") or entry.get("id")
         if not channel_id:
             continue
+        title = entry.get("title") or entry.get("channel") or channel_id
+        if title.endswith(_TOPIC_CHANNEL_SUFFIX):
+            continue
         remote_thumbnail_url = _best_thumbnail_url(entry.get("thumbnails") or [])
         results.append(
             ChannelSearchResult(
                 channel_id=channel_id,
-                title=entry.get("title") or entry.get("channel") or channel_id,
+                title=title,
                 thumbnail_url=cached_avatar_or_hotlink(channel_id, remote_thumbnail_url),
                 subscriber_count=entry.get("channel_follower_count"),
                 channel_url=entry.get("channel_url")

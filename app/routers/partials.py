@@ -34,7 +34,11 @@ from app.page_context import (
     queue_thumbnail_caching,
     storage_summary_context,
 )
-from app.services.remote_detail import remote_channel_context, remote_playlist_context
+from app.services.remote_detail import (
+    remote_artist_context,
+    remote_channel_context,
+    remote_playlist_context,
+)
 from app.templating import templates
 from app.youtube.urls import CHANNEL_ID_RE, PLAYLIST_ID_RE
 
@@ -124,11 +128,12 @@ def playlist_detail_fragment(
     return templates.TemplateResponse(request, "_fragment_detail.html", context)
 
 
-# The two below render the same panel from YouTube rather than the database —
-# Explore's recommendations drill into them (see services/remote_detail.py).
-# No queue_thumbnail_caching: that works on Content rows, and nothing here has
-# one yet. Both are slow (a live yt-dlp read) where the three above are not,
-# which is why the client shows its loading state for them the same way.
+# The three below render the same panel from YouTube rather than the database —
+# Explore's search results and recommendations drill into them (see
+# services/remote_detail.py). No queue_thumbnail_caching: that works on
+# Content rows, and nothing here has one yet. All three are slow (a live
+# read) where the three above are not, which is why the client shows its
+# loading state for them the same way.
 
 
 @router.get("/detail/yt-playlist/{playlist_id}", response_class=HTMLResponse)
@@ -163,4 +168,24 @@ def remote_channel_fragment(
     context = remote_channel_context(db, profile.id, channel_id, avatar_url=avatar)
     if context is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Could not open this channel")
+    return templates.TemplateResponse(request, "_fragment_detail.html", context)
+
+
+@router.get("/detail/yt-artist/{browse_id}", response_class=HTMLResponse)
+def remote_artist_fragment(
+    browse_id: str,
+    request: Request,
+    profile: User = Depends(get_current_profile),
+    db: Session = Depends(get_db),
+) -> HTMLResponse:
+    """An artist's YouTube Music page. Same id shape as the channel route
+    above — an artist's browse id *is* a channel id — and it falls back to
+    that route's context when the id turns out not to name an artist (see
+    remote_artist_context)."""
+    if not CHANNEL_ID_RE.match(browse_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artist not found")
+
+    context = remote_artist_context(db, profile.id, browse_id)
+    if context is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Could not open this artist")
     return templates.TemplateResponse(request, "_fragment_detail.html", context)

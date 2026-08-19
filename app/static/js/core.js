@@ -13,11 +13,11 @@
 // place everything after that first paint agrees with it.
 const VALID_TABS = ["home", "library", "explore", "settings"];
 const PLAYLIST_KINDS = ["favorites", "saved", "new-uploads", "recently-played"];
-// Detail routes that carry an id. "yt-channel"/"yt-playlist" are the same
-// panel showing something the library doesn't have yet — a recommended
-// YouTube playlist, or a channel nobody follows (see
+// Detail routes that carry an id. The three "yt-" ones are the same panel
+// showing something the library doesn't have yet — a recommended YouTube
+// playlist, a channel nobody follows, or a YouTube Music artist (see
 // app/services/remote_detail.py).
-const ID_DETAIL_KINDS = ["channel", "yt-channel", "yt-playlist"];
+const ID_DETAIL_KINDS = ["channel", "yt-channel", "yt-playlist", "yt-artist"];
 
 export function classifyHash(hash) {
   const [path, query] = hash.split("?");
