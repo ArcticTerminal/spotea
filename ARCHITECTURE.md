@@ -55,7 +55,7 @@ app/
   scheduler.py       background loop: refresh due users, sweep disk
   storage.py         disk accounting, purge, orphan sweeps, export
   downloader.py      yt-dlp audio extraction — the only yt-dlp importer
-  images.py          avatar/thumbnail fetch + cache, /avatar-proxy helpers
+  images.py          avatar/thumbnail fetch + cache, /image-proxy helpers
   content_query.py   one place that decides what a filter/playlist means
   page_context.py    the context every page and fragment renders from
   progress.py        expiring in-memory registries (downloads, syncs)
@@ -222,7 +222,7 @@ at all.
 | GET/PUT | `/settings` | quality, interests, interval |
 | GET/POST | `/recommendations`, `/recommendations/refresh` | the For you batch |
 | DELETE/GET | `/storage`, `/storage/export` | clear all, zip |
-| GET | `/avatars/*`, `/thumbnails/*`, `/avatar-proxy` | images |
+| GET | `/avatars/*`, `/thumbnails/*`, `/image-proxy` | images |
 | POST | `/register`, `/login`, `/logout` | auth |
 | GET | `/health` | db + scheduler liveness |
 

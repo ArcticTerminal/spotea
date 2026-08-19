@@ -176,7 +176,7 @@ def test_fetch_image_bytes_returns_the_body_and_content_type(network):
 
 def test_fetch_image_bytes_writes_nothing_to_disk(network, tmp_path, monkeypatch):
     """The whole point over _download_image: a channel nobody's followed
-    doesn't earn a permanent local copy (see /avatar-proxy in app/main.py)."""
+    doesn't earn a permanent local copy (see /image-proxy in app/main.py)."""
     network(JPEG)
     monkeypatch.chdir(tmp_path)
 
@@ -186,7 +186,7 @@ def test_fetch_image_bytes_writes_nothing_to_disk(network, tmp_path, monkeypatch
 
 
 def test_fetch_image_bytes_rejects_a_non_image_content_type(network):
-    """The upstream host is allowlisted (see app.main's _AVATAR_PROXY_ALLOWED_
+    """The upstream host is allowlisted (see app.main's _IMAGE_PROXY_ALLOWED_
     HOSTS) but still not trusted to actually serve an image — an error page
     or redirect target shouldn't be forwarded as if it were one."""
     network(b"<html>not an image</html>", content_type="text/html")

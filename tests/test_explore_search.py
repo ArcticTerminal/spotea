@@ -26,7 +26,7 @@ SONG = VideoSearchResult(
 ARTIST = ChannelSearchResult(
     channel_id="UCQm-Fc8TAF3c1hJffBPjxgw",
     title="Tarkan",
-    thumbnail_url="/avatar-proxy?u=x",
+    thumbnail_url="/image-proxy?u=x",
     # None, as YouTube Music's artist search actually answers — measured live.
     subscriber_count=None,
     channel_url="https://www.youtube.com/channel/UCQm-Fc8TAF3c1hJffBPjxgw",

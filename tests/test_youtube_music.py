@@ -21,7 +21,7 @@ def _proxied(remote_url: str) -> str:
     """The same wrapping _proxied_cover_url applies — see that function's
     docstring for why a song/playlist/release cover is never hotlinked
     directly."""
-    return f"/avatar-proxy?u={quote(remote_url, safe='')}"
+    return f"/image-proxy?u={quote(remote_url, safe='')}"
 
 SONG = {
     "title": "Biliyorsun",

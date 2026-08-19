@@ -47,7 +47,7 @@ from dataclasses import dataclass, field
 
 from ytmusicapi import YTMusic
 
-from app.images import cached_avatar_or_hotlink, proxied_avatar_url
+from app.images import cached_avatar_or_hotlink, proxied_image_url
 from app.youtube.models import (
     PLAYLIST_ITEM_LIMIT,
     SEARCH_RESULT_LIMIT,
@@ -214,7 +214,7 @@ def _proxied_cover_url(thumbnails: list[dict] | None) -> str | None:
     (see cached_avatar_or_hotlink's docstring on why not — the same 92%
     orphan-file problem applies here at a much larger scale, since a track
     or an album is browsed far more often than it's followed). So this
-    always goes through /avatar-proxy rather than checking for one on disk
+    always goes through /image-proxy rather than checking for one on disk
     first — hotlinking Google's CDN directly from these cards used to fail
     silently and often: Chrome's ORB rejects a real share of yt3.ggpht.com
     responses outright (see download_avatar's docstring), and any cover
@@ -224,7 +224,7 @@ def _proxied_cover_url(thumbnails: list[dict] | None) -> str | None:
     host at all.
     """
     url = _cover_url(thumbnails)
-    return proxied_avatar_url(url) if url else None
+    return proxied_image_url(url) if url else None
 
 
 def _artist_names(item: dict) -> tuple[str | None, str | None]:

@@ -114,7 +114,7 @@ def avatar_url_at_size(url: str | None, size: int) -> str | None:
 
     Worth doing wherever a stored avatar URL is rendered into a small fixed
     box: at "=s0" a dozen suggestion cards pulled roughly 4.7 MB through
-    /avatar-proxy, versus about 180 KB at "=s176" — same images, same CDN,
+    /image-proxy, versus about 180 KB at "=s176" — same images, same CDN,
     a size parameter apart.
 
     Applied at render time rather than baked into what gets stored, so the

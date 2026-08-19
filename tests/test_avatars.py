@@ -4,9 +4,9 @@
 Measured live before this: 977 of 1060 avatar files on disk (92%, 16.4 MB)
 were orphans — search downloaded a fresh copy for every result, and nothing
 anywhere ever deleted one. Per the locked decision, only an artist someone
-actually follows gets a local copy now (see feed_sync.fetch_feed_data);
+actually follows gets a local copy now (see artist_sync.fetch_artist_data);
 search reuses what's already there or routes the remote URL through
-/avatar-proxy (see app/main.py) instead of handing it to the browser to
+/image-proxy (see app/main.py) instead of handing it to the browser to
 hotlink directly.
 """
 
@@ -19,7 +19,7 @@ REMOTE = "https://yt3.ggpht.com/abc=s900-c-k-c0x00ffffff-no-rj"
 
 def test_a_never_cached_artist_is_proxied_not_downloaded(monkeypatch):
     """The core behaviour: no download call happens at all — a result for an
-    artist nobody follows gets a same-origin /avatar-proxy URL wrapping the
+    artist nobody follows gets a same-origin /image-proxy URL wrapping the
     remote one, not a permanent local copy."""
     monkeypatch.setattr(images, "cached_avatar_path", lambda channel_id: None)
 
@@ -29,7 +29,7 @@ def test_a_never_cached_artist_is_proxied_not_downloaded(monkeypatch):
     monkeypatch.setattr(images, "download_avatar", fail_if_called)
 
     assert images.cached_avatar_or_hotlink(CHANNEL_ID, REMOTE) == (
-        "/avatar-proxy?u=https%3A%2F%2Fyt3.ggpht.com%2Fabc%3Ds900-c-k-c0x00ffffff-no-rj"
+        "/image-proxy?u=https%3A%2F%2Fyt3.ggpht.com%2Fabc%3Ds900-c-k-c0x00ffffff-no-rj"
     )
 
 

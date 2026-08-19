@@ -128,17 +128,19 @@ def cached_avatar_path(channel_id: str) -> str | None:
     return None
 
 
-def proxied_avatar_url(remote_url: str) -> str:
-    """A remote avatar URL, wrapped so the browser fetches it through this
-    app's own /avatar-proxy (app/main.py) instead of hotlinking Google's CDN
-    directly — see cached_avatar_or_hotlink below for why."""
-    return f"/avatar-proxy?u={urllib.parse.quote(remote_url, safe='')}"
+def proxied_image_url(remote_url: str) -> str:
+    """A remote image URL — an avatar, or a song/album/playlist cover —
+    wrapped so the browser fetches it through this app's own /image-proxy
+    (app/main.py) instead of hotlinking Google's CDN directly. See
+    cached_avatar_or_hotlink below, and youtube/music.py's
+    _proxied_cover_url, for why."""
+    return f"/image-proxy?u={urllib.parse.quote(remote_url, safe='')}"
 
 
 def cached_avatar_or_hotlink(channel_id: str, remote_url: str | None) -> str | None:
     """A search result's avatar — reused from disk if this artist already
     has one (already followed, or found in an earlier search), proxied
-    through this app's own /avatar-proxy otherwise. This used to download a
+    through this app's own /image-proxy otherwise. This used to download a
     fresh copy for every result instead: measured live, 977 of 1060 avatar
     files on disk (92%, 16.4 MB) were exactly that — orphans nothing ever
     pointed at, because nothing anywhere deletes an avatar. Per the locked
@@ -149,10 +151,10 @@ def cached_avatar_or_hotlink(channel_id: str, remote_url: str | None) -> str | N
     Chrome's Opaque Response Blocking rejected a meaningful share of those
     even after the yt3.ggpht.com rewrite — the same problem a followed
     artist's local-copy fetch dodges by fetching server-side instead of
-    trusting the browser to load Google's URL. /avatar-proxy is that same fix
+    trusting the browser to load Google's URL. /image-proxy is that same fix
     without a permanent local copy, which an artist nobody's followed yet
     doesn't earn.
     """
     if not remote_url:
         return None
-    return cached_avatar_path(channel_id) or proxied_avatar_url(remote_url)
+    return cached_avatar_path(channel_id) or proxied_image_url(remote_url)
