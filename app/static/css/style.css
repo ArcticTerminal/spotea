@@ -3218,16 +3218,24 @@ audio {
   display: none;
 }
 
-/* A control now, not a strip. A 3px line is impossible to aim at, so the
-   button keeps a padded 11px box while the track inside it stays a hairline;
-   both track and fill thicken on hover to say it is grabbable. */
-/* Same touch-target problem as .range, same fix: the padding is the target,
-   the 3px line inside it is all you see. */
+/* A control, not a strip: a 3px line is impossible to aim at, so the padding
+   around it is the real target and both track and fill thicken on hover to
+   say it's grabbable.
+
+   The padding is all below the line. Symmetrical padding put the bar's own
+   raised background above the track, which reads as a grey band along the
+   top edge of the mini player rather than as part of a control — and the
+   bigger the target got, the wider the band. Growing downwards instead, with
+   a negative margin to match, means the target eats the bar's own top
+   padding (dead space) while the line stays flush against the top edge. It
+   deliberately stops short of the artwork and buttons below: a seek that
+   swallows taps meant for Expand would be a worse bug than a small target. */
 .mini-player-progress {
   position: relative;
   display: block;
   width: 100%;
-  padding: 9px 0;
+  padding: 0 0 8px;
+  margin-bottom: -8px;
   border: none;
   background: none;
   cursor: pointer;
@@ -3244,10 +3252,9 @@ audio {
 .mini-player-progress-fill {
   position: absolute;
   left: 0;
-  /* Centred rather than offset by the padding, so growing the touch target
-     doesn't need this number changed to match. */
-  top: 50%;
-  transform: translateY(-50%);
+  /* Flush with the top, on top of the ::before track, which sits at the top
+     of the content box now that all the padding is underneath it. */
+  top: 0;
   height: 3px;
   width: 0%;
   background: var(--accent);
