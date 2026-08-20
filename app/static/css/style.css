@@ -62,6 +62,59 @@
 
   /* Seek/volume slider's unfilled track */
   --track-empty: #4d4d4d;
+
+  /* Type scale. The colors above were tokenized long before this block
+     existed, and the gap showed: an audit of this file found 20 distinct
+     font-size values, 11 of them packed between 0.7rem and 0.95rem — sizes
+     too close to read as deliberate, but different enough to keep baselines
+     from lining up. These eight steps cover every one of those cases.
+
+     Nothing is rewritten wholesale to use them; the rule going forward is
+     that a component being touched moves to the nearest step, and no new
+     raw value gets added. */
+  --text-2xs: 0.6875rem; /* 11px — duration/count badges */
+  --text-xs: 0.75rem; /* 12px — tertiary text, help lines */
+  --text-sm: 0.8125rem; /* 13px — secondary text, artist names */
+  --text-md: 0.875rem; /* 14px — body, card titles, tab labels */
+  --text-lg: 1rem; /* 16px — row titles, buttons */
+  --text-xl: 1.25rem; /* 20px — shelf headings */
+  --text-2xl: 1.5rem; /* 24px — panel headings */
+  --text-3xl: 2rem; /* 32px — hero titles (desktop) */
+
+  /* Spacing, on a 4px base. Same story as the type scale: 25 distinct rem
+     values were in use, 10 of them between 0.3rem and 0.75rem. */
+  --space-1: 0.25rem; /* 4px */
+  --space-2: 0.5rem; /* 8px */
+  --space-3: 0.75rem; /* 12px */
+  --space-4: 1rem; /* 16px */
+  --space-5: 1.5rem; /* 24px */
+  --space-6: 2rem; /* 32px */
+  --space-7: 3rem; /* 48px */
+
+  /* Radius. 6px used to be the dominant value and it was applied to rows,
+     cards and inputs alike, so the radius carried no hierarchy. Small chrome
+     gets a tight corner, cards get a soft one. */
+  --radius-sm: 4px; /* row thumbnails, inputs, badges */
+  --radius-md: 8px; /* cards, cover art, modals */
+  --radius-pill: 999px; /* chips, follow button */
+  --radius-circle: 50%; /* artist avatars, play FAB */
+}
+
+/* Keyboard focus. Every focusable element used to fall through to the UA
+   default, which Chromium resolves to `outline: auto 1px rgb(16, 16, 16)` —
+   a near-black ring on a #121212 page, about 1.02:1 against it, i.e. no
+   visible focus anywhere in the app. The accent is used rather than white
+   because the mini player's play button is itself white and swallowed a
+   white ring. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Mouse clicks shouldn't leave a ring behind. :focus-visible already handles
+   this in browsers that support it; this clears the UA's :focus fallback. */
+:focus:not(:focus-visible) {
+  outline: none;
 }
 
 * {
@@ -1911,7 +1964,7 @@ button.track-link {
 
 .card {
   background: var(--bg-base);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -1925,7 +1978,14 @@ button.track-link {
   position: relative;
   display: block;
   width: 100%;
-  aspect-ratio: 16 / 9;
+  /* Square, because every cover this app shows is square. The 16:9 this used
+     to be dated from when content could be a video still; after the
+     music-only rewrite nothing here is a video, and cropping a square cover
+     to 16:9 sliced the artwork — playlist covers lost the middle of their
+     own titles. The artist page already special-cased itself back to square
+     (see .release-card below, now removed) which is what gave the game
+     away. */
+  aspect-ratio: 1;
   background: var(--bg-input);
   border: none;
   padding: 0;
@@ -1941,14 +2001,14 @@ button.track-link {
      image can never influence .thumb's own size. .thumb is a flex item
      (.card is display:flex), and a flex item's height in a column flex
      container is partly resolved from its content's intrinsic size before
-     aspect-ratio: 16/9 is applied — with a percentage-height replaced child
-     still in flow, that content-size pass picks up the *image's own*
-     natural aspect ratio instead. Invisible for thumbnails already close to
-     16:9, but a real 4:3 thumbnail (YouTube's plain hqdefault.jpg, used for
-     RSS-sourced entries — as opposed to the already-cropped-ish thumbnail
-     yt-dlp returns for backfilled/searched entries) rendered visibly taller
-     than its 16:9 siblings. Taking the image out of flow entirely sidesteps
-     the whole interaction.
+     the aspect-ratio above is applied — with a percentage-height replaced
+     child still in flow, that content-size pass picks up the *image's own*
+     natural aspect ratio instead, and the card renders taller or shorter
+     than its siblings. Sources don't agree on a ratio (YouTube's plain
+     hqdefault.jpg is 4:3, yt-dlp returns something wider, YouTube Music's
+     cover art is square), so this is not hypothetical. Taking the image out
+     of flow entirely sidesteps the whole interaction, whatever ratio .thumb
+     itself is set to.
   */
   position: absolute;
   inset: 0;
@@ -1958,28 +2018,19 @@ button.track-link {
   display: block;
 }
 
-.duration-badge {
-  position: absolute;
-  bottom: 0.4rem;
-  left: 0.4rem;
-  background: rgba(0, 0, 0, 0.75);
-  color: var(--white);
-  font-size: 0.7rem;
-  font-weight: 600;
-  padding: 0.1rem 0.35rem;
-  border-radius: 4px;
-  line-height: 1.4;
-}
-
-/* Marks content that's already on disk and will start instantly. Mirrors the
-   duration badge on the opposite corner. */
+/* Marks content that's already on disk and will start instantly. The one
+   badge left over the artwork — a duration badge used to sit in the opposite
+   corner, but stamping a runtime on cover art is a video convention, and the
+   duration is already in every track list. */
 .downloaded-badge {
   position: absolute;
-  bottom: 0.4rem;
-  right: 0.4rem;
+  /* Bottom-left, the corner the duration badge used to hold. The right-hand
+     corner belongs to the play button that appears on hover. */
+  bottom: var(--space-2);
+  left: var(--space-2);
   width: 18px;
   height: 18px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   background: var(--accent);
   color: var(--black);
   display: flex;
@@ -1990,6 +2041,87 @@ button.track-link {
 .downloaded-badge svg {
   width: 11px;
   height: 11px;
+}
+
+/* The play affordance on a card's artwork — the one gesture that most says
+   "this is a music library". .thumb is already the play control (an <a> on a
+   server-rendered card, a <button> on an Explore one), so this is purely a
+   visual layer on top of it rather than another focusable element in the tab
+   order, which is already four stops per card.
+
+   Hidden where there is no hover: on a phone it would be a permanent orange
+   disc covering the corner of every cover, and tapping the artwork plays the
+   track there anyway. */
+.card .thumb::before,
+.card .thumb::after {
+  content: "";
+  position: absolute;
+  opacity: 0;
+  transform: translateY(6px);
+  transition:
+    opacity 0.16s ease,
+    transform 0.16s ease;
+  /* .thumb itself is the play control; these must never eat its clicks. */
+  pointer-events: none;
+  /* Above the artwork. .thumb's img is absolutely positioned with z-index
+     auto, so painting order is plain DOM order — ::before, img, ::after —
+     and without this the disc rendered *behind* the cover while the
+     triangle rendered in front of it. */
+  z-index: 1;
+}
+
+/* The disc. */
+.card .thumb::before {
+  right: var(--space-2);
+  bottom: var(--space-2);
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-circle);
+  background: var(--accent);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.5);
+}
+
+/* The triangle, drawn rather than loaded: the app's CSP allows images only
+   from 'self' and YouTube's hosts, so an inline data: URI for the glyph —
+   background-image is governed by img-src — was blocked outright and left a
+   blank orange disc. clip-path has no such problem and keeps this to CSS,
+   which matters because Explore builds its cards in JS and would otherwise
+   need the same markup added by hand.
+
+   Nudged 1px right of true centre: a triangle's visual mass sits left of its
+   bounding box, so a mathematically centred one reads as too far left. */
+.card .thumb::after {
+  right: calc(var(--space-2) + 12px);
+  bottom: calc(var(--space-2) + 13px);
+  width: 13px;
+  height: 14px;
+  background: var(--black);
+  clip-path: polygon(0 0, 100% 50%, 0 100%);
+}
+
+.card:hover .thumb::before,
+.card:hover .thumb::after,
+.card .thumb:focus-visible::before,
+.card .thumb:focus-visible::after {
+  opacity: 1;
+  transform: none;
+}
+
+/* On a touch screen this would be a permanent orange disc over the corner of
+   every cover, and tapping the artwork already plays the track. */
+@media (hover: none) {
+  .card .thumb::before,
+  .card .thumb::after {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card .thumb::before,
+  .card .thumb::after {
+    transition: none;
+    transform: none;
+  }
 }
 
 /* Save-for-later toggle, pinned to the right end of the card's action row so
@@ -2021,28 +2153,38 @@ button.track-link {
 }
 
 .card-body {
-  padding: 0.75rem;
+  padding: var(--space-3);
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: var(--space-1);
+  flex: 1;
 }
 
 .card-title {
   margin: 0;
-  font-size: 0.9rem;
+  font-size: var(--text-md);
   line-height: 1.3;
-  min-height: 2.34rem;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+  /* One line, ellipsised — the same shape as .card-channel below it, so a
+     card is always exactly two lines of text and every card in a shelf is
+     the same height without anything having to reserve space.
+
+     This used to clamp to two lines with a min-height holding both open.
+     That made a one-line title leave a line of dead space under itself, and
+     removing just the min-height didn't help: cards stretch to the tallest
+     one in the row, so a single two-line title anywhere in the shelf —
+     including on a card scrolled out of view — padded out every other card.
+     The full title is still available: _content_card.html puts it in the
+     title attribute. */
+  white-space: nowrap;
   overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .card-meta-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.5rem;
+  gap: var(--space-2);
 }
 
 .card-meta-text {
@@ -2051,8 +2193,14 @@ button.track-link {
 
 .card-channel {
   margin: 0;
-  font-size: 0.8rem;
+  font-size: var(--text-sm);
   color: var(--text-secondary);
+  /* One line, always. A 150px card on a phone wrapped "Bob Marley & The
+     Wailers" onto three lines, which stretched the card past half the
+     viewport and left the save button floating beside a ragged block. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .card-link {
@@ -2088,9 +2236,14 @@ button.track-link {
   text-decoration: underline;
 }
 
+/* Content cards dropped their date line — it printed the day we first saw the
+   track rather than a release date, so it repeated one meaningless value down
+   the whole shelf. This still styles the third line on the cards that do have
+   something real to put there: a release year on the artist page's album and
+   single cards, and a listener count on an artist card. */
 .card-date {
   margin: 0;
-  font-size: 0.75rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
 }
 
@@ -2289,11 +2442,8 @@ button.track-link {
   cursor: default;
 }
 
-
-.modal button:focus-visible {
-  outline: 2px solid var(--white);
-  outline-offset: 2px;
-}
+/* Modal buttons used to be the one place in the app with a visible focus
+   ring. The global :focus-visible rule near the top covers them now. */
 
 /* Toasts */
 
@@ -2359,11 +2509,17 @@ button.track-link {
 }
 
 .player-art {
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   overflow: hidden;
-  aspect-ratio: 16 / 9;
+  /* Square like every other cover in the app. Capped and centred because a
+     square that tracks the card's full width is much taller than the 16:9
+     it replaces, and on a short viewport it pushed the transport controls
+     off-screen. */
+  aspect-ratio: 1;
+  max-width: 340px;
+  width: 100%;
+  margin: 0 auto var(--space-5);
   background: var(--bg-input);
-  margin-bottom: 1.75rem;
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
 }
 
@@ -2900,12 +3056,9 @@ body.has-mini-player .layout {
    list has no equivalent for are defined below.
 --------------------------------------------------------------------------- */
 
-/* Cover art is square, unlike every other .thumb in the app (video stills are
-   16:9). Overriding the ratio rather than the whole rule keeps the absolute-
-   positioning fix in .card .thumb img applying here too. */
-.release-card .thumb {
-  aspect-ratio: 1;
-}
+/* A release card used to override .card .thumb back to a square ratio,
+   because the app-wide default was 16:9. That default is square now, so the
+   override has nothing left to say. */
 
 /* Long enough to need collapsing — 729 characters for a mid-size artist,
    measured — but the full text is worth having, so it clamps rather than

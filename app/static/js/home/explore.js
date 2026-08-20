@@ -125,10 +125,9 @@ function recVideoCardHtml(video) {
   const thumb = video.thumbnail_url
     ? `<img src="${escapeHtml(video.thumbnail_url)}" alt="" loading="lazy" />`
     : "";
-  const duration =
-    video.duration_seconds != null
-      ? `<span class="duration-badge">${formatDuration(video.duration_seconds)}</span>`
-      : "";
+  // No duration over the artwork — that's a video-thumbnail convention, and
+  // _content_card.html dropped it for the same reason. Duration belongs in a
+  // track list, on the right.
   return `
     <article
       class="card rec-card"
@@ -140,7 +139,7 @@ function recVideoCardHtml(video) {
       data-channel-id="${escapeHtml(video.channel_id || "")}"
     >
       <button type="button" class="thumb rec-play" aria-label="Play ${escapeHtml(video.title)}">
-        ${thumb}${duration}
+        ${thumb}
       </button>
       <div class="card-body">
         <h3 class="card-title" title="${escapeHtml(video.title)}">${escapeHtml(video.title)}</h3>
