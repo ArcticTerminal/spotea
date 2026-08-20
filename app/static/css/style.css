@@ -865,6 +865,13 @@ html[data-active-tab="detail"] .tab-panel[data-tab-panel="detail"] {
 
 .channel-search input {
   width: 100%;
+}
+
+/* Margin lives on the wrap, not the input: .search-clear-btn centers
+   itself at top:50% of .search-input-wrap's own box, and a margin on the
+   input would inflate that box past the input's actual height, pushing
+   the centered button up off-center. */
+.channel-search {
   margin-bottom: 0.75rem;
 }
 
@@ -1024,13 +1031,6 @@ html[data-active-tab="detail"] .tab-panel[data-tab-panel="detail"] {
 .btn-add-channel:disabled {
   opacity: 0.6;
   cursor: default;
-}
-
-/* --- Explore's "For you" recommendations ------------------------------- */
-
-/* Same header shape as a Home shelf. */
-.recommendations-header {
-  align-items: center;
 }
 
 /* Recommendation shelves nest inside the "For you" block, so their own

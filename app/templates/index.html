@@ -153,20 +153,17 @@
         </div>
 
         <div id="explore-browse-panel">
-          {# "For you": channels/songs/playlists searched from the interests
-             the interests listed in Settings. Filled entirely by
-             home/explore.js — fetched in the background as soon as the app
-             loads (not part of the page render itself, since it can cost a
-             live YouTube round trip), so the shelves are already here by the
-             time this tab is opened.
+          {# Charts, charting artists and one rotating mood shelf, searched
+             from the interests listed in Settings when there are any.
+             Filled entirely by home/explore.js — fetched in the background
+             as soon as the app loads (not part of the page render itself,
+             since it can cost a live YouTube round trip), so the shelves
+             are already here by the time this tab is opened.
 
              No refresh control of its own: these shelves are re-checked on
              every visit to this tab, rebuilt once the interval Settings sets
              for refreshes has elapsed, when the interest list is
              edited, and when the app-wide Refresh button is pressed. #}
-          <div class="shelf-header recommendations-header">
-            <h2 class="shelf-title">For you</h2>
-          </div>
           <div id="recommendations-body"></div>
         </div>
 
