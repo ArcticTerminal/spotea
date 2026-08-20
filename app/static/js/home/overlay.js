@@ -27,6 +27,7 @@ import {
   clearQueue,
   cycleRepeat,
   isShuffled,
+  loadQueue,
   nextId,
   noteCurrent,
   peekNextId,
@@ -617,7 +618,22 @@ export function setupPlayerOverlay() {
     if (!card) return;
 
     event.preventDefault();
-    openPlayer(card.dataset.contentId);
+    const contentId = card.dataset.contentId;
+    openPlayer(contentId);
+
+    // Playing one card queues up the rest of its shelf, so "next track" means
+    // something from Home too. Every content shelf is one of the pinned
+    // playlists (see _home_shelves.html's data-queue-kind), which is what
+    // makes this a queue the server can already produce.
+    //
+    // Deliberately not awaited, and deliberately after openPlayer: the queue
+    // costs a round trip, and holding playback for it would put a network
+    // call between the tap and play(), which is exactly what iOS refuses to
+    // treat as a user gesture. The queue arriving late is invisible — it only
+    // enables previous/next, and setQueue puts the pointer on the track that
+    // is by then already playing.
+    const kind = card.closest("[data-queue-kind]")?.dataset.queueKind;
+    if (kind) loadQueue({ kind }, { startId: contentId });
   });
 }
 
