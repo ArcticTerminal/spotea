@@ -148,11 +148,21 @@ def test_report_playback_only_sends_the_unexpected_events() -> None:
     not a silent one in player.js."""
     source = (JS_DIR / "player.js").read_text()
 
-    match = re.search(r'const REPORTED_EVENTS = new Set\(\[(.*?)\]\);', source)
+    match = re.search(r"const REPORTED_EVENTS = new Set\(\[(.*?)\]\);", source, re.S)
     assert match, "REPORTED_EVENTS allowlist not found in player.js"
     kept = {name.strip().strip('"') for name in match.group(1).split(",") if name.strip()}
 
-    assert kept == {"play-rejected", "playback-stalled", "prepare-failed", "outgoing-ended"}
+    # "volume-gate" is a deliberate, temporary exception: it fires once per
+    # healthy page load, because what an iPhone reports about its own volume
+    # property turned out to be unguessable from here and had to be asked.
+    # It comes back out — with its BUILD constant — once that is answered.
+    assert kept == {
+        "play-rejected",
+        "playback-stalled",
+        "prepare-failed",
+        "outgoing-ended",
+        "volume-gate",
+    }
 
     # The allowlist alone proves nothing if reportPlayback doesn't actually
     # enforce it — this is the guard clause that turns "defined" into "used".
@@ -187,9 +197,10 @@ def test_the_volume_slider_is_gated_on_ios_as_well_as_on_the_write_taking() -> N
     assert "function isIOSWebKit()" in source, (
         "the iOS gate is gone — a volume slider that does nothing is back on every iPhone"
     )
-    assert "volumeIsSettable(activeAudio()) && !isIOSWebKit()" in source, (
+    assert "volumeIsSettable(activeAudio())" in source, "the feature-detection gate is gone"
+    assert "&& !isIOSWebKit()" in source, (
         "the volume slider is no longer gated on both the write taking *and* not being "
-        "iOS; feature detection alone returns true on iOS and shows a dead control"
+        "iOS; feature detection alone can show a dead control on an iPhone"
     )
     # iPadOS 13+ claims to be a Mac, so the sniff has to look past the name.
     assert "maxTouchPoints" in source, (

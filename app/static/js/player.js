@@ -7,6 +7,12 @@ import { consumeResumeState } from "./resume.js";
 
 const SKIP_SECONDS = 15;
 
+// TEMPORARY (2026-08-20) — goes with the "volume-gate" beacon below. Bumped
+// by hand; its only job is to let a breadcrumb from a phone say which copy of
+// this file that phone is actually running, since "you're on a stale page" is
+// otherwise indistinguishable from "the fix doesn't work".
+const BUILD = "ios-volume-gate-1";
+
 // A download that works settles in roughly two seconds end to end, so a flat
 // 1500ms poll — which is what this used to be — spent most of a second of
 // dead air after the file was already on disk. Start tight and back off, so
@@ -106,7 +112,17 @@ let activeVisibilityHandler = null;
 // they're what *every* track produces whether or not anything actually went
 // wrong. The four kept here are exactly the ones that only fire when
 // something didn't happen the way it should have.
-const REPORTED_EVENTS = new Set(["play-rejected", "playback-stalled", "prepare-failed", "outgoing-ended"]);
+// "volume-gate" is TEMPORARY (2026-08-20) and is the one entry here that
+// fires on a healthy page load rather than on a failure — see the beacon in
+// setupPlayer. Remove it, and its BUILD constant, once the phone has
+// answered.
+const REPORTED_EVENTS = new Set([
+  "play-rejected",
+  "playback-stalled",
+  "prepare-failed",
+  "outgoing-ended",
+  "volume-gate",
+]);
 
 export function reportPlayback(event, detail = {}) {
   if (!REPORTED_EVENTS.has(event)) return;
@@ -432,7 +448,8 @@ export function setupPlayer() {
   // background-playback behaviour that took four rounds to get right (see the
   // Playback element note above) on a volume slider. On iOS the hardware
   // buttons are the volume control, and this stays a mute button.
-  if (volumeIsSettable(activeAudio()) && !isIOSWebKit()) {
+  const volumeIsNative = volumeIsSettable(activeAudio());
+  if (volumeIsNative && !isIOSWebKit()) {
     volume.addEventListener("input", () => {
       const audio = activeAudio();
       audio.volume = Number(volume.value) / 100;
@@ -443,6 +460,25 @@ export function setupPlayer() {
   } else {
     volume.hidden = true;
   }
+
+  // TEMPORARY (2026-08-20) — delete once it has answered its question.
+  //
+  // Two rounds were spent reasoning about what an iPhone reports here instead
+  // of asking one, and the published answer (Apple's own docs: reading volume
+  // "always returns 1" on iOS) disagrees with what's actually on screen on
+  // the user's phone, where the slider is still visible. That can only be
+  // settled from the device. BUILD is in it because the most likely
+  // explanation is simply that the phone is running an older copy of this
+  // file, and nothing else here can tell that apart from a live bug.
+  reportPlayback("volume-gate", {
+    build: BUILD,
+    ua: navigator.userAgent,
+    maxTouchPoints: navigator.maxTouchPoints,
+    readBackSaysSettable: volumeIsNative,
+    detectedAsIOS: isIOSWebKit(),
+    sliderHiddenAttr: volume.hasAttribute("hidden"),
+    sliderDisplay: getComputedStyle(volume).display,
+  });
 
   muteBtn.addEventListener("click", () => {
     activeAudio().muted = !activeAudio().muted;
