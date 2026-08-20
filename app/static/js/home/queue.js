@@ -8,12 +8,13 @@
 // one-way: queue.js is imported by the player and the detail panel, and
 // imports neither.
 //
-// Two orderings are kept, not one. `ids` is the channel/playlist's own
-// order, exactly as its track list shows it; `order` is the order playback
-// actually follows, which is a permutation of `ids` while shuffle is on.
-// Collapsing them into a single shuffled array would make turning shuffle
-// back off mid-queue impossible — there'd be nothing left that remembered
-// where the list really started.
+// A queue holds two fixed orderings and a pointer at one of them. `ids` is
+// the channel/playlist's own order, exactly as its track list shows it;
+// `shuffleOrder` is the one shuffle of it this queue will ever have; `order`
+// is whichever of the two is in force. Collapsing them into a single shuffled
+// array would make turning shuffle back off mid-queue impossible — there'd be
+// nothing left that remembered where the list really started — and
+// re-shuffling on each toggle made the queue a different list every press.
 
 import { api } from "../core.js";
 
@@ -36,7 +37,18 @@ const PREFS_KEY = "spotea-play-prefs";
 // `repeat` is "off" | "all" | "one". Like shuffle it is a standing
 // preference rather than part of a particular queue, so it survives
 // clearQueue() and outlives whatever is playing.
-let state = { source: null, ids: [], order: [], position: -1, shuffle: false, repeat: "off" };
+// `shuffleOrder` is this queue's one shuffle of `ids`, decided when the queue
+// is built and kept for as long as it lasts. `order` is whichever of the two
+// is in force right now — see applyOrder.
+let state = {
+  source: null,
+  ids: [],
+  shuffleOrder: [],
+  order: [],
+  position: -1,
+  shuffle: false,
+  repeat: "off",
+};
 
 const REPEAT_MODES = ["off", "all", "one"];
 
@@ -63,6 +75,11 @@ function restore() {
   state = {
     source: saved.source ?? null,
     ids: saved.ids,
+    // A record written before the shuffle order was kept has none. Building a
+    // fresh one is the only option, and costs nothing: it can only differ
+    // from the order that record was playing in if shuffle was on, and this
+    // runs once per page load.
+    shuffleOrder: Array.isArray(saved.shuffleOrder) ? saved.shuffleOrder : shuffled(saved.ids),
     order: saved.order,
     position: Number.isInteger(saved.position) ? saved.position : -1,
     shuffle: saved.shuffle === true,
@@ -104,7 +121,7 @@ restorePrefs();
 // would reshuffle what's up next on every reload, and resume.js forces one
 // each time an iOS PWA comes back from the home screen.
 if (state.ids.length && state.shuffle !== queueShuffle) {
-  reorder(state.order[state.position] ?? null);
+  applyOrder(state.order[state.position] ?? null);
 }
 
 function announce() {
@@ -122,18 +139,21 @@ function shuffled(ids) {
 }
 
 /**
- * Rebuilds `order` for the current shuffle setting, keeping `keepId` where
- * playback already is: first in a freshly shuffled order, or at its real
- * position in the list once shuffle is turned back off. Re-shuffling from
- * scratch and dropping back to position 0 would restart whatever's playing.
+ * Points `order` at one of the queue's two fixed orderings and puts the
+ * pointer back on `keepId`, so nothing restarts.
+ *
+ * A list has exactly two orders and both are decided once, when the queue is
+ * built: its own, and one shuffle of it. Turning shuffle on used to shuffle
+ * again from scratch every time, which meant the queue panel was a different
+ * list after every press and there was no way back to the order you had just
+ * been looking at. Switching between two stable orders is also what lets the
+ * panel keep its rows and its scroll position across a toggle.
+ *
+ * The cost is that there's no way to ask for a *different* random order. A
+ * fresh shuffle comes with the next queue, which is often enough.
  */
-function reorder(keepId) {
-  if (!state.shuffle) {
-    state.order = state.ids.slice();
-  } else {
-    const rest = state.ids.filter((id) => id !== keepId);
-    state.order = keepId == null ? shuffled(state.ids) : [keepId, ...shuffled(rest)];
-  }
+function applyOrder(keepId) {
+  state.order = (state.shuffle ? state.shuffleOrder : state.ids).slice();
   state.position = keepId == null ? -1 : state.order.indexOf(keepId);
 }
 
@@ -265,6 +285,7 @@ export function clearQueue() {
   state = {
     source: null,
     ids: [],
+    shuffleOrder: [],
     order: [],
     position: -1,
     shuffle: state.shuffle,
@@ -281,7 +302,7 @@ export function clearQueue() {
  */
 export function toggleShuffle() {
   state.shuffle = !state.shuffle;
-  if (state.order.length) reorder(state.order[state.position] ?? null);
+  if (state.order.length) applyOrder(state.order[state.position] ?? null);
   announce();
   return state.shuffle;
 }
@@ -319,7 +340,14 @@ export function setQueue(source, ids, { startId = null } = {}) {
   // Number(): startId reaches here as a string from dataset reads, and the
   // ids are JSON numbers — indexOf across the two would never match.
   const start = startId == null ? null : Number(startId);
-  reorder(state.ids.includes(start) ? start : null);
+  const keep = state.ids.includes(start) ? start : null;
+  // This queue's one shuffle, fixed here for as long as it lasts (see
+  // applyOrder). A clicked track goes to the front of it so that pressing
+  // play on a row under shuffle still starts there and still has the whole
+  // rest of the list ahead of it, rather than resuming from wherever that
+  // track happened to land in the permutation.
+  state.shuffleOrder = keep == null ? shuffled(state.ids) : [keep, ...shuffled(state.ids.filter((id) => id !== keep))];
+  applyOrder(keep);
   if (state.position === -1) state.position = 0;
   announce();
   return state.order[state.position];
