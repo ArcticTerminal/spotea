@@ -93,12 +93,28 @@
     </div>
   </header>
 
+  {# Icons render alongside the labels but only show on the mobile bottom bar
+     (see style.css's .tab-icon) — on a phone this is the app's primary
+     navigation and a bare word is both a small target and a slow read. The
+     desktop tab strip stays text-only. #}
   <nav class="tabs" role="tablist">
     <div class="tabs-inner">
-    <button type="button" class="tab-btn" data-tab="home" role="tab" aria-selected="false">Home</button>
-    <button type="button" class="tab-btn" data-tab="library" role="tab" aria-selected="false">Library</button>
-    <button type="button" class="tab-btn" data-tab="explore" role="tab" aria-selected="false">Explore</button>
-    <button type="button" class="tab-btn" data-tab="settings" role="tab" aria-selected="false">Settings</button>
+    <button type="button" class="tab-btn" data-tab="home" role="tab" aria-selected="false">
+      <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-home" /></svg>
+      <span class="tab-label">Home</span>
+    </button>
+    <button type="button" class="tab-btn" data-tab="library" role="tab" aria-selected="false">
+      <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-library" /></svg>
+      <span class="tab-label">Library</span>
+    </button>
+    <button type="button" class="tab-btn" data-tab="explore" role="tab" aria-selected="false">
+      <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-search" /></svg>
+      <span class="tab-label">Explore</span>
+    </button>
+    <button type="button" class="tab-btn" data-tab="settings" role="tab" aria-selected="false">
+      <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-settings" /></svg>
+      <span class="tab-label">Settings</span>
+    </button>
     </div>
   </nav>
   </div>

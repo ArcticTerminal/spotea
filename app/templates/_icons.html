@@ -25,6 +25,14 @@
    currentColor, which every icon here depends on.
 #}
 <svg xmlns="http://www.w3.org/2000/svg" style="position: absolute; width: 0; height: 0; overflow: hidden" aria-hidden="true">
+  {# The four navigation icons. Only drawn on the mobile bottom bar, where a
+     label alone is too small a target to aim at and too slow to read; the
+     desktop tab strip stays text-only. #}
+  <symbol id="i-home"><path d="M3 10.5L12 3l9 7.5"></path><path d="M5 9.4V21h14V9.4"></path></symbol>
+  {# A 2x2 grid, because that is literally what the Library tab shows. #}
+  <symbol id="i-library"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></symbol>
+  <symbol id="i-search"><circle cx="11" cy="11" r="7"></circle><line x1="20.5" y1="20.5" x2="16" y2="16"></line></symbol>
+  <symbol id="i-settings"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></symbol>
   <symbol id="i-check"><polyline points="20 6 9 17 4 12"></polyline></symbol>
   <symbol id="i-bookmark"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></symbol>
   <symbol id="i-arrow-left"><path d="M19 12H5"></path><path d="M12 19l-7-7 7-7"></path></symbol>

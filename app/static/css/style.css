@@ -549,10 +549,15 @@ select {
   border: none;
   border-bottom: 2px solid transparent;
   color: var(--text-muted);
-  font-size: 0.9rem;
+  font-size: var(--text-md);
   font-weight: 600;
-  padding: 0.75rem 0.1rem;
+  padding: var(--space-3) 0.1rem;
   cursor: pointer;
+}
+
+/* Text-only up here; the icon is for the mobile bottom bar below. */
+.tab-icon {
+  display: none;
 }
 
 .tab-btn:hover {
@@ -587,6 +592,88 @@ html[data-active-tab="detail"][data-detail-home="explore"] .tab-btn[data-tab="ex
   color: var(--white);
   border-bottom-color: var(--accent);
 }
+
+/* ---------------------------------------------------------------------------
+   Phone: the tab strip becomes a bottom bar.
+
+   Primary navigation belongs where the thumb already is. Sitting at the top
+   of an 844px-tall screen it was a reach away on every single tab switch,
+   and it put the app's two most-used controls — navigation and playback — at
+   opposite ends of the display.
+
+   .tabs is a child of .app-header-sticky, and `position: fixed` simply lifts
+   it out of that flow: the wrapper has no transform, filter or
+   backdrop-filter, so nothing between here and the viewport establishes a
+   containing block that would trap it. The mini player then stacks directly
+   above the bar rather than over it, the way it does in every player that
+   has both.
+--------------------------------------------------------------------------- */
+@media (max-width: 480px) {
+  :root {
+    --bottom-nav-height: 3.5rem;
+  }
+
+  .tabs {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 900;
+    background: var(--bg-raised);
+    border-top: 1px solid var(--border-subtle);
+    border-bottom: none;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  .tabs-inner {
+    gap: 0;
+    padding: 0;
+  }
+
+  .tab-btn {
+    /* Equal quarters, so the target is the whole cell rather than the word. */
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.2rem;
+    height: var(--bottom-nav-height);
+    padding: 0;
+    /* The underline is a top-strip idiom; down here the icon and label carry
+       the state on their own. */
+    border-bottom: none;
+    font-size: var(--text-2xs);
+    font-weight: 600;
+  }
+
+  .tab-icon {
+    display: block;
+    width: 22px;
+    height: 22px;
+  }
+
+  /* Same two selector groups as the desktop rules above, minus the underline
+     they set — repeated rather than folded in because these have to win on
+     specificity inside the media query. */
+  .tab-btn.active,
+  html[data-active-tab="home"] .tab-btn[data-tab="home"],
+  html[data-active-tab="library"] .tab-btn[data-tab="library"],
+  html[data-active-tab="explore"] .tab-btn[data-tab="explore"],
+  html[data-active-tab="settings"] .tab-btn[data-tab="settings"],
+  html[data-active-tab="detail"][data-detail-home="library"] .tab-btn[data-tab="library"],
+  html[data-active-tab="detail"][data-detail-home="explore"] .tab-btn[data-tab="explore"] {
+    color: var(--accent);
+    border-bottom-color: transparent;
+  }
+
+}
+
+/* The bar's two knock-on effects — what the mini player sits on top of, and
+   how much room the page has to leave at its bottom — are set at the end of
+   this file instead of here. Both .mini-player and .layout are defined
+   further down, and a rule of equal specificity that comes first simply
+   loses; the first attempt at this silently did nothing. */
 
 .layout {
   padding: 1rem;
@@ -3219,4 +3306,31 @@ body.has-mini-player .layout {
   font-weight: 700;
   letter-spacing: 0.02em;
   text-transform: uppercase;
+}
+
+/* ---------------------------------------------------------------------------
+   Phone bottom bar, part two.
+
+   The bar itself is styled up with the rest of .tabs; these two rules live
+   down here purely because of the cascade. .mini-player and .layout are both
+   defined later in this file, so an equally specific override placed beside
+   the bar's own styles is overwritten by them — which is exactly what
+   happened on the first pass: the bar rendered correctly while the mini
+   player still sat on top of it and the page still ran underneath it.
+--------------------------------------------------------------------------- */
+@media (max-width: 480px) {
+  /* Above the bar, not behind it. */
+  .mini-player {
+    bottom: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom, 0px));
+  }
+
+  /* The bar is always on screen, so the page always has to clear it — unlike
+     the mini player, which only reserves room while a track is loaded. */
+  .layout {
+    padding-bottom: calc(var(--bottom-nav-height) + 1rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  body.has-mini-player .layout {
+    padding-bottom: calc(var(--bottom-nav-height) + 5.5rem + env(safe-area-inset-bottom, 0px));
+  }
 }
