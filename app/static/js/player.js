@@ -7,12 +7,6 @@ import { consumeResumeState } from "./resume.js";
 
 const SKIP_SECONDS = 15;
 
-// TEMPORARY (2026-08-20) — goes with the "volume-gate" beacon below. Bumped
-// by hand; its only job is to let a breadcrumb from a phone say which copy of
-// this file that phone is actually running, since "you're on a stale page" is
-// otherwise indistinguishable from "the fix doesn't work".
-const BUILD = "ios-volume-gate-1";
-
 // A download that works settles in roughly two seconds end to end, so a flat
 // 1500ms poll — which is what this used to be — spent most of a second of
 // dead air after the file was already on disk. Start tight and back off, so
@@ -112,17 +106,7 @@ let activeVisibilityHandler = null;
 // they're what *every* track produces whether or not anything actually went
 // wrong. The four kept here are exactly the ones that only fire when
 // something didn't happen the way it should have.
-// "volume-gate" is TEMPORARY (2026-08-20) and is the one entry here that
-// fires on a healthy page load rather than on a failure — see the beacon in
-// setupPlayer. Remove it, and its BUILD constant, once the phone has
-// answered.
-const REPORTED_EVENTS = new Set([
-  "play-rejected",
-  "playback-stalled",
-  "prepare-failed",
-  "outgoing-ended",
-  "volume-gate",
-]);
+const REPORTED_EVENTS = new Set(["play-rejected", "playback-stalled", "prepare-failed", "outgoing-ended"]);
 
 export function reportPlayback(event, detail = {}) {
   if (!REPORTED_EVENTS.has(event)) return;
@@ -296,14 +280,19 @@ export function paintRange(input) {
  * Apple requires it.
  *
  * Sniffed from the user agent, which volumeIsSettable below deliberately
- * avoids, and it is here because that feature detection was measured to be
- * wrong on a real iPhone: the slider stayed on screen and did nothing, which
- * means the write-then-read-back test came back *true* there. iOS evidently
- * stores the assigned value on the property and reflects it back while
- * routing playback volume to the hardware buttons regardless — so no amount
- * of reading the property can tell the two apart. Detection can't be done
- * from behaviour when the behaviour is a lie, so this asks who it's talking
- * to instead.
+ * avoids — and it is here because that feature detection is measurably wrong
+ * on a modern iPhone. Confirmed from the device itself (iOS 18.7, Safari
+ * 26.6, via a temporary beacon since removed): writing 0.5 and reading it
+ * back returns **0.5**, so the detection says "settable" and the slider then
+ * does nothing, because the property is not what the output level follows.
+ *
+ * Apple's own documentation still says the opposite — "the volume property
+ * is not settable in JavaScript. Reading the volume property always returns
+ * 1" — and that is what this code was originally written against. It has
+ * simply stopped being true: the property now keeps what it is given while
+ * playback volume stays with the hardware buttons. Nothing readable
+ * distinguishes the two cases any more, so this asks who it is talking to
+ * instead.
  */
 function isIOSWebKit() {
   const ua = navigator.userAgent || "";
@@ -423,31 +412,32 @@ export function setupPlayer() {
   // is a separate property and genuinely works, so that button stays.
   //
   // Two gates, because neither is enough alone. The feature detection catches
-  // any browser that refuses the write outright. It does *not* catch iOS,
-  // which was the whole reason it existed: measured on a real iPhone, the
-  // slider was still on screen and still useless, so the read-back had
-  // returned true — the property keeps the value it was given and simply
-  // isn't what controls the output. Hence the second, sniffed gate.
+  // any browser that refuses the write outright. It does *not* catch a modern
+  // iPhone, which is the case it was written for: iOS 18.7 returns the value
+  // it was handed, so the detection says "settable" over a slider that does
+  // nothing. Hence the second, sniffed gate — see isIOSWebKit.
   //
-  // **A GainNode was built for this and reverted (2026-08-20), untested.**
-  // Routing the element through Web Audio is the standard answer to a volume
-  // property that won't take, and it shipped briefly: constructed lazily, on
-  // the first slider move below full volume, so a session that never touched
-  // the slider kept the untouched playback path. It worked end to end against
-  // a browser patched to refuse volume writes the way iOS was assumed to.
+  // **A GainNode was built for this and reverted (2026-08-20).** Routing the
+  // element through Web Audio is the usual answer to a volume property that
+  // won't take, and it shipped briefly: constructed lazily, on the first
+  // slider move below full volume, so a session that never touched the slider
+  // kept the untouched playback path.
   //
-  // On the phone it changed nothing — but not because Web Audio failed there.
-  // It never ran: selecting it depended on volumeIsSettable coming back
-  // false, and on that device it comes back true, which is the same wrong
-  // assumption this whole block is now built around avoiding. Whether a
-  // GainNode would actually work on iOS is therefore still unknown.
+  // It never actually ran on the phone — selecting it required
+  // volumeIsSettable to come back false, and it comes back true — so it
+  // proved nothing on device. What settles it is that Apple's own developer
+  // forum has the same pair tried together: "I tried the 'volume' property of
+  // the <audio> and also the Web Audio API 'GainNode'. Neither approach
+  // worked. The player's output stays/reported as 1.0." Both are ignored on
+  // iOS; MPVolumeView, which a web page cannot reach, is the only native way.
   //
-  // Not worth finding out, at least not for this. Making it selectable means
-  // routing iOS playback through Web Audio, where an AudioContext suspended
-  // in the background is silence rather than quiet audio — betting the
-  // background-playback behaviour that took four rounds to get right (see the
-  // Playback element note above) on a volume slider. On iOS the hardware
-  // buttons are the volume control, and this stays a mute button.
+  // So there is nothing to go back for, and a reason not to: making the gain
+  // path selectable means routing iOS playback through Web Audio, where an
+  // AudioContext suspended in the background is silence rather than quiet
+  // audio — betting the background-playback behaviour that took four rounds
+  // to get right (see the Playback element note above) on a volume slider. On
+  // iOS the hardware buttons are the volume control, and this stays a mute
+  // button.
   const volumeIsNative = volumeIsSettable(activeAudio());
   if (volumeIsNative && !isIOSWebKit()) {
     volume.addEventListener("input", () => {
@@ -460,25 +450,6 @@ export function setupPlayer() {
   } else {
     volume.hidden = true;
   }
-
-  // TEMPORARY (2026-08-20) — delete once it has answered its question.
-  //
-  // Two rounds were spent reasoning about what an iPhone reports here instead
-  // of asking one, and the published answer (Apple's own docs: reading volume
-  // "always returns 1" on iOS) disagrees with what's actually on screen on
-  // the user's phone, where the slider is still visible. That can only be
-  // settled from the device. BUILD is in it because the most likely
-  // explanation is simply that the phone is running an older copy of this
-  // file, and nothing else here can tell that apart from a live bug.
-  reportPlayback("volume-gate", {
-    build: BUILD,
-    ua: navigator.userAgent,
-    maxTouchPoints: navigator.maxTouchPoints,
-    readBackSaysSettable: volumeIsNative,
-    detectedAsIOS: isIOSWebKit(),
-    sliderHiddenAttr: volume.hasAttribute("hidden"),
-    sliderDisplay: getComputedStyle(volume).display,
-  });
 
   muteBtn.addEventListener("click", () => {
     activeAudio().muted = !activeAudio().muted;

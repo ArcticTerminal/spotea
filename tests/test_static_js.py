@@ -152,17 +152,7 @@ def test_report_playback_only_sends_the_unexpected_events() -> None:
     assert match, "REPORTED_EVENTS allowlist not found in player.js"
     kept = {name.strip().strip('"') for name in match.group(1).split(",") if name.strip()}
 
-    # "volume-gate" is a deliberate, temporary exception: it fires once per
-    # healthy page load, because what an iPhone reports about its own volume
-    # property turned out to be unguessable from here and had to be asked.
-    # It comes back out — with its BUILD constant — once that is answered.
-    assert kept == {
-        "play-rejected",
-        "playback-stalled",
-        "prepare-failed",
-        "outgoing-ended",
-        "volume-gate",
-    }
+    assert kept == {"play-rejected", "playback-stalled", "prepare-failed", "outgoing-ended"}
 
     # The allowlist alone proves nothing if reportPlayback doesn't actually
     # enforce it — this is the guard clause that turns "defined" into "used".
@@ -185,13 +175,14 @@ def test_the_volume_slider_is_gated_on_ios_as_well_as_on_the_write_taking() -> N
     alone — write a volume, read it back — on the reasoning that the
     restriction is per-browser rather than per-OS.
 
-    It was measured wrong on a real iPhone twice: the slider stayed on screen
-    and stayed useless, which means the read-back returns *true* there. iOS
-    keeps the value it was assigned and reflects it back; the property simply
-    isn't what controls how loud anything is, so no amount of reading it can
-    tell the two cases apart. Hence the second, user-agent gate — and hence
-    this test, because "just feature-detect it" is exactly the tidy-looking
-    change that would silently put the dead control back on every iPhone."""
+    That is measurably wrong on a modern iPhone, confirmed from the device
+    (iOS 18.7, Safari 26.6): writing 0.5 and reading it back returns 0.5, so
+    the detection reports "settable" over a slider that does nothing. Apple's
+    documentation still claims reading always returns 1; it has stopped being
+    true. Nothing readable separates the two cases any more, hence the second,
+    user-agent gate — and hence this test, because "just feature-detect it" is
+    exactly the tidy-looking change that would put the dead control back on
+    every iPhone."""
     source = (JS_DIR / "player.js").read_text()
 
     assert "function isIOSWebKit()" in source, (
