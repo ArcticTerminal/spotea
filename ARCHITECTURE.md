@@ -44,7 +44,7 @@ only ever to turn a video id into an audio file.
 
 ```
 app/
-  main.py            app wiring, lifespan, image routes, avatar proxy
+  main.py            app wiring, lifespan, image routes, image proxy
   models.py          User, Artist, Content, RecommendationCache
   schemas.py         request/response shapes
   database.py        engine, session, SQLite pragmas
@@ -55,7 +55,7 @@ app/
   scheduler.py       background loop: refresh due users, sweep disk
   storage.py         disk accounting, purge, orphan sweeps, export
   downloader.py      yt-dlp audio extraction — the only yt-dlp importer
-  images.py          avatar/thumbnail fetch + cache, /image-proxy helpers
+  images.py          avatar/thumbnail fetch + cache, /image-proxy helpers (songs and releases too)
   content_query.py   one place that decides what a filter/playlist means
   page_context.py    the context every page and fragment renders from
   progress.py        expiring in-memory registries (downloads, syncs)
@@ -70,7 +70,7 @@ app/
     artists.py       follow, unfollow, refresh, which are still syncing
     explore.py       search, and turning a remote row into a playable one
     content.py       download, stream, favorite, save, queues
-    recommendations.py  the "For you" batch
+    recommendations.py  the Explore batch (GET/POST)
     settings.py      audio quality, interests, refresh interval
     storage.py       clear all, export zip
     auth.py          register, login, logout
@@ -127,6 +127,13 @@ profiles); the profile model is gone.
 | `name`, `avatar_url` | display, filled in by the first sync |
 | `followed` | False for a placeholder created to hold one Explore track, and for an artist unfollowed while keeping some of their content |
 | `release_snapshot` | JSON array of every release browse id the page listed last time. The whole change-detection mechanism. NULL means never synced |
+| `monthly_listeners` | YouTube Music's own count string ("1.91M"), refreshed every sync |
+| `related_artists` | JSON array of their "fans also like" artists, refreshed every sync — feeds Explore's **Similar artists** shelf |
+| `top_tracks` | JSON array of their page-preview songs, refreshed every sync — feeds Explore's **Songs** shelf |
+
+The last three cost nothing extra: they arrive on the same `get_artist` call
+the sync already makes for every followed artist, and are simply kept
+instead of discarded. See "Explore & recommendations" below.
 
 ### `content`
 
@@ -198,7 +205,47 @@ at all.
 
 ---
 
-## 5. Endpoints
+## 5. Explore & recommendations
+
+`services/recommendations.py` builds one batch of shelves per user, cached in
+`recommendation_cache` and rebuilt when it goes stale, the interest list
+changes, or the Refresh button is pressed (`GET/POST /recommendations`,
+`/recommendations/refresh`). Six shelves, three different sources:
+
+| shelf | source | cost |
+|---|---|---|
+| **Playlists** | YouTube Music playlist search, keyed on a sample of the typed interest list | a live search per sampled interest |
+| **Songs** | every followed artist's own `top_tracks` (§3), merged and deduped | none — already on disk |
+| **Similar artists** | every followed artist's own `related_artists` (§3), merged and deduped | none — already on disk |
+| **Charts** / **Charting artists** | `MUSIC_CHART_COUNTRY`'s YouTube Music chart | one live request, shared by both |
+| **Moods & genres** | every category in YouTube Music's "Moods & moments" menu | one live request, playlists not fetched until a mood is opened |
+
+Songs and Similar artists used to both be interest-driven search too, the
+same way Playlists still is. Both were dropped: an interest is free text,
+and it was routinely a genre or a mood rather than a song title or an
+artist's name ("Hip Hop", not "Drake") — YouTube Music's artist search in
+particular answers that kind of query with beatmaker/compilation channels,
+not real artists (measured live). Rebuilding both from data already sitting
+on a followed artist's own row is both cheaper and more reliable than typing
+never was.
+
+The two follow-based shelves are computed fresh on every read regardless of
+the batch's own cache state (`recommendations._merge_from_followed`) — they
+cost a query over local data, not a network call, so there's no reason to
+let them go stale with the rest of the batch. A profile with nothing
+followed gets neither shelf at all, with no seeded default.
+
+**Opening a mood.** Clicking one in "Moods & genres" opens
+`GET /partials/detail/yt-mood/{params}` — a panel of that mood's playlists
+(`templates/_mood_panel.html`, one more live request, paid only for the
+mood actually opened), rendered as a shelf of cards rather than a track
+list. Picking a playlist from there opens it the ordinary
+`yt-playlist` way. Only "Moods & moments" is listed, not YouTube Music's
+"Genres" menu — see §9.
+
+---
+
+## 6. Endpoints
 
 | method | path | what |
 |---|---|---|
@@ -209,6 +256,7 @@ at all.
 | GET | `/partials/detail/yt-artist-songs/{browse_id}` | their whole song list |
 | GET | `/partials/detail/yt-release/{browse_id}` | an album or single |
 | GET | `/partials/detail/yt-playlist/{playlist_id}` | a YouTube Music playlist |
+| GET | `/partials/detail/yt-mood/{params}` | a mood's playlists |
 | POST/DELETE | `/artists`, `/artists/{id}` | follow, unfollow |
 | POST | `/artists/refresh` | sync now |
 | GET | `/artists/syncing` | which are still filling in |
@@ -220,7 +268,7 @@ at all.
 | GET | `/content/queue/playlist/{kind}` | the ids behind a Play all |
 | POST/DELETE | `/content/{id}/{favorite,save}` | engagement flags |
 | GET/PUT | `/settings` | quality, interests, interval |
-| GET/POST | `/recommendations`, `/recommendations/refresh` | the For you batch |
+| GET/POST | `/recommendations`, `/recommendations/refresh` | the Explore batch |
 | DELETE/GET | `/storage`, `/storage/export` | clear all, zip |
 | GET | `/avatars/*`, `/thumbnails/*`, `/image-proxy` | images |
 | POST | `/register`, `/login`, `/logout` | auth |
@@ -230,7 +278,7 @@ Everything except auth and `/health` requires a session.
 
 ---
 
-## 6. The client
+## 7. The client
 
 `index.html` is the entire app: Home, Library, Explore, Settings and the
 detail panel are tab panels in one document, routed by the URL hash. An
@@ -242,9 +290,12 @@ Two mechanisms carry almost all of the interactivity:
 - **Fragment refresh.** Anything that changes what a region shows re-fetches
   that region from `/partials/*` and swaps it in (`static/js/fragments.js`).
   Nothing hand-patches the DOM; a shelf and its count can't disagree.
-- **The detail panel.** One panel body renders four remote kinds. Remote
-  fragments are cached per URL for the session, since nothing this app does
-  changes what YouTube Music would answer.
+- **The detail panel.** One panel, three body shapes: a track list
+  (a pinned playlist, or remote `yt-playlist`/`yt-artist-songs`/`yt-release`),
+  an artist profile (`yt-artist`, shelves rather than a list), or a mood's
+  playlist shelf (`yt-mood`). Remote fragments are cached per URL for the
+  session, since nothing this app does changes what YouTube Music would
+  answer.
 
 The player is a single `<audio>` element. It is the only one, deliberately:
 adding a second to solve an iOS background-playback problem is what caused
@@ -252,7 +303,7 @@ the problem the second element was added to fix.
 
 ---
 
-## 7. Concurrency & security
+## 8. Concurrency & security
 
 - **One worker, always.** In-memory registries (download progress, sync
   progress, login-failure counts) are process-local, and the app asserts a
@@ -266,15 +317,16 @@ the problem the second element was added to fix.
   a shared threadpool worker.
 - **Every outbound URL is host-checked** before it is fetched, so an
   authenticated user can't point a follow at `127.0.0.1`.
-- **The avatar proxy** only fetches from an allowlist of Google image hosts,
-  and answers anything it can't fetch with a transparent pixel rather than a
-  broken image.
+- **The image proxy** (avatars, song/album/playlist covers alike) only
+  fetches from an allowlist of Google/YouTube image hosts, and answers
+  anything it can't fetch with a transparent pixel rather than a broken
+  image.
 - **CSP and security headers** are set in `app/middleware.py`; gzip is
   applied selectively, never to audio or images.
 
 ---
 
-## 8. Known failure modes
+## 9. Known failure modes
 
 **YouTube refusing a download (HTTP 403).** The retry ladder in
 `downloader.py` walks client impersonations. A track that every client
@@ -284,16 +336,19 @@ Topic-channel track licensed for other countries. Deleting the download
 clears the flag, which is the manual "try again".
 
 **ytmusicapi is unofficial.** Its playlist parser already fails on 25 of
-YouTube Music's 40 mood categories, which is why the mood shelf reads only
-one section. A parser break takes out discovery; it cannot take out the
-library, because playback is a local file and a local row.
+YouTube Music's 40 mood/genre categories — every one of them under "Genres",
+plus one mood — measured live, which is why "Moods & genres" lists only the
+"Moods & moments" section (`youtube/music.py`'s `MOOD_SECTION`); the other
+section would 500 the moment one of those categories was opened. A parser
+break takes out discovery; it cannot take out the library, because playback
+is a local file and a local row.
 
 **Release detection lag.** The sync sees a release when the artist's page
 lists it. How quickly that happens after a real release is not measured.
 
 ---
 
-## 9. Deployment
+## 10. Deployment
 
 ```bash
 cp .env.example .env      # set SECRET_KEY
@@ -312,7 +367,7 @@ from the Dockerfile layer. `ffmpeg` for remuxing.
 
 ---
 
-## 10. Verifying UI work
+## 11. Verifying UI work
 
 The test suite covers the server and guards the shipped JS at source level,
 but it cannot click anything. Anything that changes what a person sees is

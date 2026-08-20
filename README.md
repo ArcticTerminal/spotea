@@ -17,9 +17,11 @@ from your browser — a personal, free alternative to a streaming subscription.
   durations and cover art.
 - Play anything without following anyone: add a single song straight from
   search and it plays like everything else.
-- Tell it what you're into — list genres, artists or moods under
-  **Interests** in Settings, and Explore's **For you** shelves fill up from
-  them. This week's charts and a rotating mood shelf are there regardless.
+- Explore fills up on its own once you follow a few artists: **Songs** and
+  **Similar artists** come from who you actually follow, not from typing
+  anything. List genres, artists or moods under **Interests** in Settings
+  and that drives the **Playlists** shelf too. This week's charts and every
+  one of YouTube Music's moods to browse are there regardless.
 - Downloads are yours: audio is extracted with yt-dlp, stored on your own
   disk, and exported as one zip whenever you want it.
 
@@ -100,7 +102,10 @@ All configuration is via environment variables (see `.env.example`):
 | `DATABASE_URL` | no | `sqlite:////app/data/spotea.db` | SQLAlchemy database URL |
 | `STORAGE_DIR` | no | `/app/data/storage` | Where downloaded audio files are stored |
 | `AVATARS_DIR` | no | `/app/data/avatars` | Where fetched artist avatars are stored |
+| `THUMBNAILS_DIR` | no | `/app/data/thumbnails` | Where cached song/album thumbnails are stored |
 | `AUDIO_FORMAT` | no | `m4a` | Audio format yt-dlp extracts to |
+| `SESSION_HTTPS_ONLY` | no | `false` | Marks the session cookie Secure — turn on once the app sits behind HTTPS |
+| `MUSIC_CHART_COUNTRY` | no | `ZZ` (global) | Two-letter country code for Explore's Charts shelf, e.g. `TR`, `US` |
 | `HOST_PORT` | no | `8000` | Host port docker-compose publishes the app on (Docker only) |
 
 ## License
