@@ -18,24 +18,24 @@
     // Nothing is remembered across a fresh open: the hash is written on every
     // tab switch (see home/tabs.js), so a reload or a deep link still lands
     // where it should, while opening the app with no hash at all — a PWA
-    // launch, a bookmark, the reload after switching or creating a profile —
-    // always starts on Home. It used to fall back to a localStorage copy of
-    // the last tab instead, which meant creating a profile from Settings
-    // dropped you back into Settings with the onboarding wizard over it.
+    // launch, a bookmark — always starts on Home. It used to fall back to a
+    // localStorage copy of the last tab instead, which meant an action taken
+    // from Settings dropped you back into Settings on the next load.
     //
-    // A channel/playlist hash resolves to the "detail" panel instead — kept
+    // An artist/playlist hash resolves to the "detail" panel instead — kept
     // out of VALID_TABS itself so those routes can't get treated as a
-    // remembered tab. That includes the two yt-* routes, which are the same
-    // panel showing a YouTube playlist or an unfollowed channel (see
-    // services/remote_detail.py). home/detail.js re-parses the hash after module load to
-    // actually fetch and fill the panel; this only has to get first paint
-    // right. A player/<id> hash is deliberately not handled here at all — it
+    // remembered tab. That includes every yt-* route, which are all the
+    // same panel showing something YouTube Music has that this app doesn't
+    // (see services/remote_detail.py). home/detail.js re-parses the hash
+    // after module load to actually fetch and fill the panel; this only has
+    // to get first paint right. A player/<id> hash is deliberately not
+    // handled here at all — it
     // opens the overlay on top of whatever tab/detail this same logic
     // resolves to, not a tab switch of its own.
     (function () {
       var VALID_TABS = ["home", "library", "explore", "settings"];
       var PLAYLIST_KINDS = ["favorites", "saved", "new-uploads", "recently-played"];
-      var DETAIL_PREFIXES = ["channel/", "yt-channel/", "yt-playlist/"];
+      var DETAIL_PREFIXES = ["yt-artist/", "yt-artist-songs/", "yt-release/", "yt-playlist/", "yt-mood/"];
       var hash = location.hash.slice(1).split("?")[0];
       var isDetail =
         PLAYLIST_KINDS.indexOf(hash) !== -1 ||
@@ -66,14 +66,8 @@
       <h1 class="brand"><img src="/static/img/logo.svg" alt="" class="brand-logo" />Spotea</h1>
       <div class="topbar-actions">
         <div class="topbar-actions-inline">
-          <button type="button" id="refresh-feeds-btn" class="btn-icon" aria-label="Refresh feeds" title="Refresh feeds">
+          <button type="button" id="refresh-artists-btn" class="btn-icon" aria-label="Refresh" title="Check for new releases">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-refresh" /></svg>
-          </button>
-          <button type="button" id="profile-switcher-btn" class="btn-ghost btn-profile" aria-haspopup="dialog" aria-label="Switch profile" title="Switch profile">
-            <span class="profile-row-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-user" /></svg>
-            </span>
-            <span id="profile-switcher-name">{{ profile_name }}</span>
           </button>
           <form method="post" action="/logout">
             <button type="submit" class="btn-ghost">Log out</button>
@@ -86,13 +80,7 @@
         <div id="mobile-menu" class="mobile-menu" role="menu" hidden>
           <button type="button" id="mobile-menu-refresh" class="mobile-menu-item" role="menuitem">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-refresh" /></svg>
-            <span>Refresh feeds</span>
-          </button>
-          <button type="button" id="mobile-menu-profile" class="mobile-menu-item" role="menuitem" aria-label="Switch profile">
-            <span class="profile-row-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#i-user" /></svg>
-            </span>
-            <span id="mobile-menu-profile-name">{{ profile_name }}</span>
+            <span>Check for new releases</span>
           </button>
           <form method="post" action="/logout" class="mobile-menu-form">
             <button type="submit" class="mobile-menu-item" role="menuitem">
@@ -125,17 +113,22 @@
     <section id="tab-library" class="tab-panel" data-tab-panel="library">
       <div class="content-header">
         <h2>Your channels</h2>
-        {% if feeds %}
-        <input
-          type="text"
-          id="library-search-input"
-          class="library-search-input"
-          placeholder="Search channels…"
-          autocomplete="off"
-          autocapitalize="off"
-          autocorrect="off"
-          aria-label="Search channels"
-        />
+        {% if artists %}
+        <div class="search-input-wrap">
+          <input
+            type="text"
+            id="library-search-input"
+            class="library-search-input"
+            placeholder="Search channels…"
+            autocomplete="off"
+            autocapitalize="off"
+            autocorrect="off"
+            aria-label="Search channels"
+          />
+          <button type="button" id="library-search-clear" class="search-clear-btn" aria-label="Clear search" hidden>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-close" /></svg>
+          </button>
+        </div>
         {% endif %}
       </div>
       <div id="library-grid">
@@ -145,33 +138,33 @@
 
     <section id="tab-explore" class="tab-panel" data-tab-panel="explore" hidden>
       <div class="channels-panel-inner">
-        <div class="channel-search">
-          <input type="text" id="explore-search-input" placeholder="Search a song or channel…" autocomplete="off" autocapitalize="off" autocorrect="off" />
+        <div class="channel-search search-input-wrap">
+          <input type="text" id="explore-search-input" placeholder="Search a song or artist…" autocomplete="off" autocapitalize="off" autocorrect="off" />
+          <button type="button" id="explore-search-clear" class="search-clear-btn" aria-label="Clear search" hidden>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-close" /></svg>
+          </button>
         </div>
 
         <div id="explore-results-panel" hidden>
           <h2>Songs</h2>
           <ul id="video-search-results" class="search-results video-search-results"></ul>
 
-          <h2>Channels</h2>
+          <h2>Artists</h2>
           <ul id="channel-search-results" class="search-results"></ul>
         </div>
 
         <div id="explore-browse-panel">
-          {# "For you": channels/songs/playlists searched from the interests
-             this profile listed in Settings. Filled entirely by
-             home/explore.js — fetched in the background as soon as the app
-             loads (not part of the page render itself, since it can cost a
-             live YouTube round trip), so the shelves are already here by the
-             time this tab is opened.
+          {# Charts, charting artists and one rotating mood shelf, searched
+             from the interests listed in Settings when there are any.
+             Filled entirely by home/explore.js — fetched in the background
+             as soon as the app loads (not part of the page render itself,
+             since it can cost a live YouTube round trip), so the shelves
+             are already here by the time this tab is opened.
 
              No refresh control of its own: these shelves are re-checked on
              every visit to this tab, rebuilt once the interval Settings sets
-             for feed refreshes has elapsed, when the interest list is
+             for refreshes has elapsed, when the interest list is
              edited, and when the app-wide Refresh button is pressed. #}
-          <div class="shelf-header recommendations-header">
-            <h2 class="shelf-title">For you</h2>
-          </div>
           <div id="recommendations-body"></div>
         </div>
 
@@ -180,15 +173,8 @@
 
     <section id="tab-settings" class="tab-panel" data-tab-panel="settings" hidden>
       <div class="channels-panel-inner">
-        {# Two groups, because the rows genuinely divide that way and nothing
-           on the panel used to say so: everything here is per-profile except
-           the profile roster itself and the refresh interval, which live on
-           the Account (see models.py — `User` is a profile, `Account` is the
-           login). Whose settings you are looking at was previously invisible,
-           so changing the interval on one profile silently changed it for the
-           whole household. #}
         <section class="settings-group">
-          <h2>This profile · <span id="settings-profile-name" class="settings-group-who">{{ profile_name }}</span></h2>
+          <h2>Account · <span class="settings-group-who">{{ account_email }}</span></h2>
 
           <div class="settings-row">
             <div class="settings-row-info">
@@ -214,9 +200,6 @@
             <button type="button" id="open-downloads" class="btn-quiet">Manage downloads</button>
           </div>
 
-          {# Per-profile and staying that way: the downloads it applies to are
-             themselves per-profile (Content.user_id), so one profile can be on
-             Data saver while another keeps High quality. #}
           <div class="settings-row">
             <div class="settings-row-info">
               <span class="settings-row-label">Download quality</span>
@@ -228,40 +211,18 @@
             </select>
           </div>
 
-          <div class="settings-row">
-            <div class="settings-row-info">
-              <span class="settings-row-label">Import channels</span>
-              <span class="settings-row-desc">Paste a list of handles or URLs to follow several channels at once.</span>
-            </div>
-            <button type="button" id="open-bulk-import" class="btn-quiet">Import</button>
-          </div>
         </section>
 
-        <section class="settings-group">
-          <h2>Account · <span class="settings-group-who">{{ account_email }}</span></h2>
-
           <div class="settings-row">
             <div class="settings-row-info">
-              <span class="settings-row-label">Profiles</span>
-              <span class="settings-row-desc">Switch, rename, or remove a profile. Deleting one also removes its channels and downloads.</span>
+              <span class="settings-row-label">Check for new releases</span>
+              <span class="settings-row-desc">How often followed artists are checked for new releases in the background.</span>
             </div>
-            <button type="button" id="open-profiles-settings" class="btn-quiet">Manage profiles</button>
-          </div>
-
-          {# The scope sentence is repeated in the row's own description rather
-             than left to the group heading: this is the one control where
-             account-wide is genuinely surprising — the interval sits next to
-             five per-profile rows and reads like another one. #}
-          <div class="settings-row">
-            <div class="settings-row-info">
-              <span class="settings-row-label">Check for new videos</span>
-              <span class="settings-row-desc">How often followed channels are checked for new videos in the background. Applies to every profile on this account.</span>
-            </div>
-            <select id="refresh-interval-select" class="settings-select" aria-label="Check for new videos">
-              <option value="15" {{ 'selected' if feed_refresh_interval_minutes == 15 }}>Every 15 minutes</option>
-              <option value="30" {{ 'selected' if feed_refresh_interval_minutes == 30 }}>Every 30 minutes</option>
-              <option value="60" {{ 'selected' if feed_refresh_interval_minutes == 60 }}>Every hour</option>
-              <option value="120" {{ 'selected' if feed_refresh_interval_minutes == 120 }}>Every 2 hours</option>
+            <select id="refresh-interval-select" class="settings-select" aria-label="Check for new releases">
+              <option value="15" {{ 'selected' if refresh_interval_minutes == 15 }}>Every 15 minutes</option>
+              <option value="30" {{ 'selected' if refresh_interval_minutes == 30 }}>Every 30 minutes</option>
+              <option value="60" {{ 'selected' if refresh_interval_minutes == 60 }}>Every hour</option>
+              <option value="120" {{ 'selected' if refresh_interval_minutes == 120 }}>Every 2 hours</option>
             </select>
           </div>
         </section>
@@ -273,177 +234,6 @@
     </section>
   </main>
 
-  <div
-    id="onboarding-overlay"
-    class="modal-overlay"
-    hidden
-    data-needs-onboarding="{{ needs_onboarding | tojson }}"
-  >
-    <div class="modal modal-onboarding">
-      <div class="modal-header">
-        {# Text swapped by home/onboarding.js as the wizard moves between
-           steps — the kind picked on step one also changes what the chip
-           step's question should be. #}
-        {# No close button, and no backdrop/Escape either (see core.js's
-           setupOverlay `dismissible: false`): this is a required step, and
-           the only way out of it is finishing it. Dismissing it left the
-           profile in the exact state it exists to prevent — an empty
-           library and empty "For you" shelves. #}
-        <h2 id="onboarding-title">What do you want to listen to?</h2>
-      </div>
-
-      <div id="onboarding-step-kind" class="onboarding-step">
-        <div class="onboarding-step-body">
-          <p class="muted">
-            Pick one to get you started — you can always follow both kinds later.
-          </p>
-          <div class="kind-cards">
-            <button type="button" class="kind-card" data-kind="music">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M9 18V5l12-2v13" />
-                <circle cx="6" cy="18" r="3" />
-                <circle cx="18" cy="16" r="3" />
-              </svg>
-              <span class="kind-card-name">Music</span>
-              <span class="kind-card-desc">Artists, albums and mixes</span>
-            </button>
-            <button type="button" class="kind-card" data-kind="podcast">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                <line x1="12" y1="19" x2="12" y2="23" />
-                <line x1="8" y1="23" x2="16" y2="23" />
-              </svg>
-              <span class="kind-card-name">Podcasts</span>
-              <span class="kind-card-desc">Shows, talks and interviews</span>
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div id="onboarding-step-genres" class="onboarding-step" hidden>
-        <div class="onboarding-step-body">
-          <p class="muted" data-kind-copy="music">
-            Pick a few genres — Explore's <strong>For you</strong> shelves and the channel
-            suggestions on the next step are searched from these. You can always add more
-            later from Settings.
-          </p>
-          <p class="muted" data-kind-copy="podcast" hidden>
-            Pick a few topics — the show suggestions on the next step and Explore's
-            <strong>For you</strong> shelves are searched from these. You can always add
-            more later from Settings.
-          </p>
-          {# Chip strings come from app/genres.py (MUSIC_GENRES /
-             PODCAST_CATEGORIES), the same lists the curated suggestion
-             seeds (scripts/seed_music_artists.py,
-             scripts/seed_podcast_channels.py) key off of — Jinja loops here
-             instead of hardcoded buttons keep them unable to drift apart.
-             Which grid shows follows the kind picked on the previous
-             step. #}
-          <div class="genre-grid" data-kind-grid="music">
-            {% for genre in music_genres %}
-            <button type="button" class="genre-chip" data-genre="{{ genre }}">{{ genre }}</button>
-            {% endfor %}
-          </div>
-          <div class="genre-grid" data-kind-grid="podcast" hidden>
-            {% for category in podcast_categories %}
-            <button type="button" class="genre-chip" data-genre="{{ category }}">{{ category }}</button>
-            {% endfor %}
-          </div>
-          <form id="onboarding-genre-form" class="interests-add-form">
-            <input
-              type="text"
-              id="onboarding-genre-input"
-              placeholder="Something else…"
-              maxlength="60"
-              autocomplete="off"
-              autocapitalize="off"
-              autocorrect="off"
-              aria-label="Add a genre"
-            />
-            <button type="submit" class="btn-quiet">Add</button>
-          </form>
-        </div>
-        <div class="modal-actions">
-          <button type="button" id="onboarding-genres-back" class="btn-quiet onboarding-back">Back</button>
-          <button type="button" id="onboarding-genres-skip" class="btn-quiet">Skip</button>
-          <button type="button" id="onboarding-genres-next" class="btn-primary" disabled>Next</button>
-        </div>
-      </div>
-
-      <div id="onboarding-step-channels" class="onboarding-step" hidden>
-        <div class="onboarding-step-body">
-          {# Search first, suggestions second, with a labelled rule between
-             them: the two are different questions ("who am I already looking
-             for?" vs "what is there?"), and a page of shelves with a search
-             box buried under it reads as one long scroll of channels rather
-             than two ways in. #}
-          <div class="channel-search">
-            <input
-              type="text"
-              id="onboarding-search-input"
-              placeholder="Search for a channel…"
-              autocomplete="off"
-              autocapitalize="off"
-              autocorrect="off"
-              aria-label="Search channels"
-            />
-          </div>
-          <ul id="onboarding-search-results" class="search-results"></ul>
-
-          <p class="onboarding-divider"><span>or pick from what you like</span></p>
-
-          {# One shelf per picked genre, built client-side from Explore's own
-             shelf/channel card by home/onboarding.js — a div, not a list,
-             because what goes in is .shelf blocks rather than result rows. #}
-          <div id="onboarding-suggested-channels" class="onboarding-shelves"></div>
-        </div>
-        <div class="modal-actions">
-          <button type="button" id="onboarding-channels-back" class="btn-quiet onboarding-back">Back</button>
-          {# Filled by home/onboarding.js — how many channels are followed so
-             far against the handful the step asks for before Finish unlocks. #}
-          <p id="onboarding-channels-progress" class="muted onboarding-progress"></p>
-          <button type="button" id="onboarding-open-bulk-import" class="btn-quiet">Import many at once</button>
-          <button type="button" id="onboarding-finish" class="btn-primary" disabled>Finish</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <div id="bulk-import-overlay" class="modal-overlay" hidden>
-    <div class="modal modal-bulk-import">
-      <div class="modal-header">
-        <h2>Import channels</h2>
-        <button type="button" id="bulk-import-close" class="modal-close" aria-label="Close">×</button>
-      </div>
-
-      <div id="bulk-import-form-section">
-        <p class="muted">
-          One channel per line — a handle (<code>@handle</code>), a full channel URL, or a row
-          copied straight from a Google Takeout <code>subscriptions.csv</code> export.
-        </p>
-        <textarea
-          id="bulk-import-input"
-          class="bulk-import-input"
-          rows="8"
-          placeholder="@handle&#10;https://www.youtube.com/@anotherhandle"
-        ></textarea>
-        <div class="modal-actions">
-          <button type="button" id="bulk-import-start" class="btn-primary">Import</button>
-        </div>
-      </div>
-
-      <div id="bulk-import-progress-section" class="bulk-import-progress" hidden>
-        <p id="bulk-import-progress-text" class="muted"></p>
-        <ul id="bulk-import-results" class="bulk-import-results"></ul>
-        <div class="modal-actions">
-          <button type="button" id="bulk-import-again" class="btn-quiet" hidden>Import more</button>
-          <button type="button" id="bulk-import-reload" class="btn-primary" hidden>Refresh page</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
   <div id="interests-overlay" class="modal-overlay" hidden>
     <div class="modal modal-interests">
       <div class="modal-header">
@@ -453,7 +243,7 @@
 
       <p class="muted">
         Genres, artists, moods — one per entry. Explore's <strong>For you</strong> shelves are
-        searched from these, and update on the same schedule as your feeds.
+        searched from these, and update on the same schedule as your library.
       </p>
 
       {# The chips are rendered by home/settings.js from the data-interests
@@ -499,47 +289,6 @@
     </div>
   </div>
 
-  <div id="profiles-overlay" class="modal-overlay" hidden>
-    <div class="modal modal-profiles">
-      <div class="modal-header">
-        <h2>Switch profile</h2>
-        <button type="button" id="profiles-close" class="modal-close" aria-label="Close">×</button>
-      </div>
-      <ul id="profiles-switch-list" class="profiles-list"></ul>
-      <p class="muted profiles-switch-hint">Want to add or rename a profile? Head to Settings.</p>
-    </div>
-  </div>
-
-  <div id="profiles-manage-overlay" class="modal-overlay" hidden>
-    <div class="modal modal-profiles">
-      <div class="modal-header">
-        <h2>Manage profiles</h2>
-        <button type="button" id="profiles-manage-close" class="modal-close" aria-label="Close">×</button>
-      </div>
-      <ul id="profiles-manage-list" class="profiles-list"></ul>
-      <form id="profiles-add-form" class="profiles-add-form">
-        <input
-          type="text"
-          id="profiles-add-input"
-          placeholder="New profile name…"
-          maxlength="100"
-          autocomplete="off"
-          required
-        />
-        <button type="submit" class="btn-primary">Add</button>
-      </form>
-    </div>
-  </div>
-
-  <div id="backfill-overlay" class="overlay" hidden>
-    <div class="backfill-overlay-content">
-      <span class="spinner spinner-lg" role="status" aria-label="Fetching channel history"></span>
-      <div class="backfill-overlay-text">
-        <p id="backfill-overlay-title"></p>
-        <p id="backfill-overlay-detail"></p>
-      </div>
-    </div>
-  </div>
 
   {% include "_player_overlay.html" %}
 {% endblock %}

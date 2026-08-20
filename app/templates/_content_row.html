@@ -15,7 +15,7 @@
       <span class="track-title" title="{{ item.title }}">{{ item.title }}</span>
       {% if show_channel or item.published_at %}
       <span class="track-date">
-        {%- if show_channel -%}{{ item.feed.channel_title }}{% if item.published_at %} · {% endif %}{%- endif -%}
+        {%- if show_channel -%}{{ item.artist.name }}{% if item.published_at %} · {% endif %}{%- endif -%}
         {%- if item.published_at -%}{{ item.published_at.strftime('%d %b %Y') }}{%- endif -%}
       </span>
       {% endif %}

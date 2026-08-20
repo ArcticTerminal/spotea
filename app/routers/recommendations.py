@@ -6,8 +6,8 @@ only thing that separates them is `force`: GET takes whatever is cached,
 POST /refresh insists on a rebuild.
 
 A separate router rather than more of routers/explore.py: those routes all
-live under /feeds because they're about feeds the user might add, and these
-aren't about feeds at all.
+live under /artists because they're about artists the user might add, and these
+aren't about artists at all.
 """
 
 from datetime import timedelta
@@ -15,7 +15,7 @@ from datetime import timedelta
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.deps import get_current_profile, get_db, require_login
+from app.deps import get_current_user, get_db, require_login
 from app.interests import parse_interests
 from app.models import User
 from app.schemas import RecommendationsOut
@@ -26,14 +26,14 @@ router = APIRouter(
 )
 
 
-def _recommendations_out(db: Session, profile: User, *, force: bool) -> RecommendationsOut:
+def _recommendations_out(db: Session, user: User, *, force: bool) -> RecommendationsOut:
     # The batch goes stale on the same interval the user picked for background
-    # feed refreshes, rather than on a cadence of its own — see
+    # artist refreshes, rather than on a cadence of its own — see
     # services/recommendations.py.
-    ttl = timedelta(minutes=profile.account.feed_refresh_interval_minutes)
-    batch, generated_at = get_recommendations(db, profile, ttl=ttl, force=force)
+    ttl = timedelta(minutes=user.refresh_interval_minutes)
+    batch, generated_at = get_recommendations(db, user, ttl=ttl, force=force)
     return RecommendationsOut(
-        interests=parse_interests(profile.interests),
+        interests=parse_interests(user.interests),
         generated_at=generated_at,
         **batch,
     )
@@ -41,24 +41,24 @@ def _recommendations_out(db: Session, profile: User, *, force: bool) -> Recommen
 
 @router.get("", response_model=RecommendationsOut)
 def read_recommendations(
-    profile: User = Depends(get_current_profile), db: Session = Depends(get_db)
+    user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ) -> RecommendationsOut:
-    """Whatever this profile's current batch is — served straight from the
+    """Whatever the current batch is — served straight from the
     cache when there is a fresh one, which is the normal case for opening the
     Explore tab. Only builds (and only then goes near YouTube) when there
     isn't one, so this staying slow on first load is expected, not a bug."""
-    return _recommendations_out(db, profile, force=False)
+    return _recommendations_out(db, user, force=False)
 
 
 @router.post("/refresh", response_model=RecommendationsOut)
 def refresh_recommendations(
-    profile: User = Depends(get_current_profile), db: Session = Depends(get_db)
+    user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ) -> RecommendationsOut:
     """Always rebuilds, which also resamples which interests get searched — so
-    a profile with more interests than one run covers sees the rest of them
+    a library with more interests than one run covers sees the rest of them
     this way.
 
     There is no dedicated refresh control in the UI: this is what the app-wide
-    "Refresh feeds" button calls alongside POST /feeds/refresh, so the one
+    "Refresh artists" button calls alongside POST /artists/refresh, so the one
     button means "go and look at everything again"."""
-    return _recommendations_out(db, profile, force=True)
+    return _recommendations_out(db, user, force=True)

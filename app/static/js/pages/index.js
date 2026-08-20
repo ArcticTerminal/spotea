@@ -2,21 +2,18 @@
 // channel/playlist detail panel and player overlay drilled into from them.
 
 import { setupSaveButtons } from "../content-actions.js";
-import { setupBulkImport, setupBulkImportOverlay } from "../home/bulk-import.js";
 import { handleInitialRoute, setupDetailPanel } from "../home/detail.js";
 import { refreshRecommendations, setupExploreSearch, setupRecommendations } from "../home/explore.js";
 import {
-  setupHomeChannels,
+  setupHomeArtists,
   setupHorizontalScrollers,
-  setupLibraryChannelGrid,
+  setupLibraryArtistGrid,
   setupLibrarySearch,
   setupMobileMenu,
-  setupPreparingChannels,
+  setupPreparingArtists,
   setupRefreshButton,
 } from "../home/library.js";
-import { setupOnboarding } from "../home/onboarding.js";
 import { resumeOverlayIfNeeded, setupPlayerOverlay } from "../home/overlay.js";
-import { openProfileSwitcher, setupProfiles } from "../home/profiles.js";
 import {
   setupDownloadsOverlay,
   setupInterests,
@@ -44,23 +41,16 @@ setupSaveButtons();
 setupExploreSearch();
 setupRecommendations();
 setupDownloadsOverlay();
-setupBulkImportOverlay();
-setupBulkImport();
 setupStorage();
 setupSettings();
 setupInterests();
-setupHomeChannels();
-setupLibraryChannelGrid();
+setupHomeArtists();
+setupLibraryArtistGrid();
 setupLibrarySearch();
-setupPreparingChannels();
+setupPreparingArtists();
 setupHorizontalScrollers();
 // The one Refresh control covers Explore's recommendations too — passed in
 // rather than imported inside library.js, which explore.js already imports
 // from (see setupRefreshButton).
 setupRefreshButton(refreshRecommendations);
-setupMobileMenu(openProfileSwitcher, refreshRecommendations);
-setupProfiles();
-// Last: its steps call into setupInterests's saveInterests, explore.js's
-// channel search endpoint, and the bulk-import overlay's trigger id, all of
-// which need to already be wired by the time it can open.
-setupOnboarding();
+setupMobileMenu(refreshRecommendations);

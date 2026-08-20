@@ -16,21 +16,6 @@ VIDEO_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{11}$")
 # into a youtube.com URL.
 PLAYLIST_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{12,64}$")
 
-# Fetching a channel's Videos-tab playlist (UULF, see longform_feed_url)
-# instead of its full-uploads feed is supposed to exclude Shorts entirely —
-# but that's an unofficial, undocumented YouTube convention, and in practice
-# a Short occasionally still turns up there anyway. This is a defensive
-# second check applied at insert time (see feed_sync.apply_feed_data and
-# services/backfill.py) using each entry's already-fetched duration, not a
-# replacement for the UULF trick — classic Shorts are ≤60s; YouTube widened
-# the format to up to 3 minutes in 2024, but that upper range overlaps with
-# plenty of legitimate short-form long-content videos, so this stays
-# conservative rather than risk dropping real content.
-SHORT_MAX_DURATION_SECONDS = 60
-
-# A bare channel id, for the places one arrives as untrusted input rather
-# than being pulled out of a URL we fetched (see routers/partials.py's remote
-# channel route, which interpolates it straight into a youtube.com URL).
 CHANNEL_ID_RE = re.compile(r"^UC[\w-]{22}$")
 
 # A YouTube Music release id — an album or a single. Same reason as above:
@@ -39,46 +24,29 @@ CHANNEL_ID_RE = re.compile(r"^UC[\w-]{22}$")
 # channel id's is, so this bounds it rather than pinning it.
 RELEASE_ID_RE = re.compile(r"^MPREb_[\w-]{1,32}$")
 
-# YouTube names an artist's auto-generated music channel "<Artist> - Topic".
-# Two places care: channel search drops them (nobody means to follow one by
-# that name), and following an artist targets one deliberately — where the
-# suffix is noise, since the card is meant to read as the artist.
-TOPIC_CHANNEL_SUFFIX = " - Topic"
-
-
-def strip_topic_suffix(title: str | None) -> str | None:
-    return title.removesuffix(TOPIC_CHANNEL_SUFFIX) if title else title
-
+# A mood/genre category's opaque browse token (see youtube/music.py's
+# MoodCategory) — measured live across all 40 of YouTube Music's current
+# categories: always exactly 24 URL-safe characters, but nothing says that's
+# guaranteed to stay true, so this bounds rather than pins the length, same
+# as RELEASE_ID_RE above.
+MOOD_PARAMS_RE = re.compile(r"^[\w-]{1,32}$")
 
 CHANNEL_ID_URL_RE = re.compile(r"youtube\.com/channel/(UC[\w-]{22})")
 CHANNEL_ID_PARAM_RE = re.compile(r"channel_id=([\w-]+)")
 
 YOUTUBE_WATCH_URL = "https://www.youtube.com/watch?v={video_id}"
 
-RSS_FEED_URL_TEMPLATE = "https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
-RSS_FEED_PLAYLIST_URL_TEMPLATE = "https://www.youtube.com/feeds/videos.xml?playlist_id={playlist_id}"
+
 PLAYLIST_PAGE_URL_TEMPLATE = "https://www.youtube.com/playlist?list={playlist_id}"
-
-# sp=EgIQAg%3D%3D restricts YouTube search results to the "Channel" type.
-CHANNEL_SEARCH_URL_TEMPLATE = "https://www.youtube.com/results?search_query={query}&sp=EgIQAg%3D%3D"
-
-# No type filter — Explore is searching for a specific video/song, and
-# YouTube's default mixed results are already mostly videos. Adding a
-# "Video" type filter isn't needed on top of that.
-VIDEO_SEARCH_URL_TEMPLATE = "https://www.youtube.com/results?search_query={query}"
-
-# sp=EgIQAw%3D%3D restricts YouTube search results to the "Playlist" type —
-# same trick as the channel filter above, one value along.
-PLAYLIST_SEARCH_URL_TEMPLATE = "https://www.youtube.com/results?search_query={query}&sp=EgIQAw%3D%3D"
 
 CHANNEL_PAGE_URL_TEMPLATE = "https://www.youtube.com/channel/{channel_id}"
 
 
-# Every URL this package is handed ends up being fetched — by rss.fetch_feed
-# or by yt-dlp — and the only thing standing between "follow this channel" and
+# Every URL this package is handed can end up being fetched, and the only
+# thing standing between "follow this channel" and
 # a request-forgery primitive is the host. Without this check an authenticated
-# user could point POST /feeds at 127.0.0.1 or a LAN address and read the
-# failure text back; no Feed row could survive it (a real one needs a
+# user could point POST /artists at 127.0.0.1 or a LAN address and read the
+# failure text back; no Artist row could survive it (a real one needs a
 # yt_channelid in the response), so it was a probe rather than a breach, but
 # the probe is itself the leak. Checked at both entry points — resolve_feed_url,
 # so the error arrives before any network call, and fetch_feed, which is what
@@ -114,49 +82,17 @@ def is_youtube_url(url: str) -> bool:
     return (split.hostname or "").lower() in _YOUTUBE_HOSTS
 
 
-def extract_channel_id(rss_url: str) -> str | None:
-    match = CHANNEL_ID_PARAM_RE.search(rss_url)
+def extract_channel_id(url: str) -> str | None:
+    """The channel id out of either shape this app passes around: the artist
+    URL a Artist row is keyed by ("…?channel_id=UC…") and the channel page URL
+    the Follow button carries ("youtube.com/channel/UC…")."""
+    match = CHANNEL_ID_PARAM_RE.search(url) or CHANNEL_ID_URL_RE.search(url)
     return match.group(1) if match else None
 
 
-def _playlist_id(channel_id: str, prefix: str) -> str:
-    """YouTube maps a channel to several special playlists by swapping the
-    "UC" prefix of its channel ID: "UULF" is the Videos tab (long-form only,
-    Shorts and Lives excluded), "UU" is all uploads mixed together. This is
-    an undocumented but long-stable YouTube convention, not a public API."""
-    return prefix + channel_id[2:] if channel_id.startswith("UC") else channel_id
-
-
-def channel_feed_url(channel_id: str) -> str:
-    """Canonical RSS feed URL for a channel_id — the single place this shape
-    is built, so every code path that creates or upgrades a Feed row for a
-    given channel_id agrees on its rss_url (see extract.resolve_feed_url and
-    routers/explore.py's _get_or_create_placeholder_feed, whose dedup lookup
-    depends on this being consistent)."""
-    return RSS_FEED_URL_TEMPLATE.format(channel_id=channel_id)
-
-
-def longform_feed_url(channel_id: str) -> str:
-    """RSS feed scoped to a channel's Videos tab (UULF playlist) instead of
-    all uploads — entries here are never Shorts, so callers don't need a
-    separate Shorts-tab fetch to filter them out."""
-    return RSS_FEED_PLAYLIST_URL_TEMPLATE.format(playlist_id=_playlist_id(channel_id, "UULF"))
-
-
 def playlist_url(playlist_id: str) -> str:
-    """A plain playlist page, for any playlist id — a recommended playlist
-    from search, as opposed to the channel-derived one longform_playlist_url
-    below builds."""
+    """A plain playlist page, for any playlist id."""
     return PLAYLIST_PAGE_URL_TEMPLATE.format(playlist_id=playlist_id)
-
-
-def longform_playlist_url(channel_id: str) -> str:
-    """The same Videos-tab playlist as longform_feed_url, but as a regular
-    playlist page for yt-dlp to extract rather than an RSS feed. Always
-    newest-first, unlike the /videos tab whose sort order some channels
-    override (e.g. "Popular"), which can leave recent uploads out of a
-    bounded flat fetch."""
-    return PLAYLIST_PAGE_URL_TEMPLATE.format(playlist_id=_playlist_id(channel_id, "UULF"))
 
 
 def absolute_thumbnail_url(raw: str | None) -> str | None:
@@ -185,7 +121,7 @@ def avatar_url_at_size(url: str | None, size: int) -> str | None:
 
     Worth doing wherever a stored avatar URL is rendered into a small fixed
     box: at "=s0" a dozen suggestion cards pulled roughly 4.7 MB through
-    /avatar-proxy, versus about 180 KB at "=s176" — same images, same CDN,
+    /image-proxy, versus about 180 KB at "=s176" — same images, same CDN,
     a size parameter apart.
 
     Applied at render time rather than baked into what gets stored, so the

@@ -13,7 +13,7 @@ indexes tracks rather than videos.
 **Deliberately not used for podcasts, and not used for channel search.**
 That is a measured decision, not an oversight. YouTube Music models a
 podcast as an "MPSP…" playlist rather than a channel, which is the wrong
-identity for an app whose entire sync path is a channel's RSS feed — and its
+identity for an app whose entire sync path is a channel's RSS artist — and its
 matching is worse besides: searching it for "The Diary of a CEO" put a
 reupload channel whose episodes have a few hundred views ahead of the real
 19M-subscriber one that youtube.com finds first. Podcast discovery and
@@ -43,16 +43,18 @@ a 500.
 
 import logging
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from ytmusicapi import YTMusic
 
-from app.youtube.search import (
+from app.images import cached_avatar_or_hotlink, proxied_image_url
+from app.youtube.models import (
+    PLAYLIST_ITEM_LIMIT,
     SEARCH_RESULT_LIMIT,
     ChannelSearchResult,
+    PlaylistDetail,
     PlaylistSearchResult,
     VideoSearchResult,
-    cached_avatar_or_hotlink,
 )
 from app.youtube.urls import (
     CHANNEL_ID_RE,
@@ -190,16 +192,39 @@ def _parse_count(text: str | None) -> int | None:
 
 
 def _cover_url(thumbnails: list[dict] | None) -> str | None:
-    """The largest reported cover, asked for at COVER_SIZE.
+    """The largest reported cover, asked for at COVER_SIZE — the raw remote
+    URL, not yet proxied. Every candidate here is a real URL YouTube Music
+    itself reported, unlike yt-dlp's speculative maxresdefault.jpg guess
+    (which 404s), so the last (largest) one is always usable.
 
-    Simpler than search.py's _best_thumbnail_url, and can afford to be:
-    that one exists to drop yt-dlp's speculative maxresdefault.jpg guess,
-    which 404s. Every candidate here is a real URL YouTube Music itself
-    reported, so the last (largest) one is always usable.
+    Used directly only where the caller does its own proxying downstream
+    (an artist's `avatar_url`, passed to cached_avatar_or_hotlink by
+    remote_detail.py once a local copy is worth checking for). Everywhere
+    else, see _proxied_cover_url below.
     """
     if not thumbnails:
         return None
     return absolute_thumbnail_url(cover_url_at_size(thumbnails[-1].get("url"), COVER_SIZE))
+
+
+def _proxied_cover_url(thumbnails: list[dict] | None) -> str | None:
+    """A song, playlist or release cover, ready to render.
+
+    Unlike a followed artist's avatar, none of these ever earn a local copy
+    (see cached_avatar_or_hotlink's docstring on why not — the same 92%
+    orphan-file problem applies here at a much larger scale, since a track
+    or an album is browsed far more often than it's followed). So this
+    always goes through /image-proxy rather than checking for one on disk
+    first — hotlinking Google's CDN directly from these cards used to fail
+    silently and often: Chrome's ORB rejects a real share of yt3.ggpht.com
+    responses outright (see download_avatar's docstring), and any cover
+    that happened to arrive on lh3.googleusercontent.com instead — which
+    absolute_thumbnail_url only rewrites away from for the yt3 host — was
+    hard-blocked by this app's own img-src CSP, which never allowed that
+    host at all.
+    """
+    url = _cover_url(thumbnails)
+    return proxied_image_url(url) if url else None
 
 
 def _artist_names(item: dict) -> tuple[str | None, str | None]:
@@ -210,8 +235,8 @@ def _artist_names(item: dict) -> tuple[str | None, str | None]:
     auto-generated "<Artist> - Topic" channel rather than the artist's
     official channel. That is the right choice *here* even though the Topic
     channel is not what anyone wants to follow: it arrives free in this same
-    response, it is a real UC id with a working RSS feed, and all it does is
-    give the preview row a placeholder feed to hang off (see
+    response, it is a real UC id with a working RSS artist, and all it does is
+    give the preview row a placeholder artist to hang off (see
     routers/explore.py's add_video_batch). Following is a separate action and
     resolves the official channel properly — see fetch_artist.
     """
@@ -249,7 +274,7 @@ def _song_result(item: dict) -> VideoSearchResult | None:
     return VideoSearchResult(
         video_id=video_id,
         title=title,
-        thumbnail_url=_cover_url(item.get("thumbnails")),
+        thumbnail_url=_proxied_cover_url(item.get("thumbnails")),
         duration_seconds=item.get("duration_seconds"),
         channel_title=channel_title,
         channel_id=channel_id,
@@ -269,7 +294,7 @@ def _playlist_result(item: dict) -> PlaylistSearchResult | None:
     return PlaylistSearchResult(
         playlist_id=playlist_id,
         title=item.get("title") or "Untitled playlist",
-        thumbnail_url=_cover_url(item.get("thumbnails")),
+        thumbnail_url=_proxied_cover_url(item.get("thumbnails")),
         # `author` is the publisher ("YouTube Music" for the curated ones);
         # `description` is the line YouTube Music itself prints under a mood
         # playlist, and it is the more useful of the two — "Taylor Swift,
@@ -340,6 +365,43 @@ def search_playlists(query: str, limit: int = SEARCH_RESULT_LIMIT) -> list[Playl
         if len(results) == limit:
             break
     return results
+
+
+def search_artists(query: str, limit: int = SEARCH_RESULT_LIMIT) -> list[ChannelSearchResult]:
+    """Explore's artist search.
+
+    Replaced a yt-dlp search of youtube.com's channel tab, which had to filter
+    "<Artist> - Topic" containers back out of its own results by name. This
+    one is asking the music catalogue for musicians, so there is nothing to
+    filter: measured live, "tarkan" returns Tarkan first out of 13.
+
+    The results carry no subscriber count (measured: the field is absent), so
+    cards built from these print a name and nothing under it. The count is on
+    the artist's own page for anyone who opens it.
+    """
+    results = (_artist_result(item) for item in _search(query, "artists", limit))
+    return [result for result in results if result is not None]
+
+
+def fetch_playlist(playlist_id: str, limit: int = PLAYLIST_ITEM_LIMIT) -> PlaylistDetail:
+    """One playlist's tracks. Empty items when there's no such playlist.
+
+    Preferred over the yt-dlp flat read this replaced for the same reason
+    fetch_release is: one request either way, but this one answers with real
+    durations and square cover art rather than a video still. Measured live
+    on a chart playlist: 100 of 100 tracks, every one with a duration, in
+    0.47s.
+    """
+    playlist = _call("playlist", "get_playlist", playlist_id, limit)
+    if not playlist:
+        return PlaylistDetail(playlist_id=playlist_id, title=None, video_count=None, items=[])
+
+    return PlaylistDetail(
+        playlist_id=playlist_id,
+        title=playlist.get("title"),
+        video_count=playlist.get("trackCount"),
+        items=_song_results(playlist.get("tracks")),
+    )
 
 
 @dataclass
@@ -468,11 +530,6 @@ class ArtistProfile:
     # one of these costs exactly what a bare track list costs.
     albums: list[ArtistRelease] = field(default_factory=list)
     singles: list[ArtistRelease] = field(default_factory=list)
-    # Music videos. No duration on any of them (their entries carry
-    # title/videoId/artists/playlistId/thumbnails/views and nothing else),
-    # which is why these belong in a shelf of cards and not in the track
-    # list — a card doesn't print a duration in the first place.
-    videos: list[VideoSearchResult] = field(default_factory=list)
     related: list[ChannelSearchResult] = field(default_factory=list)
 
 
@@ -521,7 +578,7 @@ def _releases(section: dict | None, kind: str) -> list[ArtistRelease]:
                 browse_id=browse_id,
                 title=title,
                 year=item.get("year"),
-                cover_url=_cover_url(item.get("thumbnails")),
+                cover_url=_proxied_cover_url(item.get("thumbnails")),
                 # Singles report their own ("Single", and "EP" for some);
                 # albums report nothing, so the shelf they came from is the
                 # only thing that knows.
@@ -538,14 +595,14 @@ def _topic_channel_id(songs: list[dict], name: str) -> str | None:
     is, that id is their Topic channel — the auto-generated one a label
     uploads licensed audio to. It is the only channel that carries their
     music and nothing else, which is what makes it the right thing to
-    follow: an official channel's feed also carries vlogs and interviews,
+    follow: an official channel's artist also carries vlogs and interviews,
     and those are not what someone following an artist in a music app is
     asking for.
 
     Matched by name rather than taken from the first credit, because a
     collaboration lists the other artist first. Measured on Shirin David and
     Sezen Aksu: the name match finds exactly one id, credited on 56 of 56
-    and 150 of 150 tracks respectively, and its feed is titled "<Artist> -
+    and 150 of 150 tracks respectively, and its artist is titled "<Artist> -
     Topic". Costs nothing — this is the response the page already returned.
 
     Case-insensitively, because the two halves of that match come from
@@ -671,7 +728,6 @@ def fetch_artist(browse_id: str, all_songs: bool = True) -> ArtistProfile | None
         track_count=track_count,
         albums=_releases(artist.get("albums"), "Album"),
         singles=_releases(artist.get("singles"), "Single"),
-        videos=_song_results((artist.get("videos") or {}).get("results")),
         related=_related_artists(artist.get("related")),
     )
 
@@ -706,30 +762,25 @@ def fetch_release(browse_id: str) -> ReleaseDetail | None:
     if not tracks:
         return None
 
+    # A track entry inside an album/single response carries no thumbnail of
+    # its own — measured live on a 14-track album, every single one came
+    # back with thumbnails: None, since the whole release shares one cover
+    # rather than each track having its own. Without this, every row in an
+    # opened album rendered with no image at all. cover_url is already
+    # proxied (see _proxied_cover_url), so no extra wrapping needed here.
+    cover_url = _proxied_cover_url(release.get("thumbnails"))
+    if cover_url:
+        tracks = [
+            track if track.thumbnail_url else replace(track, thumbnail_url=cover_url)
+            for track in tracks
+        ]
+
     artists = [artist.get("name") for artist in release.get("artists") or [] if artist.get("name")]
     return ReleaseDetail(
         title=release["title"],
         year=release.get("year"),
         kind=release.get("type") or "Release",
-        cover_url=_cover_url(release.get("thumbnails")),
+        cover_url=cover_url,
         artist_names=", ".join(artists) or None,
         tracks=tracks,
     )
-
-
-def resolve_artist_channel(browse_id: str) -> str | None:
-    """The official YouTube channel behind an artist's Topic channel, for
-    turning "follow this artist" into a channel this app can actually sync.
-
-    Verified live: the Topic id every song result carries
-    ("UCNaGLJRPE3ohleIDM7RFtlQ") resolves to "UC6OI7Crv96jgra5pwJNDFRQ",
-    which is @sezenaksu — 3.19M subscribers and a real upload feed, where
-    the Topic channel is an automated container nobody would choose to
-    follow. Costs one request, which is why it happens on the follow click
-    and not on every search result.
-    """
-    # all_songs=False: this wants one field off the page header, and the full
-    # track list it would otherwise pull costs a second request nobody here
-    # reads.
-    artist = fetch_artist(browse_id, all_songs=False)
-    return artist.channel_id if artist else None

@@ -1,19 +1,21 @@
 // Explore: one search box over both songs and channels, and the
-// interest-based "For you" shelves under it.
+// browse shelves under it — interest-based ones when there are interests,
+// charts and moods to browse either way (see services/recommendations.py).
 //
 // What happens when you act on a result lives in home/remote.js (playing a
-// song, following a channel) or in the detail panel (opening a playlist or an
-// unfollowed channel drills into home/detail.js's yt-playlist/yt-artist
-// kinds, rather than Explore growing a track list of its own).
+// song, following a channel) or in the detail panel (opening a playlist, an
+// artist, or a mood's playlists drills into home/detail.js's yt-playlist/
+// yt-artist/yt-mood kinds, rather than Explore growing a track list of its
+// own).
 //
 // The tab shows one of two regions at a time: the browse/recommendations
 // panel by default, and the search results while there's a query.
 
-import { api, debounce, escapeHtml, formatDuration } from "../core.js";
+import { api, debounce, escapeHtml, formatDuration, setupSearchClear } from "../core.js";
 import { openDetail } from "./detail.js";
 import { wireScrollers } from "./scrollers.js";
-import { followChannel, playRemoteVideo } from "./remote.js";
-import { activate, onTabActivated } from "./tabs.js";
+import { followArtist, playRemoteVideo } from "./remote.js";
+import { onTabActivated } from "./tabs.js";
 
 function formatSubscribers(count) {
   if (count == null) return "";
@@ -231,33 +233,9 @@ function recPlaylistCardHtml(playlist) {
   `;
 }
 
-// Above this, a video goes on the "Long form" shelf instead of "Contents" —
-// matches the ≤10-minute line the audit measured against (Music profile:
-// 11/11 recommended videos ran over this; Podcast: 10/12, median 2:18:19).
-// Naming is deliberately content-type-neutral rather than "Songs"/"Mixes":
-// the Podcast profile's own interests (linux, devops) mean hour-long content
-// there is the *correct* result, not noise to filter out — this only sorts
-// it onto its own shelf instead of hiding it.
-const LONG_FORM_THRESHOLD_SECONDS = 10 * 60;
-
-/** Splits a video list into { contents, longForm } by LONG_FORM_THRESHOLD_
- *  SECONDS. A video with no known duration goes to "Contents" — most
- *  recommended content is short-form, and an unknown duration is rare
- *  (search results carry it from yt-dlp's flat extraction almost always). */
-function splitByDuration(videos) {
-  const contents = [];
-  const longForm = [];
-  for (const video of videos) {
-    const isLongForm = video.duration_seconds != null && video.duration_seconds > LONG_FORM_THRESHOLD_SECONDS;
-    (isLongForm ? longForm : contents).push(video);
-  }
-  return { contents, longForm };
-}
-
 /** A whole shelf, or nothing at all when that kind came back empty — an
- *  empty "Playlists" heading is worse than no heading. Exported for the
- *  onboarding wizard, which builds one per picked genre. */
-export function shelfHtml(title, items, cardHtml) {
+ *  empty "Playlists" heading is worse than no heading. */
+function shelfHtml(title, items, cardHtml) {
   if (!items.length) return "";
   return `
     <div class="shelf">
@@ -267,17 +245,33 @@ export function shelfHtml(title, items, cardHtml) {
   `;
 }
 
-/** The nudge to go and list some interests. Shown above the shelves rather
- *  than instead of them: the charts and the mood shelf don't come from the
- *  interest list, so a profile that has listed none still has plenty to
- *  look at — it just isn't personal yet. */
-function interestsPromptHtml() {
+function moodChipHtml(mood) {
   return `
-    <p class="muted">
-      Tell Spotea what you're into — add a few interests in Settings and this fills up with
-      channels, songs and playlists picked for you.
-    </p>
-    <button type="button" id="recommendations-open-settings" class="btn-primary">Add interests</button>
+    <button
+      type="button"
+      class="channel-chip"
+      data-mood-params="${escapeHtml(mood.params)}"
+      data-mood-title="${escapeHtml(mood.title)}"
+    >
+      <span>${escapeHtml(mood.title)}</span>
+    </button>
+  `;
+}
+
+/** Moods & genres: a chip row rather than shelfHtml's card grid. A mood
+ *  category has no artwork of its own — only the playlists inside it do —
+ *  so a text chip (the same one Home's "Recently followed" row uses) reads
+ *  better than an image card with nothing to show. Clicking one opens all
+ *  of that mood's playlists (see templates/_mood_panel.html), not a track
+ *  list, so the user picks a playlist from there rather than this app
+ *  guessing which one they meant. */
+function moodsShelfHtml(moods) {
+  if (!moods.length) return "";
+  return `
+    <div class="shelf">
+      <div class="shelf-header"><h3 class="shelf-title">Moods &amp; genres</h3></div>
+      <div class="channel-row">${moods.map(moodChipHtml).join("")}</div>
+    </div>
   `;
 }
 
@@ -285,28 +279,27 @@ function renderRecommendations(data) {
   const body = document.getElementById("recommendations-body");
   if (!body) return;
 
-  const { contents, longForm } = splitByDuration(data.videos);
   const shelves = [
-    // Interest-based first, because they're the ones about this profile.
-    shelfHtml("Contents", contents, recVideoCardHtml),
-    shelfHtml("Long form", longForm, recVideoCardHtml),
-    shelfHtml("Channels", data.channels, channelCardHtml),
+    // Songs and Artists used to both be typed-interest search, same as
+    // Playlists still is — and both went badly for anything that wasn't
+    // literally a song title or an artist's name, since an interest was
+    // routinely a genre or mood instead. Both are now built from artists
+    // actually followed rather than typed text (see
+    // services/recommendations.py's _songs_from_followed and
+    // _similar_to_followed) — empty for a library with nothing followed
+    // yet, and deliberately not seeded with anything else in that case.
+    shelfHtml("Songs", data.videos, recVideoCardHtml),
     shelfHtml("Playlists", data.playlists, recPlaylistCardHtml),
-    // Then what everyone gets: this week's charts and one rotating mood.
+    shelfHtml("Similar artists", data.similar_artists, artistCardHtml),
+    // Then what everyone gets: this week's charts and every mood to browse.
     shelfHtml("Charts", data.charts, recPlaylistCardHtml),
     shelfHtml("Charting artists", data.chart_artists, artistCardHtml),
-    // The only shelf whose heading comes from YouTube rather than from this
-    // file, so the only one that needs escaping.
-    data.mood
-      ? shelfHtml(escapeHtml(data.mood.title), data.mood.playlists, recPlaylistCardHtml)
-      : "",
+    moodsShelfHtml(data.moods),
   ].join("");
 
-  const prompt = data.interests.length ? "" : interestsPromptHtml();
   body.innerHTML =
-    prompt +
-    (shelves ||
-      `<p class="muted">Nothing came back this time. Try refreshing, or add a different interest in Settings.</p>`);
+    shelves ||
+    `<p class="muted">Nothing came back this time. Try refreshing, or add a different interest in Settings.</p>`;
   // Shelves built here never pass through the fragment swap that normally
   // wires drag-scrolling, so they have to ask for it themselves.
   wireScrollers();
@@ -425,12 +418,6 @@ export function setupRecommendations() {
   });
 
   body.addEventListener("click", (event) => {
-    if (event.target.closest("#recommendations-open-settings")) {
-      activate("settings");
-      document.getElementById("open-interests")?.click();
-      return;
-    }
-
     // Checked before anything else: the artist's name sits inside cards that
     // are themselves clickable, so the outer handler would otherwise swallow
     // it and start playing the song.
@@ -444,7 +431,7 @@ export function setupRecommendations() {
     // (preview it) but carries its own Add button (follow it outright).
     const addButton = event.target.closest(".btn-add-channel");
     if (addButton) {
-      followChannel(addButton.dataset.channelUrl, addButton);
+      followArtist(addButton.dataset.channelUrl, addButton);
       return;
     }
 
@@ -455,7 +442,17 @@ export function setupRecommendations() {
     // portrait — but the chart card has none to send anyway.
     const channelCard = event.target.closest(".shelf-channel-card");
     if (channelCard) {
-      openDetail("yt-artist", channelCard.dataset.channelId, { avatar: channelCard.dataset.thumbnailUrl || null });
+      openDetail("yt-artist", channelCard.dataset.channelId);
+      return;
+    }
+
+    // A "Moods & genres" chip — opens that mood's whole playlist shelf
+    // (see templates/_mood_panel.html), not a track list. The title rides
+    // along so the panel doesn't have to pay an extra lookup for it (see
+    // routers/partials.py's yt-mood route).
+    const moodChip = event.target.closest(".channel-chip[data-mood-params]");
+    if (moodChip) {
+      openDetail("yt-mood", moodChip.dataset.moodParams, { title: moodChip.dataset.moodTitle });
       return;
     }
 
@@ -488,6 +485,8 @@ export function setupExploreSearch() {
   const channelResults = document.getElementById("channel-search-results");
   if (!input || !resultsPanel || !browsePanel) return;
 
+  setupSearchClear("explore-search-input", "explore-search-clear");
+
   const runSearch = debounce(async (query) => {
     if (!query) {
       showExplorePanel("explore-browse-panel");
@@ -507,8 +506,8 @@ export function setupExploreSearch() {
     channelResults.innerHTML = loadingHtml;
 
     const [videos, channels] = await Promise.all([
-      api(`/feeds/search-videos?q=${encodeURIComponent(query)}`),
-      api(`/feeds/search?q=${encodeURIComponent(query)}`),
+      api(`/explore/songs?q=${encodeURIComponent(query)}`),
+      api(`/explore/artists?q=${encodeURIComponent(query)}`),
     ]);
 
     if (videos.ok) {
@@ -525,7 +524,7 @@ export function setupExploreSearch() {
     // sits inside that row.
     const btn = event.target.closest(".btn-add-channel");
     if (btn) {
-      followChannel(btn.dataset.channelUrl, btn);
+      followArtist(btn.dataset.channelUrl, btn);
       return;
     }
 
@@ -536,7 +535,7 @@ export function setupExploreSearch() {
     // for a channel that isn't one (a podcast, say).
     const row = event.target.closest(".search-result-channel");
     if (row?.dataset.channelId) {
-      openDetail("yt-artist", row.dataset.channelId, { avatar: row.dataset.thumbnailUrl || null });
+      openDetail("yt-artist", row.dataset.channelId);
     }
   });
 

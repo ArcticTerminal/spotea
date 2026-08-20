@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 
 from app.config import settings
-from app.deps import get_current_profile, get_db, require_login
+from app.deps import get_current_user, get_db, require_login
 from app.formatting import format_size, safe_filename
 from app.models import Content, User
 from app.storage import EXPORT_TEMP_SUFFIX, clear_all
@@ -23,9 +23,9 @@ router = APIRouter(prefix="/storage", tags=["storage"], dependencies=[Depends(re
 
 @router.delete("")
 def clear_storage(
-    profile: User = Depends(get_current_profile), db: Session = Depends(get_db)
+    user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ) -> dict[str, int]:
-    cleared = clear_all(db, profile.id)
+    cleared = clear_all(db, user.id)
     return {"cleared": cleared}
 
 
@@ -43,7 +43,7 @@ def _archive_name(title: str, suffix: str, used: set[str]) -> str:
 
 @router.get("/export")
 def export_all(
-    profile: User = Depends(get_current_profile), db: Session = Depends(get_db)
+    user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ) -> FileResponse:
     """Every downloaded track as one zip.
 
@@ -60,7 +60,7 @@ def export_all(
     failure onto RAM again.
     """
     rows = (
-        db.query(Content).filter(Content.user_id == profile.id, Content.status == "ready").all()
+        db.query(Content).filter(Content.user_id == user.id, Content.status == "ready").all()
     )
     exportable = [(row, Path(row.file_path)) for row in rows if row.file_path]
     exportable = [(row, path) for row, path in exportable if path.is_file()]

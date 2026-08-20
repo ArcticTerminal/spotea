@@ -1,37 +1,37 @@
 from datetime import datetime, timedelta
 
 from app.content_query import query_content_page
-from app.models import Content, Feed, User
+from app.models import Artist, Content, User
 
 USER_ID = 1
-# Must match conftest.py's own DEFAULT_ACCOUNT_ID (duplicated rather than
+# Must match conftest.py's own DEFAULT_USER_ID (duplicated rather than
 # imported — see test_profiles_api.py for why).
-DEFAULT_ACCOUNT_ID = 1
+DEFAULT_USER_ID = 1
 
 
-def _seed(db_session, count=25):
-    feed = Feed(user_id=USER_ID, rss_url="https://example.com/feed", channel_title="Test Channel")
-    db_session.add(feed)
+def _seed(db_session, count=25, is_favorite=False):
+    artist = Artist(user_id=USER_ID, channel_id="https://example.com/artist", name="Test Channel")
+    db_session.add(artist)
     db_session.commit()
-    db_session.refresh(feed)
+    db_session.refresh(artist)
 
     now = datetime(2026, 1, 1)
     items = [
         Content(
-            feed_id=feed.id,
+            artist_id=artist.id,
             user_id=USER_ID,
             video_id=f"vid{i:04d}"[:11],
             title=f"Title {count - i:03d}",
             published_at=now - timedelta(days=i),
             duration_seconds=120 + i,
-            is_favorite=(i == 0),
+            is_favorite=is_favorite or (i == 0),
             status="not_downloaded",
         )
         for i in range(count)
     ]
     db_session.add_all(items)
     db_session.commit()
-    return feed, items
+    return artist, items
 
 
 def test_get_single_content_returns_full_shape(client, db_session):
@@ -43,7 +43,7 @@ def test_get_single_content_returns_full_shape(client, db_session):
     body = res.json()
     assert set(body.keys()) == {
         "id",
-        "feed_id",
+        "artist_id",
         "channel_title",
         "video_id",
         "title",
@@ -67,18 +67,18 @@ def test_get_single_content_404_for_nonexistent_id(client, db_session):
 
 
 def test_get_single_content_404_for_another_users_content(client, db_session):
-    other_profile = User(name="Music", account_id=DEFAULT_ACCOUNT_ID)
-    db_session.add(other_profile)
+    other_user = User(email="other1@example.com", password_hash="x")
+    db_session.add(other_user)
     db_session.commit()
-    db_session.refresh(other_profile)
+    db_session.refresh(other_user)
 
-    other_feed = Feed(user_id=other_profile.id, rss_url="https://example.com/other", channel_title="Other")
+    other_feed = Artist(user_id=other_user.id, channel_id="https://example.com/other", name="Other")
     db_session.add(other_feed)
     db_session.commit()
     db_session.refresh(other_feed)
 
     other_content = Content(
-        feed_id=other_feed.id, user_id=other_profile.id, video_id="otheruser01", title="Not yours"
+        artist_id=other_feed.id, user_id=other_user.id, video_id="otheruser01", title="Not yours"
     )
     db_session.add(other_content)
     db_session.commit()
@@ -88,28 +88,8 @@ def test_get_single_content_404_for_another_users_content(client, db_session):
     assert res.status_code == 404
 
 
-def test_channel_queue_is_the_whole_channel_in_list_order(client, db_session):
-    """The queue behind "Play all" deliberately ignores pagination — the
-    detail panel shows DEFAULT_PAGE_SIZE rows at a time, but playing a
-    channel means the channel. count=55 (not the module default of 25) so
-    the two-page traversal below still spans a real page boundary."""
-    feed, _ = _seed(db_session, count=55)
-
-    ids = client.get(f"/content/queue/channel/{feed.id}").json()["ids"]
-    assert len(ids) == 55
-
-    # Same order the track list renders, newest-first — a queue that agreed
-    # on the set but not the order would look like shuffle was stuck on.
-    listed = [
-        item.id
-        for page in (1, 2)
-        for item in query_content_page(db_session, USER_ID, page=page)[0]
-    ]
-    assert ids == listed
-
-
 def test_playlist_queue_matches_its_detail_panel(client, db_session):
-    feed, items = _seed(db_session, count=25)
+    artist, items = _seed(db_session, count=25)
     ids = client.get("/content/queue/playlist/favorites").json()["ids"]
     # _seed favorites exactly one row (i == 0, the newest).
     favorites, _page, _total_pages = query_content_page(db_session, USER_ID, filter="__favorites__")
@@ -122,13 +102,13 @@ def test_queue_endpoints_404_for_unknown_targets(client, db_session):
     assert client.get("/content/queue/playlist/bogus").status_code == 404
 
 
-def test_channel_queue_404s_for_another_profiles_channel(client, db_session):
-    other_profile = User(name="Music", account_id=DEFAULT_ACCOUNT_ID)
-    db_session.add(other_profile)
+def test_channel_queue_404s_for_another_users_channel(client, db_session):
+    other_user = User(email="other2@example.com", password_hash="x")
+    db_session.add(other_user)
     db_session.commit()
-    db_session.refresh(other_profile)
+    db_session.refresh(other_user)
 
-    other_feed = Feed(user_id=other_profile.id, rss_url="https://example.com/queue-other")
+    other_feed = Artist(user_id=other_user.id, channel_id="https://example.com/queue-other")
     db_session.add(other_feed)
     db_session.commit()
     db_session.refresh(other_feed)
@@ -137,25 +117,25 @@ def test_channel_queue_404s_for_another_profiles_channel(client, db_session):
 
 
 def test_queue_is_capped(client, db_session, monkeypatch):
-    """A backfilled channel can be thousands of videos deep; the queue stops
-    well before that rather than shipping (and storing) all of it."""
+    """A long-standing library's Favorites can run deep; the queue stops well
+    before that rather than shipping (and storing) all of it."""
     from app import content_query
 
     monkeypatch.setattr(content_query, "QUEUE_MAX_ITEMS", 5)
-    feed, _ = _seed(db_session, count=25)
+    _seed(db_session, count=25, is_favorite=True)
 
-    assert len(client.get(f"/content/queue/channel/{feed.id}").json()["ids"]) == 5
+    assert len(client.get("/content/queue/playlist/favorites").json()["ids"]) == 5
 
 
 def _seed_one(db_session, **overrides):
-    feed = Feed(user_id=USER_ID, rss_url="https://example.com/dl-feed", channel_title="Download Channel")
-    db_session.add(feed)
+    artist = Artist(user_id=USER_ID, channel_id="https://example.com/dl-artist", name="Download Channel")
+    db_session.add(artist)
     db_session.commit()
-    db_session.refresh(feed)
+    db_session.refresh(artist)
 
     fields = {"status": "not_downloaded", **overrides}
     item = Content(
-        feed_id=feed.id, user_id=USER_ID, video_id="downloadvi1", title="Download Me", **fields
+        artist_id=artist.id, user_id=USER_ID, video_id="downloadvi1", title="Download Me", **fields
     )
     db_session.add(item)
     db_session.commit()
@@ -374,33 +354,5 @@ def test_downloading_a_track_does_not_record_it_as_played(client, db_session, tm
 
     db_session.refresh(item)
     assert item.last_played_at is None
-    assert item.play_count == 0
 
 
-def test_streaming_a_track_increments_its_play_count(client, db_session, tmp_path):
-    """What the "On Repeat" smart playlist orders by — last_played_at alone
-    only says *when*, not how often."""
-    item = _seed_ready(db_session, tmp_path)
-    assert item.play_count == 0
-
-    client.get(f"/content/{item.id}/stream")
-    client.get(f"/content/{item.id}/stream")
-
-    db_session.refresh(item)
-    assert item.play_count == 2
-
-
-def test_clearing_recently_played_does_not_reset_play_count(client, db_session, tmp_path):
-    """Deliberate: clearing the *history* shelf shouldn't also erase the
-    play-frequency signal On Repeat depends on."""
-    item = _seed_ready(db_session, tmp_path)
-    client.get(f"/content/{item.id}/stream")
-    db_session.refresh(item)
-    assert item.play_count == 1
-
-    res = client.delete("/content/recently-played")
-    assert res.status_code == 200
-
-    db_session.refresh(item)
-    assert item.last_played_at is None
-    assert item.play_count == 1

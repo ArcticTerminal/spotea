@@ -16,16 +16,13 @@ from app.database import Base, SessionLocal, engine
 from app.deps import NotAuthenticated, require_login
 from app.images import fetch_image_bytes
 from app.middleware import install as install_middleware
-from app.migrations import run_migrations
+from app.routers import artists as artists_router
 from app.routers import auth as auth_router
 from app.routers import content as content_router
 from app.routers import debug as debug_router
 from app.routers import explore as explore_router
-from app.routers import feeds as feeds_router
-from app.routers import onboarding as onboarding_router
 from app.routers import pages as pages_router
 from app.routers import partials as partials_router
-from app.routers import profiles as profiles_router
 from app.routers import recommendations as recommendations_router
 from app.routers import settings as settings_router
 from app.routers import storage as storage_router
@@ -76,7 +73,6 @@ def _assert_single_worker() -> None:
 async def lifespan(app: FastAPI):
     _assert_single_worker()
     Base.metadata.create_all(bind=engine)
-    run_migrations(engine)
 
     # Exactly once, here, before anything else in the process has had a
     # chance to start a download — see storage.sweep_startup_leftovers for
@@ -133,16 +129,14 @@ class RevalidatingStaticFiles(StaticFiles):
 app.mount("/static", RevalidatingStaticFiles(directory="app/static"), name="static")
 
 app.include_router(auth_router.router)
-app.include_router(feeds_router.router)
+app.include_router(artists_router.router)
 app.include_router(explore_router.router)
 app.include_router(content_router.router)
 app.include_router(storage_router.router)
 app.include_router(settings_router.router)
 app.include_router(recommendations_router.router)
-app.include_router(profiles_router.router)
 app.include_router(debug_router.router)
 app.include_router(partials_router.router)
-app.include_router(onboarding_router.router)
 app.include_router(pages_router.router)
 
 
@@ -162,7 +156,7 @@ def health(response: Response) -> dict[str, object]:
 
     Deliberately cheap enough for a container healthcheck to poll: one
     `SELECT 1` and an in-process flag, touching no user data and doing no
-    per-profile work.
+    per-user work.
     """
     checks = {"database": _database_reachable(), "scheduler": scheduler.is_alive()}
     healthy = all(checks.values())
@@ -219,55 +213,74 @@ def get_avatar(filename: str) -> FileResponse:
     return FileResponse(path, media_type="image/jpeg", headers=_IMAGE_CACHE_HEADERS)
 
 
-# Hosts youtube/search.py's absolute_thumbnail_url ever hands back for a
-# channel avatar — yt3.googleusercontent.com is the one it rewrites away from
-# (see that function), kept here too in case some path skips the rewrite.
+# Hosts youtube/urls.py's absolute_thumbnail_url ever hands back —
+# yt3.googleusercontent.com is the one it rewrites away from (see that
+# function), kept here too in case some path skips the rewrite.
 #
 # lh3.googleusercontent.com is the same CDN under a different name, and
-# YouTube Music picks between the two per artist with no pattern worth
-# guessing at: of twelve charting artists, eight portraits came back on yt3
-# and four on lh3. absolute_thumbnail_url's rewrite is deliberately
-# host-and-path specific and doesn't cover it (the two names don't share a
-# path namespace, so rewriting would 404), which left those four rendering
-# as empty circles — the proxy rejected them before ever fetching.
+# YouTube Music picks between the two with no pattern worth guessing at: of
+# twelve charting artists, eight portraits came back on yt3 and four on lh3
+# — and song/album covers split the same way. absolute_thumbnail_url's
+# rewrite is deliberately host-and-path specific and doesn't cover lh3 (the
+# two names don't share a path namespace, so rewriting would 404), which
+# left anything on that host rejected by this proxy before ever fetching —
+# or, hotlinked straight from the browser instead of through here, blocked
+# outright by this app's own img-src CSP (app/middleware.py), which never
+# allowed googleusercontent.com at all.
+#
+# i.ytimg.com is a third CDN entirely — YouTube's ordinary video-thumbnail
+# host, not YouTube Music's cover art one. A mood/mix playlist's tracks
+# (see youtube/music.py's fetch_mood_playlists, fetch_playlist) report their
+# thumbnails there instead of on yt3/lh3, measured live on a mood shelf's
+# "Fall Hits" playlist — every one of its 200 tracks. cover_url_at_size
+# already knows this host can't be resized the way the other two can (its
+# `sqp` query is signed), and passes it through untouched; this is the
+# other half of supporting it, so those thumbnails get proxied rather than
+# rejected before ever being fetched.
 #
 # Exact hostname match only: no endswith/substring check, which a URL like
 # https://evil.example/yt3.ggpht.com could otherwise slip past.
-_AVATAR_PROXY_ALLOWED_HOSTS = {
+_IMAGE_PROXY_ALLOWED_HOSTS = {
     "yt3.ggpht.com",
     "yt3.googleusercontent.com",
     "lh3.googleusercontent.com",
+    "i.ytimg.com",
 }
-_AVATAR_PROXY_CACHE_HEADERS = {"Cache-Control": "private, max-age=86400"}
+_IMAGE_PROXY_CACHE_HEADERS = {"Cache-Control": "private, max-age=86400"}
 
-# A 1x1 fully transparent PNG, served in place of an avatar whose upstream
-# fetch failed — see avatar_proxy below for why that beats an error status.
+# A 1x1 fully transparent PNG, served in place of an image whose upstream
+# fetch failed — see image_proxy below for why that beats an error status.
 _BLANK_PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
 )
-# Deliberately not _AVATAR_PROXY_CACHE_HEADERS' day-long cache: this is a
+# Deliberately not _IMAGE_PROXY_CACHE_HEADERS' day-long cache: this is a
 # stand-in for a fetch that failed, and a transient upstream hiccup must not
 # freeze a blank circle in the browser until tomorrow. Nothing is stored, so
 # the next render retries.
-_AVATAR_PROXY_BLANK_HEADERS = {"Cache-Control": "no-store"}
+_IMAGE_PROXY_BLANK_HEADERS = {"Cache-Control": "no-store"}
 
 
-@app.get("/avatar-proxy", dependencies=[Depends(require_login)])
-def avatar_proxy(u: str) -> Response:
-    """Streams a channel avatar YouTube's search results already handed
-    back — see youtube/search.py's _cached_avatar_or_hotlink — without
-    saving it to disk. A never-followed channel doesn't earn a permanent
-    local copy (see download_avatar's own docstring on why not: 92% of
-    avatar files on disk used to be exactly that, orphaned), but hotlinking
-    Google's CDN straight from the browser hits the same ORB problem
-    download_avatar exists to dodge. This is the same fix, without the
-    permanent copy: fetch once server-side per request, forward the bytes,
-    keep nothing.
+@app.get("/image-proxy", dependencies=[Depends(require_login)])
+def image_proxy(u: str) -> Response:
+    """Streams a channel avatar, or a song/album/playlist cover, from
+    YouTube Music's own CDN without ever saving it to disk. A channel
+    nobody's followed doesn't earn a permanent local copy (see
+    download_avatar's own docstring on why not: 92% of avatar files on disk
+    used to be exactly that, orphaned), and neither does a track or release
+    cover — those are browsed far more often than anything is followed, so
+    the same orphan problem would be worse. But hotlinking Google's CDN
+    straight from the browser hits the ORB problem download_avatar exists
+    to dodge (Chrome's Opaque Response Blocking rejects a real share of
+    yt3.ggpht.com responses outright), and this app's own CSP blocks
+    googleusercontent.com hosts entirely. This is the same fix as
+    download_avatar, without the permanent copy: fetch once server-side per
+    request, forward the bytes, keep nothing.
 
     `u` only ever reaches here as a URL this app generated itself (see
-    _cached_avatar_or_hotlink) — the host allowlist below is what keeps a
-    tampered query string from turning this into an open fetch of arbitrary
-    hosts on the server's behalf.
+    images.cached_avatar_or_hotlink and youtube/music.py's
+    _proxied_cover_url) — the host allowlist below is what keeps a tampered
+    query string from turning this into an open fetch of arbitrary hosts on
+    the server's behalf.
 
     A failed upstream fetch answers with a blank pixel rather than an error
     status. An <img> whose src 404s paints the browser's own broken-image
@@ -275,12 +288,10 @@ def avatar_proxy(u: str) -> Response:
     which already carries the grey circle used for a channel with no avatar
     at all — so a transparent pixel lands in exactly that placeholder
     instead of a broken icon, with no markup or onerror handler anywhere.
-    This matters most for the onboarding wizard, whose avatar URLs ship
-    committed in scripts/channel_profiles.py and go stale whenever a channel
-    changes its picture, but Explore's search results hit the same path any
-    time Google refuses a fetch."""
+    Explore's search results hit this path any time Google refuses a
+    fetch."""
     host = urllib.parse.urlparse(u).hostname
-    if host not in _AVATAR_PROXY_ALLOWED_HOSTS:
+    if host not in _IMAGE_PROXY_ALLOWED_HOSTS:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST)
 
     fetched = fetch_image_bytes(u)
@@ -289,13 +300,13 @@ def avatar_proxy(u: str) -> Response:
         # pixel would otherwise make a genuinely broken proxy (bad egress,
         # DNS, an upstream host change) look like a page full of channels
         # that merely have no avatar.
-        logger.warning("Avatar proxy could not fetch %s — serving a blank placeholder", u)
+        logger.warning("Image proxy could not fetch %s — serving a blank placeholder", u)
         return Response(
-            content=_BLANK_PNG, media_type="image/png", headers=_AVATAR_PROXY_BLANK_HEADERS
+            content=_BLANK_PNG, media_type="image/png", headers=_IMAGE_PROXY_BLANK_HEADERS
         )
 
     body, content_type = fetched
-    return Response(content=body, media_type=content_type, headers=_AVATAR_PROXY_CACHE_HEADERS)
+    return Response(content=body, media_type=content_type, headers=_IMAGE_PROXY_CACHE_HEADERS)
 
 
 @app.get("/thumbnails/{filename}", dependencies=[Depends(require_login)])

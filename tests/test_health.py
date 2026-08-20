@@ -61,7 +61,7 @@ def test_refresh_loop_survives_a_failure_during_a_cycle(monkeypatch):
             raise RuntimeError("database is locked")
         # Second time round: nothing due, so this is a normal no-op cycle.
 
-    monkeypatch.setattr(scheduler, "_refresh_due_accounts", sometimes_locked)
+    monkeypatch.setattr(scheduler, "_refresh_due_users", sometimes_locked)
     monkeypatch.setattr(scheduler, "ERROR_BACKOFF_SECONDS", 0)
 
     async def drive() -> tuple[bool, int]:

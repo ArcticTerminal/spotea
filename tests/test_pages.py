@@ -11,7 +11,7 @@ to catch "the page 500s", not to assert layout.
 
 from datetime import datetime, timedelta
 
-from app.models import Content, Feed, User
+from app.models import Artist, Content
 from app.timeutil import utcnow
 
 USER_ID = 1
@@ -20,20 +20,20 @@ USER_ID = 1
 def _seed(db_session, *, followed=True):
     """One followed channel with three items, each hitting a different
     Library surface: a new upload, a favorite, and a saved+downloaded one."""
-    feed = Feed(
+    artist = Artist(
         user_id=USER_ID,
-        rss_url="https://www.youtube.com/feeds/videos.xml?channel_id=UCpagetest00000000000000",
-        channel_title="Page Test Channel",
+        channel_id="UCpagetest00000000000000",
+        name="Page Test Channel",
         followed=followed,
     )
-    db_session.add(feed)
+    db_session.add(artist)
     db_session.commit()
-    db_session.refresh(feed)
+    db_session.refresh(artist)
 
     now = utcnow()
     items = [
         Content(
-            feed_id=feed.id,
+            artist_id=artist.id,
             user_id=USER_ID,
             video_id="newupload01",
             title="Fresh Upload",
@@ -42,7 +42,7 @@ def _seed(db_session, *, followed=True):
             is_new_upload=True,
         ),
         Content(
-            feed_id=feed.id,
+            artist_id=artist.id,
             user_id=USER_ID,
             video_id="favorite001",
             title="A Favorite",
@@ -51,7 +51,7 @@ def _seed(db_session, *, followed=True):
             is_favorite=True,
         ),
         Content(
-            feed_id=feed.id,
+            artist_id=artist.id,
             user_id=USER_ID,
             video_id="savedplay01",
             title="Saved And Played",
@@ -64,7 +64,7 @@ def _seed(db_session, *, followed=True):
     ]
     db_session.add_all(items)
     db_session.commit()
-    return feed, items
+    return artist, items
 
 
 def test_home_renders_every_shelf_and_the_library_grid(client, db_session):
@@ -80,20 +80,6 @@ def test_home_renders_every_shelf_and_the_library_grid(client, db_session):
     assert "Page Test Channel" in body  # Library channel card + Home chip
 
 
-def test_home_renders_the_active_profiles_name(client):
-    """The topbar button and the mobile menu row both shipped with static
-    placeholder text ("Profile" / "Switch profile") that nothing ever
-    replaced — with more than one profile there was no way to tell which one
-    you were on. See routers/pages.py's home() and profiles.js's
-    renameProfile for the one path (renaming the current profile without a
-    reload) a server render alone doesn't keep in sync."""
-    res = client.get("/")
-
-    assert res.status_code == 200
-    assert '<span id="profile-switcher-name">Default</span>' in res.text
-    assert '<span id="mobile-menu-profile-name">Default</span>' in res.text
-
-
 def test_home_renders_for_an_empty_library(client):
     """The "no content yet" path is a different branch of index.html than
     the one every seeded test takes."""
@@ -102,62 +88,19 @@ def test_home_renders_for_an_empty_library(client):
     assert res.status_code == 200
     assert "add a channel in the Explore tab" in res.text
 
-
-def test_needs_onboarding_for_a_fresh_profile_with_neither_interests_nor_a_feed(client):
-    """Drives home/onboarding.js's auto-open — a profile with nothing for
-    Explore's recommendations or the library to work from should see the
-    wizard. The fixture profile starts with no interests and no feeds, same
-    as test_home_renders_for_an_empty_library above."""
-    body = client.get("/").text
-
-    assert 'data-needs-onboarding="true"' in body
-
-
-def test_needs_onboarding_false_once_a_feed_is_followed(client, db_session):
-    """Having something followed is enough on its own — the wizard isn't
-    meant to reappear just because interests specifically are still empty."""
-    _seed(db_session)
-
-    body = client.get("/").text
-
-    assert 'data-needs-onboarding="false"' in body
-
-
-def test_onboarding_renders_a_chip_grid_per_kind(client):
-    """The wizard's chip step carries one grid per kind (MUSIC_GENRES +
-    PODCAST_CATEGORIES, app/genres.py) — a dropped Jinja loop would silently
-    leave one kind of profile with an empty picker. The &amp;-escaped entries
-    double-check the loops render real list content, not just the wrappers."""
-    body = client.get("/").text
-
-    assert 'data-kind-grid="music"' in body
-    assert 'data-kind-grid="podcast"' in body
-    assert 'data-genre="Drum &amp; Bass"' in body
-    assert 'data-genre="True Crime"' in body
-
-
-def test_needs_onboarding_false_once_interests_are_set(client, db_session):
-    profile = db_session.get(User, USER_ID)
-    profile.interests = "Jazz"
-    db_session.commit()
-
-    body = client.get("/").text
-
-    assert 'data-needs-onboarding="false"' in body
-
-
 def test_channel_avatars_are_lazy_loaded(client, db_session):
     """70 eager image requests were measured on a real, heavy library —
     avatars in the Library grid and Home's "Recently followed" chips were
     the two spots that never got the loading="lazy" every content thumbnail
     already has."""
-    feed = Feed(
+    artist = Artist(
         user_id=USER_ID,
-        rss_url="https://www.youtube.com/feeds/videos.xml?channel_id=UCavatarlazy00000000000",
-        channel_title="Avatar Lazy Channel",
+        channel_id="UCavatarlazy00000000000",
+        browse_id="UCavatarlazy00000000000",
+        name="Avatar Lazy Artist",
         avatar_url="/avatars/UCavatarlazy00000000000.jpg",
     )
-    db_session.add(feed)
+    db_session.add(artist)
     db_session.commit()
 
     body = client.get("/").text
@@ -179,7 +122,7 @@ def test_home_applies_the_duration_and_filesize_template_filters(client, db_sess
 
 
 def test_channel_and_playlist_pages_redirect_to_their_hash_route(client):
-    """Favorites/Saved/New Uploads/Recently Played/a channel/a track all moved
+    """Favorites/Saved/New releases/Recently Played/a track all moved
     in-page (see app/static/js/home/detail.js, home/overlay.js) — these
     routes exist only so an old link or bookmark still lands somewhere real.
     The actual rendering is now GET /partials/detail/... — see
@@ -189,7 +132,6 @@ def test_channel_and_playlist_pages_redirect_to_their_hash_route(client):
         ("/saved", "/#saved"),
         ("/new-uploads", "/#new-uploads"),
         ("/recently-played", "/#recently-played"),
-        ("/channel/1", "/#channel/1"),
         ("/player/1", "/#player/1"),
     ]:
         res = client.get(path, follow_redirects=False)
@@ -206,7 +148,7 @@ def test_page_routes_require_login():
     from app.main import app
 
     with TestClient(app) as anonymous:
-        for path in ["/", "/favorites", "/saved", "/new-uploads", "/recently-played", "/channel/1", "/player/1"]:
+        for path in ["/", "/favorites", "/saved", "/new-uploads", "/recently-played", "/player/1"]:
             res = anonymous.get(path, follow_redirects=False)
             assert res.status_code == 303, path
             assert res.headers["location"] == "/login", path

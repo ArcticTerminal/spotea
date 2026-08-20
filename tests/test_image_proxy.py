@@ -1,14 +1,14 @@
-"""GET /avatar-proxy (app/main.py) — streams a channel avatar from an
-allowlisted YouTube CDN host without ever writing it to disk. See
-youtube/search.py's _cached_avatar_or_hotlink for why a never-followed
-channel's avatar goes through this instead of a permanent local copy or a
-direct browser hotlink.
+"""GET /image-proxy (app/main.py) — streams an avatar or a song/album/
+playlist cover from an allowlisted YouTube CDN host without ever writing it
+to disk. See images.cached_avatar_or_hotlink and youtube/music.py's
+_proxied_cover_url for why images that haven't earned a permanent local
+copy go through this instead of a direct browser hotlink.
 """
 
 from app import main
 
 
-def test_a_proxied_avatar_is_streamed_through(client, monkeypatch):
+def test_a_proxied_image_is_streamed_through(client, monkeypatch):
     fetched = []
 
     def fake_fetch(url):
@@ -17,7 +17,7 @@ def test_a_proxied_avatar_is_streamed_through(client, monkeypatch):
 
     monkeypatch.setattr(main, "fetch_image_bytes", fake_fetch)
 
-    res = client.get("/avatar-proxy", params={"u": "https://yt3.ggpht.com/abc=s900-c-k-c0x00ffffff-no-rj"})
+    res = client.get("/image-proxy", params={"u": "https://yt3.ggpht.com/abc=s900-c-k-c0x00ffffff-no-rj"})
 
     assert res.status_code == 200
     assert res.content == b"\xff\xd8\xff-jpeg-bytes"
@@ -26,14 +26,31 @@ def test_a_proxied_avatar_is_streamed_through(client, monkeypatch):
 
 
 def test_an_lh3_portrait_is_proxied_too(client, monkeypatch):
-    """YouTube Music serves artist portraits from lh3.googleusercontent.com
-    nearly as often as from yt3 — four of twelve charting artists, measured.
+    """YouTube Music serves artist portraits — and song/album covers —
+    from lh3.googleusercontent.com nearly as often as from yt3, measured.
     Leaving it off the allowlist rejected those before they were ever
-    fetched, which rendered as an empty circle on the card."""
+    fetched, which rendered as an empty circle or a broken card image."""
     monkeypatch.setattr(main, "fetch_image_bytes", lambda url: (b"\xff\xd8\xff", "image/jpeg"))
 
     res = client.get(
-        "/avatar-proxy", params={"u": "https://lh3.googleusercontent.com/abc=w544-h544-p-l90-rj"}
+        "/image-proxy", params={"u": "https://lh3.googleusercontent.com/abc=w544-h544-p-l90-rj"}
+    )
+
+    assert res.status_code == 200
+
+
+def test_a_mood_playlist_track_thumbnail_is_proxied_too(client, monkeypatch):
+    """A mood/mix playlist's tracks report their thumbnails on
+    i.ytimg.com — YouTube's ordinary video-thumbnail host, not YouTube
+    Music's cover CDN — measured live on every one of a "Fall Hits"
+    playlist's 200 tracks. Missing this host rejected every one of them
+    before ever fetching, which is what every row on that page looked
+    like until this was added."""
+    monkeypatch.setattr(main, "fetch_image_bytes", lambda url: (b"\xff\xd8\xff", "image/jpeg"))
+
+    res = client.get(
+        "/image-proxy",
+        params={"u": "https://i.ytimg.com/vi/1lrFsXkT_rM/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQ"},
     )
 
     assert res.status_code == 200
@@ -48,7 +65,7 @@ def test_a_non_allowlisted_host_is_rejected_without_being_fetched(client, monkey
 
     monkeypatch.setattr(main, "fetch_image_bytes", fail_if_called)
 
-    res = client.get("/avatar-proxy", params={"u": "https://evil.example/tracker.png"})
+    res = client.get("/image-proxy", params={"u": "https://evil.example/tracker.png"})
 
     assert res.status_code == 400
 
@@ -58,7 +75,7 @@ def test_a_lookalike_host_is_rejected(client, monkeypatch):
     something like evil.example/yt3.ggpht.com or notyt3.ggpht.com through."""
     monkeypatch.setattr(main, "fetch_image_bytes", lambda url: (b"x", "image/jpeg"))
 
-    res = client.get("/avatar-proxy", params={"u": "https://notyt3.ggpht.com/abc"})
+    res = client.get("/image-proxy", params={"u": "https://notyt3.ggpht.com/abc"})
 
     assert res.status_code == 400
 
@@ -70,13 +87,11 @@ def test_a_failed_upstream_fetch_serves_a_blank_pixel(client, monkeypatch):
     Every avatar in the app renders through .search-result-thumb, which
     already draws the grey circle used for a channel with no avatar at all,
     so a transparent pixel lands in exactly that placeholder — no markup and
-    no onerror handler anywhere. The onboarding wizard needs it: its avatar
-    URLs ship committed in scripts/channel_profiles.py and go stale whenever
-    a channel changes its picture.
+    no onerror handler anywhere.
     """
     monkeypatch.setattr(main, "fetch_image_bytes", lambda url: None)
 
-    res = client.get("/avatar-proxy", params={"u": "https://yt3.ggpht.com/abc"})
+    res = client.get("/image-proxy", params={"u": "https://yt3.ggpht.com/abc"})
 
     assert res.status_code == 200
     assert res.headers["content-type"] == "image/png"
@@ -84,21 +99,21 @@ def test_a_failed_upstream_fetch_serves_a_blank_pixel(client, monkeypatch):
 
 
 def test_the_blank_pixel_is_not_cached(client, monkeypatch):
-    """A real avatar is cached for a day; this stand-in must not be, or one
+    """A real image is cached for a day; this stand-in must not be, or one
     transient upstream hiccup freezes a blank circle in the browser until
     tomorrow. Nothing is stored server-side either, so the next render
     retries."""
     monkeypatch.setattr(main, "fetch_image_bytes", lambda url: None)
 
-    res = client.get("/avatar-proxy", params={"u": "https://yt3.ggpht.com/abc"})
+    res = client.get("/image-proxy", params={"u": "https://yt3.ggpht.com/abc"})
 
     assert res.headers["cache-control"] == "no-store"
 
 
-def test_avatar_proxy_requires_login():
+def test_image_proxy_requires_login():
     from fastapi.testclient import TestClient
 
     with TestClient(main.app) as anonymous:
-        res = anonymous.get("/avatar-proxy", params={"u": "https://yt3.ggpht.com/abc"}, follow_redirects=False)
+        res = anonymous.get("/image-proxy", params={"u": "https://yt3.ggpht.com/abc"}, follow_redirects=False)
 
     assert res.status_code == 303

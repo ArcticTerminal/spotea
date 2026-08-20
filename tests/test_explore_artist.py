@@ -14,12 +14,11 @@ out.
 
 import pytest
 
-from app.models import Feed
+from app.models import Artist
 from app.services import remote_detail
 from app.timeutil import utcnow
-from app.youtube import search as yt_search
+from app.youtube.models import VideoSearchResult
 from app.youtube.music import ArtistProfile, ArtistRelease, ReleaseDetail
-from app.youtube.search import VideoSearchResult
 
 USER_ID = 1
 BROWSE_ID = "UCNaGLJRPE3ohleIDM7RFtlQ"
@@ -63,7 +62,6 @@ def _profile(**overrides):
         "albums": [_release()],
         "singles": [_release("Gut Genug", "2026", "Single", "MPREb_5Y3mCZ5XtG3")],
         "related": [],
-        "videos": [],
     }
     fields.update(overrides)
     return ArtistProfile(**fields)
@@ -75,34 +73,6 @@ def fake_artist(monkeypatch):
         monkeypatch.setattr(remote_detail, "fetch_artist", lambda browse_id: profile)
 
     return install
-
-
-@pytest.fixture
-def fake_channel_fallback(monkeypatch):
-    """Stands in for remote_channel_context and records what it was handed,
-    so the tests below can tell "fell back" apart from "404" and check that
-    the avatar hint survived the trip."""
-    calls: list[dict] = []
-
-    def fallback(db, user_id, channel_id, avatar_url=None):
-        calls.append({"channel_id": channel_id, "avatar_url": avatar_url})
-        return {
-            "kind": "yt-channel",
-            "remote": True,
-            "feed": None,
-            "title": "A Plain Channel",
-            "content": [],
-            "empty_message": "Nothing playable here.",
-            "back_label": "Explore",
-            "page": 1,
-            "total_pages": 1,
-            "start_index": 1,
-            "base_url": "#",
-            "video_count": 0,
-        }
-
-    monkeypatch.setattr(remote_detail, "remote_channel_context", fallback)
-    return calls
 
 
 def test_the_panel_lists_the_artists_tracks(client, fake_artist):
@@ -139,7 +109,7 @@ def test_an_uncapped_track_list_just_counts(client, fake_artist):
 def test_follow_targets_the_topic_channel(client, fake_artist):
     """What "follow an artist" means in a music app: the channel that
     carries their releases and nothing else, so a new single reaches Home
-    while their vlogs don't. Their official channel is the wrong feed for
+    while their vlogs don't. Their official channel is the wrong artist for
     this even though it's the right page to link to."""
     fake_artist(_profile())
 
@@ -147,17 +117,6 @@ def test_follow_targets_the_topic_channel(client, fake_artist):
 
     assert f"https://www.youtube.com/channel/{TOPIC_ID}" in res.text
     assert f"https://www.youtube.com/channel/{OFFICIAL_ID}" not in res.text
-
-
-def test_the_follow_says_which_artist_it_is(client, fake_artist):
-    """That's what marks the feed as an artist's — the library card reads it
-    to open this page instead of a track list, and the server reads it to
-    skip the history scan."""
-    fake_artist(_profile())
-
-    res = client.get(f"/partials/detail/yt-artist/{BROWSE_ID}")
-
-    assert f'data-artist-browse-id="{BROWSE_ID}"' in res.text
 
 
 def test_an_artist_with_no_topic_channel_falls_back(client, fake_artist):
@@ -183,62 +142,40 @@ def test_an_already_followed_artist_points_at_the_library_copy(client, db_sessio
     """Followed-ness is checked against the same channel the button follows
     — anything else would leave it saying "Follow" forever."""
     fake_artist(_profile())
-    feed = Feed(
+    artist = Artist(
         user_id=USER_ID,
-        rss_url=f"https://www.youtube.com/feeds/videos.xml?channel_id={TOPIC_ID}",
-        channel_title="Sezen Aksu",
+        channel_id=TOPIC_ID,
+        name="Sezen Aksu",
         followed=True,
     )
-    db_session.add(feed)
+    db_session.add(artist)
     db_session.commit()
-    db_session.refresh(feed)
+    db_session.refresh(artist)
 
     res = client.get(f"/partials/detail/yt-artist/{BROWSE_ID}")
 
-    assert "In your library" in res.text
-    assert "Follow" not in res.text
+    assert "Following" in res.text
+    assert "unfollow-artist-btn" in res.text
 
 
-def test_an_id_that_is_not_an_artist_opens_as_a_channel(
-    client, fake_artist, fake_channel_fallback
-):
-    """Every channel result routes through here, and most channels aren't
-    artists — a podcast that opened as a 404 would be a broken app."""
+def test_an_id_that_is_not_an_artist_is_a_404(client, fake_artist):
+    """There is no channel listing to fall back to any more. Every id that
+    reaches this route came out of an artist search, a chart entry or an
+    artist's own page, so one YouTube Music can't answer for is genuinely
+    nothing this app can show."""
     fake_artist(None)
 
-    res = client.get(f"/partials/detail/yt-artist/{BROWSE_ID}")
-
-    assert res.status_code == 200
-    assert "A Plain Channel" in res.text
+    assert client.get(f"/partials/detail/yt-artist/{BROWSE_ID}").status_code == 404
 
 
-def test_an_artist_with_nothing_playable_opens_as_a_channel_too(
-    client, fake_artist, fake_channel_fallback
-):
-    """YouTube Music knowing the name is not the same as it having tracks.
-    The channel's own uploads are still a real answer, so this falls back
-    rather than 404ing on a page it could have shown."""
+def test_an_artist_with_nothing_playable_is_a_404_too(client, fake_artist):
+    """YouTube Music knowing the name is not the same as it having tracks —
+    a VEVO container is exactly that, and music._redirected_artist is what
+    walks off it to the page that does. If that already ran and there is
+    still nothing, there is nothing to show."""
     fake_artist(_profile(tracks=[]))
 
-    res = client.get(f"/partials/detail/yt-artist/{BROWSE_ID}")
-
-    assert res.status_code == 200
-    assert "A Plain Channel" in res.text
-
-
-def test_the_cards_avatar_hint_survives_the_fallback(
-    client, fake_artist, fake_channel_fallback
-):
-    """An artist page brings its own portrait, but the channel listing has
-    none to fetch cheaply — so the hint the card sent has to reach it (see
-    remote_channel_context)."""
-    fake_artist(None)
-
-    client.get(f"/partials/detail/yt-artist/{BROWSE_ID}?avatar=/avatars/{BROWSE_ID}.jpg")
-
-    assert fake_channel_fallback == [
-        {"channel_id": BROWSE_ID, "avatar_url": f"/avatars/{BROWSE_ID}.jpg"}
-    ]
+    assert client.get(f"/partials/detail/yt-artist/{BROWSE_ID}").status_code == 404
 
 
 @pytest.mark.parametrize("browse_id", ["not-an-id", "PLcQNVKi2yvHREvYwLPBMWEAyuq4AERnrm", "UC"])
@@ -249,46 +186,6 @@ def test_a_non_channel_id_is_rejected_without_being_fetched(client, monkeypatch,
     monkeypatch.setattr(remote_detail, "fetch_artist", fail_if_called)
 
     assert client.get(f"/partials/detail/yt-artist/{browse_id}").status_code == 404
-
-
-def _channel_entry(title, channel_id="UCX6OQ3DkcsbYNE6H8uQQuVA"):
-    return {
-        "channel_id": channel_id,
-        "title": title,
-        "channel_follower_count": 100,
-        "channel_url": f"https://www.youtube.com/channel/{channel_id}",
-        "thumbnails": [],
-    }
-
-
-def test_channel_search_drops_the_topic_channels(monkeypatch):
-    """Measured live: "sezen aksu" returns the real channel (3.19M) and then
-    three Topic channels for the same artist with 587, 12 and 1 subscribers.
-    Offering those as things to follow is offering the wrong answer three
-    times."""
-    monkeypatch.setattr(
-        yt_search,
-        "_search_entries",
-        lambda url: [
-            _channel_entry("Sezen Aksu", "UC6OI7Crv96jgra5pwJNDFRQ"),
-            _channel_entry("Sezen Aksu - Topic", "UCNaGLJRPE3ohleIDM7RFtlQ"),
-        ],
-    )
-    monkeypatch.setattr(yt_search, "cached_avatar_path", lambda channel_id: None)
-
-    results = yt_search.search_channels("sezen aksu")
-
-    assert [result.channel_id for result in results] == ["UC6OI7Crv96jgra5pwJNDFRQ"]
-
-
-def test_a_channel_that_merely_mentions_topic_is_kept(monkeypatch):
-    """The rule is the auto-generated suffix, not the word."""
-    monkeypatch.setattr(
-        yt_search, "_search_entries", lambda url: [_channel_entry("On Topic with Dan")]
-    )
-    monkeypatch.setattr(yt_search, "cached_avatar_path", lambda channel_id: None)
-
-    assert len(yt_search.search_channels("on topic")) == 1
 
 
 # --------------------------------------------------------------------------
@@ -372,7 +269,6 @@ def test_the_full_song_list_keeps_the_artists_follow_button(client, fake_artist)
     res = client.get(f"/partials/detail/yt-artist-songs/{BROWSE_ID}")
 
     assert f"https://www.youtube.com/channel/{TOPIC_ID}" in res.text
-    assert f'data-artist-browse-id="{BROWSE_ID}"' in res.text
     assert "detail-play-all" in res.text
 
 
@@ -413,11 +309,11 @@ def test_a_redirected_artist_is_followed_and_reopened_by_the_page_that_has_the_m
     client, fake_artist
 ):
     """A VEVO channel opens the artist page through a redirect (see
-    music._redirected_artist), and the id the hero hands back has to be the
-    page it landed on. Sending the VEVO id back would record the feed
-    against the songless page, so the library card would reopen that."""
+    music._redirected_artist), and everything the panel offers has to belong
+    to the page it landed on — not the songless one that was asked for."""
     fake_artist(_profile(browse_id="UCtxdfwb9wfkoGocVUAJ-Bmg"))
 
     res = client.get("/partials/detail/yt-artist/UClRx3MMyYUyqOxyEqA5F2nQ")
 
-    assert 'data-artist-browse-id="UCtxdfwb9wfkoGocVUAJ-Bmg"' in res.text
+    assert f"https://www.youtube.com/channel/{TOPIC_ID}" in res.text
+    assert "UClRx3MMyYUyqOxyEqA5F2nQ" not in res.text

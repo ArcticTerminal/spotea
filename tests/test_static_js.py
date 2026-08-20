@@ -138,22 +138,6 @@ def test_service_worker_api_prefixes_have_no_trailing_slash() -> None:
     )
 
 
-def test_setup_profiles_does_not_eagerly_fetch_the_profile_list() -> None:
-    """GET /profiles used to run on every single page load to fill two
-    overlays that start hidden and, on a typical visit, are never opened —
-    see home/profiles.js's ensureProfilesLoaded. This pins the regression: a
-    call to loadProfiles() directly inside setupProfiles (rather than behind
-    ensureProfilesLoaded, deferred until an overlay actually opens) would
-    silently restore the eager fetch."""
-    source = _function_body(
-        (JS_DIR / "home" / "profiles.js").read_text(), "setupProfiles"
-    )
-
-    assert "loadProfiles()" not in source, (
-        "setupProfiles calls loadProfiles() directly — the boot-time fetch is back"
-    )
-
-
 def test_report_playback_only_sends_the_unexpected_events() -> None:
     """4 beacons were measured per track played under the old blanket policy
     — "now-playing", "play-requested" and a successful "playing" for
@@ -183,19 +167,6 @@ def test_report_playback_only_sends_the_unexpected_events() -> None:
         "REPORTED_EVENTS is defined but reportPlayback no longer checks "
         "against it — every event is being sent again"
     )
-
-
-def test_explore_recommendations_split_by_duration_at_ten_minutes() -> None:
-    """Measured live: Music profile 11/11 recommended videos ran over 10
-    minutes; Podcast 10/12, median 2:18:19. Splitting onto a "Long form"
-    shelf instead of filtering it out matters specifically for the Podcast
-    profile — its own interests (linux, devops) make hour-long content the
-    *correct* result, not noise."""
-    source = (JS_DIR / "home" / "explore.js").read_text()
-
-    assert "const LONG_FORM_THRESHOLD_SECONDS = 10 * 60;" in source
-    assert 'shelfHtml("Contents", contents, recVideoCardHtml)' in source
-    assert 'shelfHtml("Long form", longForm, recVideoCardHtml)' in source
 
 
 def test_wire_scrollers_does_not_leak_a_listener_or_observer_per_row() -> None:
@@ -289,39 +260,6 @@ def test_initial_tab_is_never_restored_from_local_storage() -> None:
     assert "localStorage." not in tabs, "home/tabs.js is back to persisting the active tab"
 
 
-def test_profile_changes_reload_onto_home() -> None:
-    """Switching, creating, or deleting the current profile all reload, and
-    all of them have to land on Home: every panel is profile-scoped, and a
-    #channel/42 hash names a feed the incoming profile doesn't have."""
-    source = (JS_DIR / "home" / "profiles.js").read_text()
-    helper = _function_body(source.replace("function reloadAtHome", "export function reloadAtHome"), "reloadAtHome")
-
-    assert 'replaceState(null, "", "/#home")' in helper, (
-        "reloadAtHome no longer rewrites the URL before reloading — assigning "
-        "a URL that differs only in its fragment reloads nothing"
-    )
-    assert source.count("window.location.reload()") == 1, (
-        "a profile change reloads without going through reloadAtHome, so it "
-        "keeps whatever tab or detail hash the outgoing profile had"
-    )
-
-
-def test_onboarding_wizard_has_no_way_out_but_finishing() -> None:
-    """It's a required step: a profile that dismisses it is left with the
-    empty library and empty "For you" shelves it exists to prevent, and since
-    needs_onboarding goes false the moment one channel exists, one add was
-    enough to never be offered it again."""
-    index = Path("app/templates/index.html").read_text()
-    onboarding = (JS_DIR / "home" / "onboarding.js").read_text()
-
-    assert 'id="onboarding-close"' not in index, "the wizard has a close button again"
-    assert "{ dismissible: false }" in onboarding, (
-        "the wizard's overlay is dismissible again — backdrop clicks and "
-        "Escape close it"
-    )
-    assert "const REQUIRED_CHANNELS" in onboarding, "the channel gate on Finish is gone"
-
-
 def test_opening_explore_never_shows_a_loading_placeholder() -> None:
     """The shelves are fetched in the background at boot and re-checked
     quietly on every later visit. Entering the tab used to swap a spinner in
@@ -342,66 +280,6 @@ def test_opening_explore_never_shows_a_loading_placeholder() -> None:
         "the unchanged-batch check is gone — every re-check re-renders every "
         "shelf, and every <img> in it, identically"
     )
-
-
-def test_onboarding_add_reports_before_it_waits() -> None:
-    """"Add" says "Added" on the press, not after the round trip.
-
-    Adding a channel is an RSS sync plus a yt-dlp history backfill. Held
-    behind that, picking six channels was six waits stacked on each other,
-    and pressing Finish early meant watching the app redraw itself. The click
-    handler is therefore not async: it labels the row, counts it, and queues
-    the work.
-    """
-    source = (JS_DIR / "home" / "onboarding.js").read_text()
-
-    assert 'container.addEventListener("click", (event) => {' in source, (
-        "the channels step's click handler is async again — the label is back "
-        "to waiting on the request"
-    )
-    assert 'btn.textContent = "Added";' in source, "the optimistic label is gone"
-    assert "enqueue(" in source, "the add queue is gone"
-
-
-def test_onboarding_never_waits_for_a_history_scan() -> None:
-    """POST /feeds resolves the channel and applies its RSS feed before it
-    answers, so the channel's recent uploads are in the library at that
-    point. The one-time full-history scan behind it runs server-side and is
-    minutes long on a big channel (6,504 videos for one in the author's own
-    library) — the wizard used to hold a loading screen for it, for content
-    nothing on the first screen needs. Library's own card carries that wait
-    now."""
-    onboarding = (JS_DIR / "home" / "onboarding.js").read_text()
-    library = (JS_DIR / "home" / "library.js").read_text()
-    index = Path("app/templates/index.html").read_text()
-
-    assert "waitForHistory: false" in onboarding, (
-        "the wizard is waiting for channel history again"
-    )
-    assert "onboarding-step-preparing" not in index, (
-        "the wizard's wait-for-backfill screen is back"
-    )
-    assert "/feeds/backfilling" in library, (
-        "Library no longer checks which channels are still being fetched, so "
-        "its 'Fetching uploads…' cards can never turn back into counts"
-    )
-
-
-def test_onboarding_adds_run_one_at_a_time() -> None:
-    """Each add resolves a channel against a service that rate-limits an
-    unauthenticated residential IP, so the queue drains one job at a time —
-    the same thing the server's own bulk importer does. Five in flight at
-    once is the burst this exists to avoid."""
-    source = (JS_DIR / "home" / "onboarding.js").read_text()
-
-    assert source.count("await followChannel(") == 1, (
-        "more than one followChannel await in the wizard — the queue is no "
-        "longer the single path adds go through"
-    )
-    assert 'jobs.find((candidate) => candidate.status === "queued")' in source, (
-        "the queue no longer walks jobs one at a time"
-    )
-
 
 def test_an_artist_name_is_only_a_link_when_there_is_an_artist_to_open() -> None:
     """A song result carries the artist's channel id most of the time but not
@@ -451,20 +329,6 @@ def test_a_channel_result_opens_the_artist_route() -> None:
     assert source.count('openDetail("yt-artist", row.dataset.channelId') == 1
 
 
-def test_the_avatar_hint_reaches_both_channel_routes() -> None:
-    """yt-artist is what a channel card opens now, and its fallback is the
-    channel listing — which has no cheap avatar of its own and renders a
-    blank hero without the hint the card already had."""
-    source = (JS_DIR / "home" / "detail.js").read_text()
-
-    assert "CHANNEL_AVATAR_KINDS.includes(kind) && avatar" in source, (
-        "detailUrl no longer forwards the avatar hint"
-    )
-    kinds = source[source.index("const CHANNEL_AVATAR_KINDS") :].split("\n")[0]
-    for kind in ("yt-channel", "yt-artist", "yt-artist-songs"):
-        assert kind in kinds, f"{kind} no longer takes the avatar hint — its fallback hero goes blank"
-
-
 def test_the_scroller_module_has_no_import_cycle() -> None:
     """Drag-to-scroll moved out of home/library.js so home/detail.js could
     wire the artist profile's shelves after a panel swap. Importing it back
@@ -502,49 +366,61 @@ def test_a_release_card_opens_by_browse_id() -> None:
     assert 'openDetail("yt-release", releaseCard.dataset.releaseId)' in source
 
 
-def test_a_new_follow_lands_on_the_artists_profile_when_it_is_one() -> None:
-    """Following used to always land on the plain channel listing, because
-    that was the only page the client knew it had made. The server now
-    decides whether a follow is an artist's (see feed_add._as_artist_follow)
-    and says so in the response, so the landing page can match the one the
-    library card opens for the very same feed."""
+def test_a_new_follow_lands_on_the_artists_profile() -> None:
+    """The landing page has to match the one the library card opens for the
+    very same artist — following someone and clicking them a minute later
+    must not show two different pages."""
     source = (JS_DIR / "home" / "detail.js").read_text()
 
-    assert 'openDetail("yt-artist", event.detail.artistBrowseId)' in source
-    assert 'openDetail("channel", event.detail.feedId)' in source
+    assert 'openDetail("yt-artist", event.detail.browseId)' in source
 
 
 def test_the_follow_event_carries_what_the_server_decided() -> None:
     """Off the response, not off the request: the caller sends a channel URL
-    and finds out afterwards that it was an artist's."""
+    and the server says whose page that turned out to be."""
     source = (JS_DIR / "home" / "remote.js").read_text()
 
-    assert "artistBrowseId: data.feed.artist_browse_id || null" in source
-    assert "detail: { feedId, title, artistBrowseId }" in source
+    assert "browseId: data.artist.browse_id || null" in source
 
 
-def test_finish_closes_the_wizard_without_waiting_for_the_queue() -> None:
-    """It used to await the whole Add queue, which drains one channel at a
-    time — measured at ~3.25s each, so six channels was twenty seconds of
-    "Finishing…". The work now happens behind the answer (see
-    services/backfill.run_initial_sync) and Library's card reports it."""
-    source = (JS_DIR / "home" / "onboarding.js").read_text()
+def test_the_first_sync_counts_as_an_artist_still_filling_in() -> None:
+    """"syncing" is the only phase there is: the server puts an artist in it
+    before fetching anything, and Library's card polls on exactly that."""
+    initial_sync = Path("app/services/initial_sync.py").read_text()
+    library = (JS_DIR / "home" / "library.js").read_text()
 
-    assert "await channelStep?.settled()" not in source, (
-        "Finish is waiting for the Add queue again"
-    )
-    assert "channelStep?.settled().then(" in source, (
-        "nothing refreshes the app once the queue finally drains"
-    )
+    assert 'ACTIVE_PHASES = frozenset({"syncing"})' in initial_sync
+    assert "/artists/syncing" in library
 
 
-def test_the_first_sync_counts_as_a_channel_still_filling_in() -> None:
-    """"syncing" is a phase like the two scan phases, on both sides: the
-    server puts a feed in it before fetching anything, and a client waiting
-    on a follow has to recognise it as activity or it gives up on the poll
-    (see NEVER_STARTED_GRACE_MS)."""
-    backfill = Path("app/services/backfill.py").read_text()
-    remote = (JS_DIR / "home" / "remote.js").read_text()
+def test_every_module_import_resolves() -> None:
+    """The regression this exists for: a rename left home/remote.js exporting
+    neither playRemoteVideo nor playRemoteList while home/explore.js and
+    home/detail.js still imported both. One unresolved import fails the whole
+    module graph, so *nothing* on the page was wired — no tabs, no menu, no
+    play button — and every server-side test still passed.
 
-    assert 'ACTIVE_PHASES = frozenset({"syncing", "scanning", "saving"})' in backfill
-    assert 'phase === "syncing"' in remote
+    There is no JS runner here to catch that by executing it, so this parses
+    the import/export graph instead: every named import has to be exported by
+    the file it names, and that file has to exist.
+    """
+    modules = {path.resolve(): path.read_text() for path in JS_DIR.rglob("*.js")}
+
+    exported = {}
+    for path, source in modules.items():
+        names = set(re.findall(r"^export (?:async )?function (\w+)", source, re.M))
+        names |= set(re.findall(r"^export (?:const|let|class) (\w+)", source, re.M))
+        exported[path] = names
+
+    broken = []
+    for path, source in modules.items():
+        for match in re.finditer(r'import\s*\{([^}]+)\}\s*from\s*"([^"]+)"', source):
+            target = (path.parent / match.group(2)).resolve()
+            if target not in modules:
+                broken.append(f"{path.name} imports a file that doesn't exist: {match.group(2)}")
+                continue
+            for name in (n.strip().split(" as ")[0] for n in match.group(1).split(",") if n.strip()):
+                if name not in exported[target]:
+                    broken.append(f"{path.name} imports {name}, which {target.name} does not export")
+
+    assert not broken, "\n".join(broken)

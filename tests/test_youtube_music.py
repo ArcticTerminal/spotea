@@ -9,11 +9,19 @@ in for artists, and counts that arrive as "1.8M" rather than a number.
 """
 
 import logging
+from urllib.parse import quote
 
 import pytest
 
 from app.youtube import music
 from app.youtube.urls import cover_url_at_size, playlist_id_from_browse_id
+
+
+def _proxied(remote_url: str) -> str:
+    """The same wrapping _proxied_cover_url applies — see that function's
+    docstring for why a song/playlist/release cover is never hotlinked
+    directly."""
+    return f"/image-proxy?u={quote(remote_url, safe='')}"
 
 SONG = {
     "title": "Biliyorsun",
@@ -105,7 +113,7 @@ def test_a_song_becomes_a_video_search_result(client):
 
 
 def test_a_songs_artists_become_its_channel(client):
-    """The Topic channel id is what a preview row hangs its placeholder feed
+    """The Topic channel id is what a preview row hangs its placeholder artist
     off (routers/explore.py), so it has to survive the mapping — and the
     artist names are what the card prints where a video would print its
     uploader."""
@@ -139,7 +147,7 @@ def test_several_artists_are_joined_into_one_line(client):
 def test_a_compilation_with_no_real_artist_channel_keeps_none(client):
     """"Various Artists" comes back with a name but no id. A None channel_id
     is the honest answer — the batch endpoint refuses those rows rather than
-    inventing a feed for them."""
+    inventing a artist for them."""
     client(search=[{**SONG, "artists": [{"name": "Various Artists", "id": None}]}])
 
     (result,) = music.search_songs("compilation")
@@ -155,7 +163,7 @@ def test_cover_art_is_requested_at_a_size_worth_rendering(client):
 
     (result,) = music.search_songs("sezen aksu")
 
-    assert result.thumbnail_url == "https://yt3.ggpht.com/abc=w544-h544-l90-rj"
+    assert result.thumbnail_url == _proxied("https://yt3.ggpht.com/abc=w544-h544-l90-rj")
 
 
 def test_an_entry_with_no_video_id_is_dropped(client):
@@ -300,7 +308,7 @@ def test_both_chart_shelves_come_from_one_request(client):
     assert playlist.playlist_id == "OLAK5uy_mFBgHnPi7PIkt7vlG84rCduzVjFtuHnpM"
     # Chart art names its size the other way round ("=s192", not
     # "=w226-h226"); cover_url_at_size handles both.
-    assert playlist.thumbnail_url == "https://yt3.ggpht.com/k=s544"
+    assert playlist.thumbnail_url == _proxied("https://yt3.ggpht.com/k=s544")
 
 
 def test_a_charting_artist_becomes_a_followable_channel(client):
@@ -365,7 +373,6 @@ def test_an_artist_page_resolves_the_official_channel(client):
     assert artist.channel_id == "UC6OI7Crv96jgra5pwJNDFRQ"
     assert artist.subscriber_count == 3_190_000
     assert [track.video_id for track in artist.tracks] == ["_efHZg9D9iE"]
-    assert music.resolve_artist_channel("UCNaGLJRPE3ohleIDM7RFtlQ") == "UC6OI7Crv96jgra5pwJNDFRQ"
 
 
 def test_the_videos_section_is_left_out(client):
@@ -496,9 +503,10 @@ def test_a_short_catalogue_is_not_reported_as_truncated(client):
     assert artist.track_count == 56
 
 
-def test_resolving_a_channel_does_not_pay_for_the_track_list(client):
-    """A follow click wants one field off the page header. The second
-    request the track list costs would buy nothing there."""
+def test_all_songs_false_does_not_pay_for_the_track_list(client):
+    """A follow click wants the ids off the page header (see
+    artist_follow._as_artist_follow). The second request the track list costs
+    would buy nothing there."""
     fake = client(
         get_artist={
             "name": "Sezen Aksu",
@@ -507,7 +515,9 @@ def test_resolving_a_channel_does_not_pay_for_the_track_list(client):
         }
     )
 
-    assert music.resolve_artist_channel("UCNaGLJRPE3ohleIDM7RFtlQ") == "UC6OI7Crv96jgra5pwJNDFRQ"
+    artist = music.fetch_artist("UCNaGLJRPE3ohleIDM7RFtlQ", all_songs=False)
+
+    assert artist.channel_id == "UC6OI7Crv96jgra5pwJNDFRQ"
     assert [call[0] for call in fake.calls] == ["get_artist"]
 
 
@@ -562,7 +572,7 @@ def test_an_artist_page_carries_its_releases(client):
 
     (album,) = artist.albums
     assert (album.browse_id, album.year, album.kind) == ("MPREb_HIQTwIoDtEM", "2025", "Album")
-    assert album.cover_url == "https://x/c=w544-h544-l90-rj"
+    assert album.cover_url == _proxied("https://x/c=w544-h544-l90-rj")
     (single,) = artist.singles
     # Singles report their own type; albums report none, so the shelf names it.
     assert single.kind == "Single"
@@ -601,7 +611,47 @@ def test_an_album_and_a_single_open_the_same_way(client):
     assert (release.title, release.year, release.kind) == ("Schlau aber blond", "2025", "Album")
     assert release.artist_names == "Shirin David"
     assert [track.video_id for track in release.tracks] == ["_efHZg9D9iE"]
-    assert release.cover_url == "https://x/c=w544-h544-l90-rj"
+    assert release.cover_url == _proxied("https://x/c=w544-h544-l90-rj")
+
+
+def test_a_tracks_missing_thumbnail_falls_back_to_the_album_cover(client):
+    """A track entry inside an album/single response carries no thumbnail
+    of its own — measured live on a real 14-track album, every one came
+    back thumbnails: None — since the whole release shares one cover. Every
+    row in an opened album rendered with no image at all before this."""
+    client(
+        get_album={
+            "title": "Schlau aber blond",
+            "year": "2025",
+            "type": "Album",
+            "artists": [{"name": "Shirin David"}],
+            "thumbnails": [{"url": "https://x/c=w226-h226-l90-rj"}],
+            "tracks": [{**SONG, "thumbnails": None}],
+        }
+    )
+
+    release = music.fetch_release("MPREb_HIQTwIoDtEM")
+
+    (track,) = release.tracks
+    assert track.thumbnail_url == release.cover_url == _proxied("https://x/c=w544-h544-l90-rj")
+
+
+def test_a_tracks_own_thumbnail_is_not_overwritten_by_the_album_cover(client):
+    client(
+        get_album={
+            "title": "Schlau aber blond",
+            "year": "2025",
+            "type": "Album",
+            "artists": [{"name": "Shirin David"}],
+            "thumbnails": [{"url": "https://x/c=w226-h226-l90-rj"}],
+            "tracks": [SONG],
+        }
+    )
+
+    release = music.fetch_release("MPREb_HIQTwIoDtEM")
+
+    (track,) = release.tracks
+    assert track.thumbnail_url == _proxied("https://yt3.ggpht.com/abc=w544-h544-l90-rj")
 
 
 @pytest.mark.parametrize("response", [None, {"title": "Gone", "tracks": []}, {"tracks": [SONG]}])
@@ -615,7 +665,6 @@ def test_an_unknown_artist_is_none_not_an_empty_profile(client):
     client(get_artist=None)
 
     assert music.fetch_artist("UCnope") is None
-    assert music.resolve_artist_channel("UCnope") is None
 
 
 @pytest.mark.parametrize(

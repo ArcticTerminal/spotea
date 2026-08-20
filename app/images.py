@@ -9,6 +9,7 @@ downloader just to cache an avatar.
 
 import os
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -92,12 +93,30 @@ def download_avatar(channel_id: str, avatar_url: str) -> str | None:
 
 def download_thumbnail(video_id: str, thumbnail_url: str) -> str | None:
     """Same deal as download_avatar, for a video's thumbnail — re-served from
-    our own origin instead of every Home/Library/Explore render hitting
-    i*.ytimg.com directly for every card on screen. Safe to call for videos
-    already known (e.g. every entry in a freshly-fetched RSS feed, not just
-    new ones) — _download_image's on-disk check makes repeat calls a no-op
-    file stat rather than a redundant fetch."""
+    our own origin instead of every Home/Library/Explore render hotlinking
+    YouTube Music's cover CDN (yt3.ggpht.com, lh3.googleusercontent.com)
+    directly for every card on screen. Safe to call for videos already known
+    (e.g. every entry in a freshly-fetched artist sync, not just new ones) —
+    _download_image's on-disk check makes repeat calls a no-op file stat
+    rather than a redundant fetch."""
     return _download_image(settings.thumbnails_dir, f"{video_id}.jpg", thumbnail_url, "/thumbnails")
+
+
+def needs_thumbnail_caching(thumbnail_url: str | None) -> bool:
+    """True for a thumbnail still pointing at a remote URL rather than our
+    own /thumbnails/{video_id}.jpg — the condition every caller of
+    artist_sync.cache_thumbnail queues a background download on.
+
+    Used to key off "ytimg.com in thumbnail_url", back when every thumbnail
+    came from yt-dlp/RSS reading i*.ytimg.com stills. YouTube Music's cover
+    art never uses that host (yt3.ggpht.com and lh3.googleusercontent.com
+    instead — see youtube/urls.py's absolute_thumbnail_url), so that check
+    stopped matching anything the day discovery moved to YouTube Music: every
+    thumbnail silently stayed an uncached, ORB-flaky hotlink forever. Keying
+    off "already local" instead of "old CDN" can't go stale the same way if
+    the CDN changes again.
+    """
+    return bool(thumbnail_url) and not thumbnail_url.startswith("/thumbnails/")
 
 
 def cached_avatar_path(channel_id: str) -> str | None:
@@ -107,3 +126,35 @@ def cached_avatar_path(channel_id: str) -> str | None:
     if (settings.avatars_dir / f"{channel_id}.jpg").is_file():
         return f"/avatars/{channel_id}.jpg"
     return None
+
+
+def proxied_image_url(remote_url: str) -> str:
+    """A remote image URL — an avatar, or a song/album/playlist cover —
+    wrapped so the browser fetches it through this app's own /image-proxy
+    (app/main.py) instead of hotlinking Google's CDN directly. See
+    cached_avatar_or_hotlink below, and youtube/music.py's
+    _proxied_cover_url, for why."""
+    return f"/image-proxy?u={urllib.parse.quote(remote_url, safe='')}"
+
+
+def cached_avatar_or_hotlink(channel_id: str, remote_url: str | None) -> str | None:
+    """A search result's avatar — reused from disk if this artist already
+    has one (already followed, or found in an earlier search), proxied
+    through this app's own /image-proxy otherwise. This used to download a
+    fresh copy for every result instead: measured live, 977 of 1060 avatar
+    files on disk (92%, 16.4 MB) were exactly that — orphans nothing ever
+    pointed at, because nothing anywhere deletes an avatar. Per the locked
+    decision, only an artist someone actually follows earns a local copy now;
+    search reuses what exists without creating more.
+
+    Used to hand back `remote_url` for the browser to hotlink directly, but
+    Chrome's Opaque Response Blocking rejected a meaningful share of those
+    even after the yt3.ggpht.com rewrite — the same problem a followed
+    artist's local-copy fetch dodges by fetching server-side instead of
+    trusting the browser to load Google's URL. /image-proxy is that same fix
+    without a permanent local copy, which an artist nobody's followed yet
+    doesn't earn.
+    """
+    if not remote_url:
+        return None
+    return cached_avatar_path(channel_id) or proxied_image_url(remote_url)

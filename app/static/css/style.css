@@ -438,21 +438,8 @@ select {
   color: var(--text-secondary);
 }
 
-.btn-profile {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  max-width: 140px;
-}
-
-.btn-profile span:last-child {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* Below this, "Spotea" + a named profile pill + the refresh icon + "Log
-   out" don't reliably fit on one line — the exact tipping point depends on
+/* Below this, "Spotea" + the refresh icon + "Log out" don't reliably fit
+   on one line — the exact tipping point depends on
    the profile's name length and the platform font's actual glyph widths,
    which easily land under the ~390px a phone-sized viewport gives us.
    Collapsing them into a single hamburger menu sidesteps that entirely
@@ -807,279 +794,6 @@ html[data-active-tab="detail"] .tab-panel[data-tab-panel="detail"] {
   min-width: 0;
 }
 
-/* --- Onboarding wizard --------------------------------------------------- */
-
-/* Full-screen takeover instead of a centered card — .modal-overlay's shared
-   centering padding would just be dead space around something that already
-   fills the screen, and a fixed card size fights a wizard meant to grow
-   (more steps, richer per-step content) rather than stay this small.
-   Both overrides need to out-specificity the shared .modal-overlay/.modal
-   rules below (same single-class specificity, later in the cascade) rather
-   than rely on source order — #onboarding-overlay's id does that for the
-   overlay, and the doubled-up .modal.modal-onboarding does it for the card. */
-#onboarding-overlay {
-  padding: 0;
-}
-
-.modal.modal-onboarding {
-  width: 100%;
-  height: 100%;
-  max-width: none;
-  max-height: none;
-  border-radius: 0;
-  box-shadow: none;
-  background: var(--bg-page);
-  display: flex;
-  flex-direction: column;
-  /* The step body below is the one scroll container, so its sticky-feeling
-     .modal-actions footer (last flex child, not itself scrolled) stays put
-     at the bottom of the screen instead of scrolling away with the content
-     above it. */
-  overflow: hidden;
-}
-
-/* How wide the wizard's centered column is, per step (home/onboarding.js
-   stamps the visible step onto the modal). The two picking steps are a
-   reading column at the modal's usual width; the channels step is a
-   catalogue of horizontally scrolling shelves, so it takes the same 1100px
-   the Explore tab it borrows those shelves from uses (.layout). It lives on
-   the modal rather than on the step because the full-bleed header and footer
-   bars align their contents to the same column and can't see which step is
-   showing. */
-.modal-onboarding {
-  --onboarding-column: 560px;
-}
-
-.modal-onboarding[data-step="onboarding-step-channels"] {
-  --onboarding-column: 1100px;
-}
-
-/* The header/footer bars stay full-bleed (border spanning edge to edge
-   reads as a page, not a leftover card), but their content lines up with
-   the centered step body below via matching horizontal padding — plain
-   auto-margins can't do that on an element that's meant to stay full width
-   itself. Below the column width + the base gutter, this collapses to the
-   flat 1.25rem gutter every other input/list in the app already uses; above
-   it, it grows to keep pace with the centered column. */
-.modal-onboarding .modal-header {
-  flex-shrink: 0;
-  margin-bottom: 0;
-  padding: 1rem max(1.25rem, calc((100% - var(--onboarding-column)) / 2 + 1.25rem));
-  padding-top: calc(1rem + env(safe-area-inset-top, 0px));
-  border-bottom: 1px solid var(--border-default);
-  box-sizing: border-box;
-}
-
-.onboarding-step {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-/* Any author-set display beats the UA stylesheet's [hidden] { display: none }
-   (author origin wins regardless of specificity), so the JS-toggled hidden
-   steps would otherwise render right alongside the visible one. */
-.onboarding-step[hidden] {
-  display: none;
-}
-
-/* Same [hidden]-vs-display trap as .onboarding-step above: .genre-grid sets
-   display: flex, and the chip step keeps the inactive kind's grid hidden. */
-.genre-grid[hidden] {
-  display: none;
-}
-
-/* First step's two big choices — deliberately card-sized, not chip-sized:
-   this is a fork in the flow, not a multi-select. */
-.kind-cards {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.75rem;
-  margin-top: 1rem;
-}
-
-.kind-card {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.3rem;
-  padding: 1.25rem 1rem;
-  background: var(--bg-base);
-  border: 1px solid var(--border-default);
-  border-radius: 12px;
-  color: var(--text-primary);
-  text-align: left;
-  cursor: pointer;
-}
-
-.kind-card:hover {
-  border-color: var(--accent);
-}
-
-.kind-card svg {
-  width: 26px;
-  height: 26px;
-  color: var(--accent);
-  margin-bottom: 0.35rem;
-}
-
-.kind-card-name {
-  font-size: 1rem;
-  font-weight: 700;
-}
-
-.kind-card-desc {
-  font-size: 0.85rem;
-  color: var(--text-muted);
-}
-
-/* Back sits at the opposite end of the footer from Skip/Next — it leaves
-   the flow rather than advancing it. */
-.onboarding-back {
-  margin-right: auto;
-}
-
-.onboarding-step-body {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  width: 100%;
-  max-width: var(--onboarding-column);
-  margin: 0 auto;
-  padding: 1.25rem;
-  box-sizing: border-box;
-}
-
-.modal-onboarding .modal-actions {
-  flex-shrink: 0;
-  padding: 1rem max(1.25rem, calc((100% - var(--onboarding-column)) / 2 + 1.25rem))
-    calc(1rem + env(safe-area-inset-bottom, 0px));
-  border-top: 1px solid var(--border-default);
-  box-sizing: border-box;
-  /* The channels step's footer carries a counter as well as two buttons,
-     which is more than a narrow phone fits on one line. */
-  flex-wrap: wrap;
-  row-gap: 0.5rem;
-}
-
-/* The channels step's gate counter: how many channels are followed against
-   how many Finish is waiting for. It reports state, it isn't one of the
-   actions, so it sits just ahead of them rather than among them — Back's own
-   margin-right: auto is what opens the gap between the two ends of the
-   footer. Two classes deep because `.modal p` further down sets margins of
-   its own that would otherwise put this on a line by itself. */
-.modal-onboarding .onboarding-progress {
-  margin: 0;
-  align-self: center;
-  font-size: 0.85rem;
-}
-
-.genre-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin: 0.75rem 0 1rem;
-}
-
-/* Toggleable, unlike .interest-chip (a label with its own remove control) —
-   same pill shape, but the whole chip is the click target and .is-selected
-   is the only state, no per-chip close button. */
-.genre-chip {
-  padding: 0.4rem 0.9rem;
-  background: var(--bg-base);
-  border: 1px solid var(--border-default);
-  border-radius: 999px;
-  color: var(--text-primary);
-  font-size: 0.85rem;
-  cursor: pointer;
-}
-
-.genre-chip:hover {
-  border-color: var(--accent);
-}
-
-/* Same accent border/tint treatment as a current profile row or the active
-   audio-quality option, so "selected" reads the same way everywhere. */
-.genre-chip.is-selected {
-  border-color: var(--accent);
-  background: var(--accent-tint);
-  color: var(--accent);
-}
-
-/* Searched channels above the shelves reuse .search-results /
-   .search-result-channel as-is (see Explore's own channel search).
-
-   What sits between them is this: a rule with its label set into it, the
-   plainest way to say "two separate offers" without either of them growing a
-   heading. Muted and small on purpose — it is a signpost between two regions
-   of channels, not a third thing to read. Scoped under .modal-onboarding to
-   beat `.modal p`'s own margins. */
-.modal-onboarding .onboarding-divider {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  margin: 1.5rem 0 1rem;
-  font-size: 0.72rem;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-
-.modal-onboarding .onboarding-divider::before,
-.modal-onboarding .onboarding-divider::after {
-  content: "";
-  flex: 1;
-  height: 1px;
-  background: var(--border-default);
-}
-
-/* The suggestion shelves are Explore's .shelf/.shelf-channel-card exactly (see
-   home/onboarding.js), only smaller: this is a catalogue to scan across, so
-   the win is how many of a genre's artists are on screen before the row has
-   to be scrolled — a 200px Home card fits five across the column, these fit
-   eight. The shelf still scrolls sideways past that rather than wrapping. */
-.onboarding-shelves .shelf {
-  margin-bottom: 1.25rem;
-}
-
-.onboarding-shelves .shelf-title {
-  font-size: 0.95rem;
-}
-
-.onboarding-shelves .shelf-row > .card {
-  flex-basis: 108px;
-}
-
-.onboarding-shelves .shelf-channel-card {
-  padding-top: 0.75rem;
-}
-
-.onboarding-shelves .shelf-channel-card .card-body {
-  padding: 0.6rem 0.5rem;
-}
-
-.onboarding-shelves .shelf-channel-card .card-title {
-  font-size: 0.8rem;
-}
-
-.onboarding-shelves .shelf-channel-avatar {
-  width: 56px;
-  height: 56px;
-}
-
-@media (min-width: 480px) {
-  .onboarding-shelves .shelf-row > .card {
-    flex-basis: 124px;
-  }
-
-  .onboarding-shelves .shelf-channel-avatar {
-    width: 64px;
-    height: 64px;
-  }
-}
-
 /* A description sentence next to a dropdown is tight on a phone screen —
    stack them instead of forcing a side-by-side row. */
 @media (max-width: 480px) {
@@ -1116,11 +830,10 @@ html[data-active-tab="detail"] .tab-panel[data-tab-panel="detail"] {
 }
 
 /* Shared shape for every text input in the app — search (library, channel
-   search), the profile name field — so they all read as the same control.
+   search), the interest field — so they all read as the same control.
    Each selector below only adds what's actually different about it (width
    behavior, margin, flex). */
 .channel-search input,
-.profiles-add-form input,
 .interests-add-form input,
 .library-search-input {
   padding: 0.5rem 0.6rem;
@@ -1135,18 +848,15 @@ html[data-active-tab="detail"] .tab-panel[data-tab-panel="detail"] {
 }
 
 .channel-search input::placeholder,
-.profiles-add-form input::placeholder,
 .interests-add-form input::placeholder,
 .library-search-input::placeholder,
-.login-card input::placeholder,
-.bulk-import-input::placeholder {
+.login-card input::placeholder {
   color: var(--text-muted);
 }
 
 /* Accent border instead of the browser's default focus ring, on every
    input above — no exceptions, so focus always reads the same way. */
 .channel-search input:focus,
-.profiles-add-form input:focus,
 .interests-add-form input:focus,
 .library-search-input:focus {
   outline: none;
@@ -1155,7 +865,61 @@ html[data-active-tab="detail"] .tab-panel[data-tab-panel="detail"] {
 
 .channel-search input {
   width: 100%;
+}
+
+/* Margin lives on the wrap, not the input: .search-clear-btn centers
+   itself at top:50% of .search-input-wrap's own box, and a margin on the
+   input would inflate that box past the input's actual height, pushing
+   the centered button up off-center. */
+.channel-search {
   margin-bottom: 0.75rem;
+}
+
+/* Wraps a search input to position its clear button inside the field
+   rather than after it — the same "×" affordance interest-chip-remove
+   uses, just anchored to a text input instead of a chip. */
+.search-input-wrap {
+  position: relative;
+}
+
+.search-input-wrap input {
+  padding-right: 2rem;
+}
+
+.search-clear-btn {
+  position: absolute;
+  right: 0.35rem;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.search-clear-btn:hover {
+  background: var(--bg-hover-strong);
+  color: var(--text-primary);
+}
+
+.search-clear-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* `display: inline-flex` above is an author rule, so it beats the UA
+   stylesheet's [hidden] { display: none } on its own — same trap
+   .btn-icon[hidden] documents above. Without this, the button stayed on
+   screen with an empty input. */
+.search-clear-btn[hidden] {
+  display: none;
 }
 
 .search-results {
@@ -1269,15 +1033,19 @@ html[data-active-tab="detail"] .tab-panel[data-tab-panel="detail"] {
   cursor: default;
 }
 
-/* --- Explore's "For you" recommendations ------------------------------- */
-
-/* Same header shape as a Home shelf. */
-.recommendations-header {
-  align-items: center;
+/* Charts/charting-artists/mood shelves read a level down from a page
+   heading even though there's no "For you" heading above them any more —
+   same muted, smaller treatment a Home/Library shelf title would get
+   nested under something bigger. */
+#recommendations-body {
+  /* Level with .shelf's own between-shelf rhythm (used below, between
+     Charts and Charting artists, etc.) rather than the tighter gap
+     .channel-search's margin-bottom leaves above it — this is the first
+     heading on the page now that "For you" is gone, and it read glued to
+     the search box at that gap. */
+  margin-top: 1.75rem;
 }
 
-/* Recommendation shelves nest inside the "For you" block, so their own
-   headings are a level down from it. */
 #recommendations-body .shelf-title {
   font-size: 0.95rem;
   color: var(--text-secondary);
@@ -1288,6 +1056,13 @@ html[data-active-tab="detail"] .tab-panel[data-tab-panel="detail"] {
    and shouldn't reserve the space for them. */
 .rec-card .card-title {
   min-height: 0;
+  /* One line, not the base .card-title's two — same reasoning as
+     .shelf-channel-card .card-title below: min-height:0 means nothing
+     reserves a second line's space up front, so a longer title (a mood
+     playlist's "End of the Road: Classic R&B Breakup") wrapped to two
+     lines and made its card taller than every shorter-titled one in the
+     same row. */
+  -webkit-line-clamp: 1;
 }
 
 /* Channel cards aren't 16:9 — an avatar reads as a channel, a letterboxed
@@ -1305,10 +1080,15 @@ html[data-active-tab="detail"] .tab-panel[data-tab-panel="detail"] {
   min-height: 0;
   /* A channel name is often one unbroken word (norahjonesVEVO), which normal
      word wrapping can't split — so it overflowed the card sideways instead of
-     wrapping, and .card-title's 2-line clamp never got the chance to put an
+     wrapping, and .card-title's clamp never got the chance to put an
      ellipsis on it. Breaking anywhere keeps the name inside the card and
      hands the clamp something to truncate. */
   overflow-wrap: anywhere;
+  /* One line, not the base .card-title's two — a long name (YoungBoy Never
+     Broke Again) wrapping to a second line made its card taller than every
+     other one in the same row, since min-height:0 above means nothing
+     reserves that second line's space up front. */
+  -webkit-line-clamp: 1;
 }
 
 .shelf-channel-card .card-body {
@@ -1445,119 +1225,6 @@ button.track-link {
 .storage-item-meta {
   font-size: 0.72rem;
   color: var(--text-muted);
-}
-
-.modal-profiles {
-  max-width: 400px;
-  /* Caps the whole modal, not just the list, so the "New profile name…"
-     input at the bottom stays reachable above the on-screen keyboard on
-     mobile instead of the modal overflowing past the visible viewport. */
-  max-height: 80vh;
-  display: flex;
-  flex-direction: column;
-}
-
-.profiles-list {
-  list-style: none;
-  margin: 0 0 1rem;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-  flex: 1 1 auto;
-  overflow-y: auto;
-  min-height: 0;
-}
-
-.profile-row {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.3rem 0.75rem;
-  background: var(--bg-base);
-  border: 1px solid transparent;
-  border-radius: 6px;
-}
-
-/* Same "selected" treatment as the audio-quality options in Settings —
-   an accent border + tint — instead of a text badge. */
-.profile-row.is-current {
-  border-color: var(--accent);
-  background: var(--accent-tint);
-}
-
-.profile-row-main {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  background: none;
-  border: none;
-  color: var(--text-primary);
-  padding: 0.5rem 0;
-  text-align: left;
-  cursor: pointer;
-}
-
-/* While its delete is in flight: the row is no longer something to act on,
-   and its actions have been swapped for a spinner (see home/profiles.js). */
-.profile-row.is-busy {
-  opacity: 0.55;
-  pointer-events: none;
-}
-
-.profile-row-main:disabled {
-  cursor: default;
-}
-
-/* Same layout as .profile-row-main, minus the button semantics/cursor —
-   the manage list's rows aren't clickable-to-switch, just icon + name. */
-.profile-row-info {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  padding: 0.5rem 0;
-  color: var(--text-primary);
-}
-
-.profile-row-icon {
-  display: inline-flex;
-  color: var(--white);
-  flex-shrink: 0;
-}
-
-.profile-row-icon svg {
-  width: 18px;
-  height: 18px;
-}
-
-.profile-row-name {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.profile-row-actions {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-  flex-shrink: 0;
-}
-
-.profiles-switch-hint {
-  margin: 1rem 0 0;
-}
-
-.profiles-add-form {
-  display: flex;
-  gap: 0.5rem;
-}
-
-.profiles-add-form input {
-  flex: 1;
 }
 
 .storage-export,
@@ -1992,6 +1659,14 @@ button.track-link {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* _mood_panel.html reuses .channel-hero-title's type but skips
+   .channel-hero's own layout entirely (no avatar, no Play/Shuffle to pin
+   against) — so it needs its own bottom margin, matching .channel-hero's,
+   to keep the same gap above the playlist shelf below it. */
+.mood-panel-title {
+  margin-bottom: 1.75rem;
 }
 
 /* Narrow phones: shrink the avatar and title so the row still has room for
@@ -2464,45 +2139,6 @@ button.track-link {
   padding: 4rem 0;
 }
 
-.backfill-overlay-content {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 1rem;
-  text-align: center;
-  padding: 0 1.5rem;
-}
-
-.backfill-overlay-text {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-}
-
-#backfill-overlay-title {
-  color: var(--text-primary);
-  font-size: 0.95rem;
-  line-height: 1.4;
-  margin: 0;
-  max-width: 320px;
-  /* Reserves room for 2 lines up front, for long channel names — without a
-     fixed height the whole spinner+text block would visibly jump up each
-     time it wraps, since it's vertically centered on the screen. */
-  min-height: 2.8em;
-}
-
-#backfill-overlay-detail {
-  /* A separate line (not just appended text) specifically so a number like
-     "page 7" or "412/1037" is never split mid-phrase by the title's own
-     line wrap — nowrap keeps it atomic since it's always short. */
-  color: var(--text-secondary);
-  font-size: 0.85rem;
-  line-height: 1.4;
-  margin: 0;
-  white-space: nowrap;
-  min-height: 1.4em;
-}
-
 /* Confirm dialog */
 
 .modal-overlay {
@@ -2567,13 +2203,6 @@ button.track-link {
   min-height: 0;
 }
 
-.modal-bulk-import {
-  max-width: 440px;
-  max-height: 80vh;
-  display: flex;
-  flex-direction: column;
-  overflow-y: auto;
-}
 
 .modal-header {
   display: flex;
@@ -2660,86 +2289,6 @@ button.track-link {
   cursor: default;
 }
 
-
-.bulk-import-input {
-  width: 100%;
-  resize: vertical;
-  padding: 0.6rem 0.75rem;
-  border-radius: 6px;
-  border: 1px solid var(--border-default);
-  background: var(--bg-input);
-  color: var(--text-primary);
-  font: inherit;
-  /* 16px — see .library-search-input's comment on iOS auto-zoom. */
-  font-size: 1rem;
-  margin-bottom: 1rem;
-}
-
-.bulk-import-input:focus {
-  outline: none;
-  border-color: var(--accent);
-}
-
-.bulk-import-progress {
-  flex: 1 1 auto;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.bulk-import-progress[hidden] {
-  display: none;
-}
-
-.bulk-import-results {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-  /* Without flex: 1 1 auto this list just grows with its content instead of
-     taking the modal's remaining space — with a long result list that pushes
-     the whole modal past its max-height instead of scrolling internally,
-     which is what spilled the list out past the modal's rounded border. */
-  flex: 1 1 auto;
-  overflow-y: auto;
-  min-height: 0;
-}
-
-.bulk-import-results li {
-  display: flex;
-  align-items: baseline;
-  gap: 0.5rem;
-  padding: 0.5rem 0.65rem;
-  background: var(--bg-base);
-  border-radius: 6px;
-  font-size: 0.82rem;
-}
-
-.bulk-import-status {
-  flex-shrink: 0;
-  font-weight: 700;
-}
-
-.bulk-import-status.is-added {
-  color: var(--accent);
-}
-
-.bulk-import-status.is-duplicate {
-  color: var(--text-muted);
-}
-
-.bulk-import-status.is-error {
-  color: var(--danger);
-}
-
-.bulk-import-line {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
 .modal button:focus-visible {
   outline: 2px solid var(--white);

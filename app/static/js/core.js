@@ -13,11 +13,11 @@
 // place everything after that first paint agrees with it.
 const VALID_TABS = ["home", "library", "explore", "settings"];
 const PLAYLIST_KINDS = ["favorites", "saved", "new-uploads", "recently-played"];
-// Detail routes that carry an id. The three "yt-" ones are the same panel
+// Detail routes that carry an id. The "yt-" ones are the same panel
 // showing something the library doesn't have yet — a recommended YouTube
-// playlist, a channel nobody follows, or a YouTube Music artist (see
-// app/services/remote_detail.py).
-const ID_DETAIL_KINDS = ["channel", "yt-channel", "yt-playlist", "yt-artist-songs", "yt-artist", "yt-release"];
+// playlist, a channel nobody follows, a YouTube Music artist, or one of
+// its moods (see app/services/remote_detail.py).
+const ID_DETAIL_KINDS = ["yt-playlist", "yt-artist-songs", "yt-artist", "yt-release", "yt-mood"];
 
 export function classifyHash(hash) {
   const [path, query] = hash.split("?");
@@ -283,4 +283,30 @@ export function setupOverlay(overlayId, closeBtnId, triggerIds = [], { dismissib
   }
 
   return { open, close };
+}
+
+/**
+ * Wires a small × button next to a search input: hidden while the input is
+ * empty, visible the moment there's anything to clear. Clearing fires a
+ * real "input" event rather than just blanking the value, so whatever the
+ * input already does on every keystroke (Explore's search, Library's
+ * filter) runs exactly as if the text had been deleted by hand — no
+ * separate "and also re-run the search" step for each caller to remember.
+ */
+export function setupSearchClear(inputId, clearBtnId) {
+  const input = document.getElementById(inputId);
+  const clearBtn = document.getElementById(clearBtnId);
+  if (!input || !clearBtn) return;
+
+  const sync = () => {
+    clearBtn.hidden = !input.value;
+  };
+  sync();
+  input.addEventListener("input", sync);
+
+  clearBtn.addEventListener("click", () => {
+    input.value = "";
+    input.dispatchEvent(new Event("input"));
+    input.focus();
+  });
 }

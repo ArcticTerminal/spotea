@@ -1,19 +1,19 @@
 """Explore: searching YouTube, and turning what comes back into something
 playable without following anything.
 
-Kept under the /feeds prefix rather than its own, because that's the URL
+Kept under the /artists prefix rather than its own, because that's the URL
 shape the client already speaks — this is a code-organisation split, not an
 API change. What makes these routes a group is that none of them involve
 following a channel: search returns things the user doesn't have yet, and
-both "listen" endpoints attach their rows to placeholder feeds.
+both "listen" endpoints attach their rows to placeholder artists.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.deps import get_current_profile, get_db, require_login
-from app.models import Content, Feed, User
+from app.deps import get_current_user, get_db, require_login
+from app.models import Artist, Content, User
 from app.schemas import (
     ChannelSearchResultOut,
     VideoAddCreate,
@@ -24,34 +24,28 @@ from app.schemas import (
 )
 from app.storage import purge_content
 from app.timeutil import utcnow
-from app.youtube.extract import resolve_video_channel
-from app.youtube.music import search_songs
-from app.youtube.search import search_channels, search_videos
-from app.youtube.urls import CHANNEL_ID_RE, channel_feed_url
+from app.youtube.music import search_artists, search_songs
+from app.youtube.urls import CHANNEL_ID_RE
 
-router = APIRouter(prefix="/feeds", tags=["explore"], dependencies=[Depends(require_login)])
+router = APIRouter(prefix="/explore", tags=["explore"], dependencies=[Depends(require_login)])
 
 
-@router.get("/search", response_model=list[ChannelSearchResultOut])
+@router.get("/artists", response_model=list[ChannelSearchResultOut])
 def search_feeds(q: str) -> list[ChannelSearchResultOut]:
-    """Channels to follow — the half of Explore's search box that finds
-    podcasts, and therefore the half that stays on youtube.com.
+    """Artists to follow.
 
-    Deliberately not moved to YouTube Music alongside the songs below.
-    Measured live: searching YouTube Music for "The Diary of a CEO" put a
-    reupload channel whose episodes have a few hundred views ahead of the
-    real 19M-subscriber one this finds first, and it models a podcast as a
-    playlist rather than a channel — which is the wrong identity for a feed
-    this app syncs over RSS. See app/youtube/music.py's docstring.
+    Asks the music catalogue for musicians rather than youtube.com for
+    channels, which is the whole reason the "<Artist> - Topic" containers
+    that search used to filter back out by name never turn up here.
     """
     query = q.strip()
     if not query:
         return []
 
-    return [ChannelSearchResultOut(**result.__dict__) for result in search_channels(query)]
+    return [ChannelSearchResultOut(**result.__dict__) for result in search_artists(query)]
 
 
-@router.get("/search-videos", response_model=list[VideoSearchResultOut])
+@router.get("/songs", response_model=list[VideoSearchResultOut])
 def search_video_feeds(q: str) -> list[VideoSearchResultOut]:
     """Songs, from YouTube Music rather than youtube.com.
 
@@ -62,59 +56,52 @@ def search_video_feeds(q: str) -> list[VideoSearchResultOut]:
     artist, album and duration already attached instead of leaving the row
     to say nothing but a title.
 
-    The fallback is not a general safety net — it fires only on a query
-    YouTube Music has *no* answer for, which in practice means a query that
-    wasn't about music. Somebody pasting the title of a talk or a one-off
-    upload into the same box should still find it, and an empty list is a
-    worse answer there than an imperfect one. It costs nothing on the
-    common path: the yt-dlp search only runs once the music search has
-    already come back empty.
+    There is no youtube.com fallback any more: this app only holds music,
+    so a query YouTube Music has no answer for is a query with no answer
+    here either, and an empty list says that honestly.
     """
     query = q.strip()
     if not query:
         return []
 
-    results = search_songs(query) or search_videos(query)
-    return [VideoSearchResultOut(**result.__dict__) for result in results]
+    return [VideoSearchResultOut(**result.__dict__) for result in search_songs(query)]
 
 
-def _get_or_create_placeholder_feed(
+def _get_or_create_placeholder(
     db: Session, channel_id: str, channel_title: str | None, user_id: int
-) -> Feed:
-    """Feed row for a channel the user hasn't actually followed — exists only
-    so a single video added via Explore has somewhere to attach (Content.feed_id
-    is required). followed=False keeps it out of Library and the background
-    refresh scheduler (see content_query.followed_feeds) until the user
-    follows the channel for real, which upgrades this same row in place (see
-    services/feed_add.py's create_feed_from_rss_url) instead of creating a duplicate — rss_url must
-    be built with the exact same channel_feed_url helper resolve_feed_url
-    uses, since that's the dedup key that lookup checks by equality.
+) -> Artist:
+    """An Artist row for someone the user hasn't actually followed — exists
+    only so a single track added via Explore has somewhere to attach
+    (Content.artist_id is required). followed=False keeps it out of Library
+    and the background refresh (see content_query.followed_artists) until the
+    user follows them for real, which upgrades this same row in place (see
+    services/artist_follow.py) instead of creating a duplicate. Keyed by the
+    bare channel id, which is what both paths agree on.
 
-    No avatar fetch: a placeholder feed's avatar is never displayed anywhere
+    No avatar fetch: a placeholder artist's avatar is never displayed anywhere
     (Library and the channel-hero page are the only avatar consumers, and
     both are followed-only surfaces)."""
-    rss_url = channel_feed_url(channel_id)
-    existing = db.query(Feed).filter(Feed.user_id == user_id, Feed.rss_url == rss_url).first()
+    existing = db.query(Artist).filter(Artist.user_id == user_id, Artist.channel_id == channel_id).first()
     if existing:
         return existing
 
-    feed = Feed(user_id=user_id, rss_url=rss_url, channel_title=channel_title, followed=False)
-    db.add(feed)
+    artist = Artist(user_id=user_id, channel_id=channel_id, name=channel_title, followed=False)
+    db.add(artist)
     db.commit()
-    db.refresh(feed)
-    return feed
+    db.refresh(artist)
+    return artist
 
 
-@router.post("/videos", response_model=VideoAddResult, status_code=status.HTTP_201_CREATED)
+@router.post("/tracks", response_model=VideoAddResult, status_code=status.HTTP_201_CREATED)
 def add_single_video(
     payload: VideoAddCreate,
-    profile: User = Depends(get_current_profile),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> VideoAddResult:
     """Explore's "listen" action — adds exactly one video without following
     its channel. Always created as a preview (Content.is_preview=True): it
     plays through the normal player like any other content, but stays out of
-    Library/New Uploads until the user favorites or saves it (see
+    Library/New releases until the user favorites or saves it (see
     routers/content.py's add_favorite/add_saved).
 
     If this video already has a Content row for this user — a previous
@@ -123,21 +110,17 @@ def add_single_video(
     id and let the player match/replay whatever was already downloaded."""
     existing_content = (
         db.query(Content)
-        .filter(Content.user_id == profile.id, Content.video_id == payload.video_id)
+        .filter(Content.user_id == user.id, Content.video_id == payload.video_id)
         .first()
     )
     if existing_content:
         return VideoAddResult(content_id=existing_content.id)
 
-    channel_id = resolve_video_channel(payload.video_id)
-    if not channel_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Could not resolve this video")
-
-    feed = _get_or_create_placeholder_feed(db, channel_id, payload.channel_title, profile.id)
+    artist = _get_or_create_placeholder(db, payload.channel_id, payload.channel_title, user.id)
 
     content = Content(
-        feed_id=feed.id,
-        user_id=profile.id,
+        artist_id=artist.id,
+        user_id=user.id,
         video_id=payload.video_id,
         title=payload.title,
         # Stored as-is — see _run_backfill's comment above; the player page
@@ -159,12 +142,12 @@ def add_single_video(
     return VideoAddResult(content_id=content.id)
 
 
-def _preview_content(feed_id: int, user_id: int, item) -> Content:
+def _preview_content(artist_id: int, user_id: int, item) -> Content:
     """A preview row from something Explore already has full metadata for.
     Same shape add_single_video builds — see its comments for why the
     thumbnail is stored as-is and why published_at is "now"."""
     return Content(
-        feed_id=feed_id,
+        artist_id=artist_id,
         user_id=user_id,
         video_id=item.video_id,
         title=item.title,
@@ -175,10 +158,10 @@ def _preview_content(feed_id: int, user_id: int, item) -> Content:
     )
 
 
-@router.post("/videos/batch", response_model=VideoBatchResult, status_code=status.HTTP_201_CREATED)
+@router.post("/tracks/batch", response_model=VideoBatchResult, status_code=status.HTTP_201_CREATED)
 def add_video_batch(
     payload: VideoBatchCreate,
-    profile: User = Depends(get_current_profile),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> VideoBatchResult:
     """Turns a whole remote playlist or channel listing into playable rows in
@@ -192,7 +175,7 @@ def add_video_batch(
     per-entry channel attribution is the real uploader, so there's nothing to
     resolve.
 
-    Rows that already exist for this profile (an earlier preview, or a real
+    Rows that already exist (an earlier preview, or a real
     upload from a followed channel) are reused rather than duplicated, the
     same way add_single_video treats them. Order in equals order out: the
     caller uses it directly as the play queue.
@@ -207,39 +190,38 @@ def add_video_batch(
     existing_content = {
         content.video_id: content
         for content in db.query(Content).filter(
-            Content.user_id == profile.id,
+            Content.user_id == user.id,
             Content.video_id.in_([item.video_id for item in items]),
         )
     }
-    wanted_rss_urls = {channel_feed_url(item.channel_id) for item in items}
-    feeds_by_rss_url = {
-        feed.rss_url: feed
-        for feed in db.query(Feed).filter(
-            Feed.user_id == profile.id, Feed.rss_url.in_(wanted_rss_urls)
+    wanted_channel_ids = {item.channel_id for item in items}
+    artists_by_channel = {
+        artist.channel_id: artist
+        for artist in db.query(Artist).filter(
+            Artist.user_id == user.id, Artist.channel_id.in_(wanted_channel_ids)
         )
     }
 
     for item in items:
-        rss_url = channel_feed_url(item.channel_id)
-        if rss_url not in feeds_by_rss_url:
-            # Same placeholder-feed contract as _get_or_create_placeholder_feed
-            # above; built inline here so the whole batch is one flush.
-            feed = Feed(
-                user_id=profile.id,
-                rss_url=rss_url,
-                channel_title=item.channel_title,
+        if item.channel_id not in artists_by_channel:
+            # Same placeholder contract as _get_or_create_placeholder above;
+            # built inline here so the whole batch is one flush.
+            artist = Artist(
+                user_id=user.id,
+                channel_id=item.channel_id,
+                name=item.channel_title,
                 followed=False,
             )
-            db.add(feed)
-            feeds_by_rss_url[rss_url] = feed
+            db.add(artist)
+            artists_by_channel[item.channel_id] = artist
     db.flush()
 
     created: dict[str, Content] = {}
     for item in items:
         if item.video_id in existing_content or item.video_id in created:
             continue
-        feed = feeds_by_rss_url[channel_feed_url(item.channel_id)]
-        content = _preview_content(feed.id, profile.id, item)
+        artist = artists_by_channel[item.channel_id]
+        content = _preview_content(artist.id, user.id, item)
         db.add(content)
         created[item.video_id] = content
 
@@ -249,29 +231,29 @@ def add_video_batch(
     return VideoBatchResult(content_ids=[resolved[item.video_id] for item in items])
 
 
-@router.delete("/videos/{content_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/tracks/{content_id}", status_code=status.HTTP_204_NO_CONTENT)
 def remove_single_video(
-    content_id: int, profile: User = Depends(get_current_profile), db: Session = Depends(get_db)
+    content_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ) -> None:
     """Removes a video added via Explore outright (unlike DELETE
     /content/{id}, which only resets download status) — used both to dismiss
     a preview early and to remove something already kept. Only for content on
-    a followed=False feed; a real follow's content comes off through
+    a followed=False artist; a real follow's content comes off through
     unfollowing the channel, not this."""
     content = (
         db.query(Content)
-        .join(Feed)
-        .filter(Content.id == content_id, Content.user_id == profile.id, Feed.followed.is_(False))
+        .join(Artist)
+        .filter(Content.id == content_id, Content.user_id == user.id, Artist.followed.is_(False))
         .first()
     )
     if not content:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Content not found")
 
-    feed_id = content.feed_id
+    artist_id = content.artist_id
     purge_content(db, content)
     db.commit()
 
-    remaining = db.query(func.count(Content.id)).filter(Content.feed_id == feed_id).scalar()
+    remaining = db.query(func.count(Content.id)).filter(Content.artist_id == artist_id).scalar()
     if remaining == 0:
-        db.query(Feed).filter(Feed.id == feed_id).delete()
+        db.query(Artist).filter(Artist.id == artist_id).delete()
         db.commit()

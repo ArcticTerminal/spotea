@@ -111,17 +111,9 @@ def test_omitting_interests_leaves_them_alone(client):
     res = client.put("/settings", json={"audio_quality": "low"})
     assert res.json() == {
         "audio_quality": "low",
-        "feed_refresh_interval_minutes": 30,
+        "refresh_interval_minutes": 30,
         "interests": ["jazz"],
     }
-
-
-def test_interests_are_per_profile(client, db_session):
-    client.put("/settings", json={"interests": ["jazz"]})
-
-    other = client.post("/profiles", json={"name": "Second"}).json()
-    client.post(f"/profiles/{other['id']}/switch")
-    assert client.get("/settings").json()["interests"] == []
 
 
 def test_interest_chips_are_rendered_into_the_settings_panel(client):

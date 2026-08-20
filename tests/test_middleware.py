@@ -36,17 +36,17 @@ def test_a_range_request_is_never_compressed(client, db_session, tmp_path):
     to be, which the <audio> element cannot reconcile — and it issues these on
     every seek.
     """
-    from app.models import Content, Feed
+    from app.models import Artist, Content
 
-    feed = Feed(user_id=1, rss_url="https://example.com/range", channel_title="Range Channel")
-    db_session.add(feed)
+    artist = Artist(user_id=1, channel_id="https://example.com/range", name="Range Channel")
+    db_session.add(artist)
     db_session.commit()
-    db_session.refresh(feed)
+    db_session.refresh(artist)
 
     audio = tmp_path / "rangevid001.m4a"
     audio.write_bytes(b"\x00" * 4096)
     content = Content(
-        feed_id=feed.id,
+        artist_id=artist.id,
         user_id=1,
         video_id="rangevid001",
         title="Ranged",

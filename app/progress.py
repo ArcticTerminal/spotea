@@ -62,7 +62,7 @@ class ProgressRegistry[K, V]:
 
     def discard(self, key: K) -> None:
         """Drop an entry ahead of its expiry — for when the thing it tracks
-        no longer exists at all (e.g. its feed was just deleted), so even
+        no longer exists at all (e.g. its artist was just deleted), so even
         the grace period above would only ever serve progress for something
         gone."""
         with self._lock:

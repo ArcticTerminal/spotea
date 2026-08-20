@@ -5,15 +5,9 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.auth import (
-    ACCOUNT_SESSION_KEY,
-    DUMMY_PASSWORD_HASH,
-    PROFILE_SESSION_KEY,
-    hash_password,
-    verify_password,
-)
+from app.auth import DUMMY_PASSWORD_HASH, SESSION_KEY, hash_password, verify_password
 from app.deps import get_db
-from app.models import Account, User
+from app.models import User
 from app.progress import ProgressRegistry
 from app.templating import templates
 
@@ -49,7 +43,7 @@ def _client_key(request: Request) -> str:
 
 @router.get("/login", response_class=HTMLResponse)
 def login_page(request: Request):
-    if request.session.get(ACCOUNT_SESSION_KEY):
+    if request.session.get(SESSION_KEY):
         return RedirectResponse(url="/", status_code=303)
     return templates.TemplateResponse(request, "login.html", {"error": None, "email": ""})
 
@@ -70,29 +64,22 @@ def login_submit(
         )
 
     normalized_email = email.strip().lower()
-    account = db.query(Account).filter(Account.email == normalized_email).first()
+    user = db.query(User).filter(User.email == normalized_email).first()
     # Always a real bcrypt check, win or lose — DUMMY_PASSWORD_HASH stands in
-    # for a real account's hash so a nonexistent email costs the same as a
-    # wrong password. See its docstring for the timing gap this closes.
-    password_hash = account.password_hash if account is not None else DUMMY_PASSWORD_HASH
+    # for a real user's hash so a nonexistent email costs the same as a wrong
+    # password. See its docstring for the timing gap this closes.
+    password_hash = user.password_hash if user is not None else DUMMY_PASSWORD_HASH
     password_ok = verify_password(password, password_hash)
     # Same generic message either way — doesn't reveal whether the email
     # itself is registered.
-    if account is None or not password_ok:
+    if user is None or not password_ok:
         _failed_login_attempts.set(key, (_failed_login_attempts.get(key) or 0) + 1)
         return templates.TemplateResponse(
             request, "login.html", {"error": "Invalid email or password", "email": email}, status_code=401
         )
 
     _failed_login_attempts.discard(key)
-    request.session[ACCOUNT_SESSION_KEY] = account.id
-    # Land back on whichever profile was active before logout — logout
-    # clears the whole session, so PROFILE_SESSION_KEY itself never survives
-    # it. If this is unset (never switched, or that profile's since been
-    # deleted), get_current_profile (deps.py) self-heals to this account's
-    # first profile on the first profile-scoped request, same as it always did.
-    if account.last_active_profile_id is not None:
-        request.session[PROFILE_SESSION_KEY] = account.last_active_profile_id
+    request.session[SESSION_KEY] = user.id
     # #home overrides whatever tab localStorage remembers from a previous
     # session (see index.html's inline head script) — a fresh login should
     # always land on Home, not wherever this browser last happened to be.
@@ -101,7 +88,7 @@ def login_submit(
 
 @router.get("/register", response_class=HTMLResponse)
 def register_page(request: Request):
-    if request.session.get(ACCOUNT_SESSION_KEY):
+    if request.session.get(SESSION_KEY):
         return RedirectResponse(url="/", status_code=303)
     return templates.TemplateResponse(request, "register.html", {"error": None, "email": ""})
 
@@ -113,7 +100,7 @@ def _validate_registration(email: str, password: str, confirm_password: str, db:
         return f"Password must be {MIN_PASSWORD_LENGTH}-{MAX_PASSWORD_LENGTH} characters"
     if password != confirm_password:
         return "Passwords do not match"
-    if db.query(Account).filter(Account.email == email).first() is not None:
+    if db.query(User).filter(User.email == email).first() is not None:
         return "Email already registered"
     return None
 
@@ -133,13 +120,8 @@ def register_submit(
             request, "register.html", {"error": error, "email": email}, status_code=400
         )
 
-    account = Account(email=normalized_email, password_hash=hash_password(password))
-    db.add(account)
-    db.flush()  # populates account.id within this transaction, before commit
-    profile = User(name="My Profile", account_id=account.id)
-    db.add(profile)
-    db.flush()  # populates profile.id
-    account.last_active_profile_id = profile.id
+    user = User(email=normalized_email, password_hash=hash_password(password))
+    db.add(user)
     try:
         db.commit()
     except IntegrityError:
@@ -149,10 +131,9 @@ def register_submit(
         return templates.TemplateResponse(
             request, "register.html", {"error": "Email already registered", "email": email}, status_code=400
         )
-    db.refresh(profile)
+    db.refresh(user)
 
-    request.session[ACCOUNT_SESSION_KEY] = account.id
-    request.session[PROFILE_SESSION_KEY] = profile.id
+    request.session[SESSION_KEY] = user.id
     return RedirectResponse(url="/#home", status_code=303)
 
 

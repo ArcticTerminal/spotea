@@ -167,8 +167,8 @@ export async function openPlayer(contentId, { expanded = true, requireVisible = 
     if (!res.ok) {
       showToast("Could not load this track");
       // If this call came from resumeOverlayIfNeeded, the sessionStorage
-      // record it read is exactly what just failed to load (e.g. a profile
-      // switch made the old content id inaccessible) — consumeResumeState
+      // record it read is exactly what just failed to load (e.g. the row was
+      // deleted since) — consumeResumeState
       // only ever clears it on a *successful* startPlayback, so without this
       // a permanently invalid record would re-trigger this same failure on
       // every page load.

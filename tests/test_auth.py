@@ -218,29 +218,3 @@ def test_register_rejects_short_password():
     assert res.status_code == 400
 
 
-def test_relogin_returns_to_the_profile_active_before_logout():
-    with TestClient(app) as c:
-        c.post("/login", data={"email": DEFAULT_ACCOUNT_EMAIL, "password": DEFAULT_ACCOUNT_PASSWORD})
-
-        # Create (which auto-switches into) a second profile, so the active
-        # one is no longer the account's first/default.
-        other_profile_id = c.post("/profiles", json={"name": "Kids"}).json()["id"]
-        assert c.get("/profiles").json() == [
-            {"id": 1, "name": "Default", "is_current": False},
-            {"id": other_profile_id, "name": "Kids", "is_current": True},
-        ]
-
-        c.post("/logout")
-        c.post("/login", data={"email": DEFAULT_ACCOUNT_EMAIL, "password": DEFAULT_ACCOUNT_PASSWORD})
-
-        # Logout clears the whole session — without account.last_active_profile_id
-        # persisting it, this would silently fall back to profile id 1 instead.
-        profiles = c.get("/profiles").json()
-        current = next(p for p in profiles if p["is_current"])
-        assert current["id"] == other_profile_id
-
-        # Clean up so this doesn't linger for other tests sharing the
-        # bootstrap account (matches this file's other tests, which never
-        # otherwise create extra profiles on the shared account).
-        c.post("/profiles/1/switch")
-        c.delete(f"/profiles/{other_profile_id}")

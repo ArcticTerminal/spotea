@@ -7,14 +7,15 @@ make the suite slow, flaky and, on a residential IP, a genuine rate-limiting
 liability.
 """
 
+import json
 from datetime import timedelta
 
 import pytest
 
-from app.models import Content, Feed, RecommendationCache, User
+from app.models import Artist, Content, RecommendationCache, User
 from app.services import recommendations as rec
 from app.timeutil import utcnow
-from app.youtube.search import ChannelSearchResult, PlaylistSearchResult, VideoSearchResult
+from app.youtube.models import ChannelSearchResult, PlaylistSearchResult
 
 USER_ID = 1
 
@@ -27,12 +28,6 @@ def _reset_interests(db_session):
     profile = db_session.get(User, USER_ID)
     profile.interests = None
     db_session.commit()
-
-
-def _video(video_id, title="Song"):
-    return VideoSearchResult(
-        video_id=video_id, title=title, thumbnail_url=None, duration_seconds=200, channel_title="Ch"
-    )
 
 
 def _channel(channel_id):
@@ -56,20 +51,20 @@ def _playlist(playlist_id):
 
 @pytest.fixture(autouse=True)
 def _no_browse_shelves(monkeypatch):
-    """Charts and the mood shelf are built on every run, interests or not —
-    so unlike the searches they can't be neutralised by leaving the interest
-    list empty. Stubbed out for every test in this file for exactly the
-    reason the module docstring gives; the two that are *about* them install
-    their own (see fake_browse)."""
+    """Charts and the mood category list are built on every run, interests
+    or not — so unlike the searches they can't be neutralised by leaving the
+    interest list empty. Stubbed out for every test in this file for exactly
+    the reason the module docstring gives; the two that are *about* them
+    install their own (see fake_browse)."""
     monkeypatch.setattr(rec, "_BROWSE_BUILDERS", ())
 
 
 @pytest.fixture
 def fake_browse(monkeypatch):
-    """Puts a known chart pair and mood shelf back, for the tests that check
-    what happens to them."""
+    """Puts a known chart pair and mood category list back, for the tests
+    that check what happens to them."""
 
-    def install(*, charts=(), chart_artists=(), mood=None):
+    def install(*, charts=(), chart_artists=(), moods=()):
         monkeypatch.setattr(
             rec,
             "_BROWSE_BUILDERS",
@@ -78,7 +73,7 @@ def fake_browse(monkeypatch):
                     "charts": [_playlist(p).__dict__ for p in charts],
                     "chart_artists": [_channel(c).__dict__ for c in chart_artists],
                 },
-                lambda: {"mood": mood},
+                lambda: {"moods": list(moods)},
             ),
         )
 
@@ -87,9 +82,10 @@ def fake_browse(monkeypatch):
 
 @pytest.fixture
 def fake_search(monkeypatch):
-    """Replaces all three searches with deterministic, query-derived results,
-    and records every query that was run so tests can assert on the request
-    budget rather than only on the output."""
+    """Replaces the interest search (playlists — see _SEARCHERS) with a
+    deterministic, query-derived result, and records every query that was
+    run so tests can assert on the request budget rather than only on the
+    output."""
     calls = []
 
     def make(kind, factory):
@@ -100,8 +96,6 @@ def fake_search(monkeypatch):
         return search
 
     searchers = {
-        "videos": make("videos", lambda seed: _video(seed)),
-        "channels": make("channels", _channel),
         "playlists": make("playlists", _playlist),
     }
     monkeypatch.setattr(rec, "_SEARCHERS", searchers)
@@ -117,37 +111,55 @@ def _set_interests(db_session, *interests):
 
 def test_no_interests_means_no_interest_searches(client, db_session, fake_search):
     """The interest shelves stay empty and cost nothing. What a profile with
-    no interests *does* get is the charts and the mood shelf, which don't
-    come from the interest list — see the two tests below."""
+    no interests *does* get is the charts and the mood category list, which
+    don't come from the interest list — see the two tests below."""
     body = client.get("/recommendations").json()
 
     assert body["interests"] == []
     assert body["interests_used"] == []
-    assert (body["videos"], body["channels"], body["playlists"]) == ([], [], [])
+    assert (body["videos"], body["playlists"]) == ([], [])
     assert fake_search == []
 
 
 def test_a_profile_with_no_interests_still_gets_the_charts(client, db_session, fake_browse):
     """The case Explore used to answer with nothing but a nag."""
-    fake_browse(charts=["top-40"], chart_artists=["UCchart"], mood={"title": "Chill", "section": "Moods & moments", "playlists": []})
+    fake_browse(
+        charts=["top-40"],
+        chart_artists=["UCchart"],
+        moods=[{"title": "Chill", "params": "abc123", "section": "Moods & moments"}],
+    )
 
     body = client.get("/recommendations").json()
 
     assert [p["playlist_id"] for p in body["charts"]] == ["top-40"]
     assert [c["channel_id"] for c in body["chart_artists"]] == ["UCchart"]
-    assert body["mood"]["title"] == "Chill"
+    assert [m["title"] for m in body["moods"]] == ["Chill"]
     assert body["generated_at"] is not None
 
 
+def test_mood_categories_lists_every_one_not_just_a_sample(monkeypatch):
+    """Unlike the old rotating single mood shelf, the user picks which
+    category to open — so this has to be the whole list YouTube Music
+    reported, not a sample of it."""
+    from app.youtube.music import MoodCategory
+
+    categories = [MoodCategory(title=f"Mood {i}", params=f"p{i}", section="Moods & moments") for i in range(14)]
+    monkeypatch.setattr(rec, "fetch_mood_categories", lambda: categories)
+
+    result = rec._mood_categories()
+
+    assert [m["title"] for m in result["moods"]] == [c.title for c in categories]
+    assert all("params" in m and "section" in m for m in result["moods"])
+
+
 def test_a_charting_artist_already_followed_is_dropped(client, db_session, fake_browse):
-    """Same rule as the interest-based channels shelf: it's a list of
-    channels to follow, and one already followed isn't."""
+    """It's a list of artists to follow, and one already followed isn't."""
     fake_browse(chart_artists=["UCfollowed", "UCnew"])
     db_session.add(
-        Feed(
+        Artist(
             user_id=USER_ID,
-            rss_url="https://www.youtube.com/feeds/videos.xml?channel_id=UCfollowed",
-            channel_title="Already Followed",
+            channel_id="UCfollowed",
+            name="Already Followed",
             followed=True,
         )
     )
@@ -158,77 +170,188 @@ def test_a_charting_artist_already_followed_is_dropped(client, db_session, fake_
     assert [c["channel_id"] for c in body["chart_artists"]] == ["UCnew"]
 
 
-def test_a_video_already_in_the_library_is_dropped_from_the_batch(client, db_session, fake_search):
-    _set_interests(db_session, "jazz")
-    feed = Feed(user_id=USER_ID, rss_url="https://example.com/already-owned-feed", channel_title="Owner")
-    db_session.add(feed)
+def _related_dict(channel_id, title):
+    """A related-artist entry as it's actually stored — see
+    ChannelSearchResult, whose every field RecommendationsOut requires
+    (nullable, but not omittable) when serializing similar_artists."""
+    return {
+        "channel_id": channel_id,
+        "title": title,
+        "thumbnail_url": None,
+        "subscriber_count": None,
+        "channel_url": f"https://www.youtube.com/channel/{channel_id}",
+    }
+
+
+def _followed_with_related(db_session, channel_id, *related):
+    artist = Artist(
+        user_id=USER_ID,
+        channel_id=channel_id,
+        name=f"Followed {channel_id}",
+        followed=True,
+        related_artists=json.dumps(list(related)),
+    )
+    db_session.add(artist)
     db_session.commit()
-    db_session.refresh(feed)
+    return artist
+
+
+def test_similar_artists_is_empty_with_nothing_followed(client, db_session, fake_browse):
+    """No seeded default, unlike every other shelf — see
+    services.recommendations._similar_to_followed."""
+    fake_browse()
+
+    body = client.get("/recommendations").json()
+
+    assert body["similar_artists"] == []
+
+
+def test_similar_artists_merges_across_followed_artists(client, db_session, fake_browse):
+    fake_browse()
+    _followed_with_related(db_session, "UCfollowed1", _related_dict("UCsimilar1", "Similar One"))
+    _followed_with_related(db_session, "UCfollowed2", _related_dict("UCsimilar2", "Similar Two"))
+
+    body = client.get("/recommendations").json()
+
+    assert {a["channel_id"] for a in body["similar_artists"]} == {"UCsimilar1", "UCsimilar2"}
+
+
+def test_similar_artists_deduplicates_a_shared_recommendation(client, db_session, fake_browse):
+    fake_browse()
+    _followed_with_related(db_session, "UCfollowed1", _related_dict("UCshared", "Shared"))
+    _followed_with_related(db_session, "UCfollowed2", _related_dict("UCshared", "Shared"))
+
+    body = client.get("/recommendations").json()
+
+    assert [a["channel_id"] for a in body["similar_artists"]] == ["UCshared"]
+
+
+def test_similar_artists_excludes_one_already_followed(client, db_session, fake_browse):
+    fake_browse()
+    db_session.add(Artist(user_id=USER_ID, channel_id="UCalreadyfollowed", name="Already", followed=True))
+    _followed_with_related(db_session, "UCfollowed1", _related_dict("UCalreadyfollowed", "Already"))
+
+    body = client.get("/recommendations").json()
+
+    assert body["similar_artists"] == []
+
+
+def test_similar_artists_ignores_a_malformed_stored_list(client, db_session, fake_browse):
+    """A render failure over one bad row would be worse than skipping it —
+    see _similar_to_followed's try/except."""
+    fake_browse()
+    artist = Artist(user_id=USER_ID, channel_id="UCbad", name="Bad", followed=True)
+    artist.related_artists = "not json"
+    db_session.add(artist)
+    db_session.commit()
+
+    body = client.get("/recommendations").json()
+
+    assert body["similar_artists"] == []
+
+
+def _track_dict(video_id, title):
+    """A top-track entry as it's actually stored — see VideoSearchResult,
+    whose every field RecommendationsOut requires when serializing videos."""
+    return {
+        "video_id": video_id,
+        "title": title,
+        "thumbnail_url": None,
+        "duration_seconds": 200,
+        "channel_title": "An Artist",
+        "channel_id": "UCartist",
+    }
+
+
+def _followed_with_tracks(db_session, channel_id, *tracks):
+    artist = Artist(
+        user_id=USER_ID,
+        channel_id=channel_id,
+        name=f"Followed {channel_id}",
+        followed=True,
+        top_tracks=json.dumps(list(tracks)),
+    )
+    db_session.add(artist)
+    db_session.commit()
+    return artist
+
+
+def test_songs_is_empty_with_nothing_followed(client, db_session, fake_browse):
+    """No seeded default, unlike the old interest-based Songs shelf — see
+    services.recommendations._songs_from_followed."""
+    fake_browse()
+
+    body = client.get("/recommendations").json()
+
+    assert body["videos"] == []
+
+
+def test_songs_merges_across_followed_artists(client, db_session, fake_browse):
+    fake_browse()
+    _followed_with_tracks(db_session, "UCfollowed1", _track_dict("videoaaaaaa", "Song One"))
+    _followed_with_tracks(db_session, "UCfollowed2", _track_dict("videobbbbbb", "Song Two"))
+
+    body = client.get("/recommendations").json()
+
+    assert {v["video_id"] for v in body["videos"]} == {"videoaaaaaa", "videobbbbbb"}
+
+
+def test_a_video_already_in_the_library_is_dropped_from_the_batch(client, db_session, fake_browse):
+    """A followed artist's own preview song is not "new" once it's actually
+    in the library — same rule owned_video_ids already applies to
+    interest-based results, now applied to _songs_from_followed too."""
+    fake_browse()
+    artist = _followed_with_tracks(
+        db_session,
+        "UCfollowed1",
+        _track_dict("alreadyowned", "Already Have This"),
+        _track_dict("videocccccc", "Not Owned Yet"),
+    )
     db_session.add(
-        Content(feed_id=feed.id, user_id=USER_ID, video_id="jazz-1", title="Already have this")
+        Content(artist_id=artist.id, user_id=USER_ID, video_id="alreadyowned", title="Already Have This")
     )
     db_session.commit()
 
     body = client.get("/recommendations").json()
 
-    assert [v["video_id"] for v in body["videos"]] == ["jazz-0", "jazz-2"]
+    assert [v["video_id"] for v in body["videos"]] == ["videocccccc"]
 
 
-def test_a_followed_channel_is_dropped_from_the_batch(client, db_session, fake_search):
-    """Observed live before this: a profile was recommended a channel it
-    already followed."""
-    _set_interests(db_session, "jazz")
-    db_session.add(
-        Feed(
-            user_id=USER_ID,
-            rss_url="https://www.youtube.com/feeds/videos.xml?channel_id=jazz-0",
-            channel_title="Already Followed",
-            followed=True,
-        )
-    )
-    db_session.commit()
-
-    body = client.get("/recommendations").json()
-
-    assert [c["channel_id"] for c in body["channels"]] == ["jazz-1", "jazz-2"]
-
-
-def test_an_unfollowed_placeholder_feed_does_not_hide_a_channel(client, db_session, fake_search):
+def test_an_unfollowed_placeholder_artist_does_not_hide_a_chart_artist(client, db_session, fake_browse):
     """followed=False is an Explore placeholder (see routers/explore.py), not
     a real subscription — it must not suppress the recommendation the way an
-    actually-followed channel does."""
-    _set_interests(db_session, "jazz")
+    actually-followed artist does. Was interest-based-channels-shelf
+    coverage before that shelf was removed; the same filter still guards
+    chart_artists and similar_artists."""
+    fake_browse(chart_artists=["UCchart"])
     db_session.add(
-        Feed(
-            user_id=USER_ID,
-            rss_url="https://www.youtube.com/feeds/videos.xml?channel_id=jazz-0",
-            channel_title="Just A Preview",
-            followed=False,
-        )
+        Artist(user_id=USER_ID, channel_id="UCchart", name="Just A Preview", followed=False)
     )
     db_session.commit()
 
     body = client.get("/recommendations").json()
 
-    assert [c["channel_id"] for c in body["channels"]] == ["jazz-0", "jazz-1", "jazz-2"]
+    assert [c["channel_id"] for c in body["chart_artists"]] == ["UCchart"]
 
 
-def test_the_library_filter_is_reapplied_on_every_read_even_from_cache(client, db_session, fake_search):
+def test_the_library_filter_is_reapplied_on_every_read_even_from_cache(
+    client, db_session, fake_search, fake_browse
+):
     """The filter can't be baked into the cached payload — build_batch's
     result is cached and reused across requests, but the library it's
-    filtered against keeps changing (someone follows a recommended channel
+    filtered against keeps changing (someone follows a recommended artist
     right after seeing it). Re-checking on every read is what makes that
-    channel disappear on the very next load instead of waiting for the
+    artist disappear on the very next load instead of waiting for the
     batch to expire and rebuild."""
-    _set_interests(db_session, "jazz")
+    fake_browse(chart_artists=["UCchart"])
     client.get("/recommendations")  # builds and caches the batch
     fake_search.clear()
 
     db_session.add(
-        Feed(
+        Artist(
             user_id=USER_ID,
-            rss_url="https://www.youtube.com/feeds/videos.xml?channel_id=jazz-0",
-            channel_title="Followed After The Batch Was Built",
+            channel_id="UCchart",
+            name="Followed After The Batch Was Built",
             followed=True,
         )
     )
@@ -237,7 +360,7 @@ def test_the_library_filter_is_reapplied_on_every_read_even_from_cache(client, d
     body = client.get("/recommendations").json()
 
     assert fake_search == []  # still served from cache, not rebuilt
-    assert "jazz-0" not in [c["channel_id"] for c in body["channels"]]
+    assert "UCchart" not in [c["channel_id"] for c in body["chart_artists"]]
 
 
 def test_a_first_request_builds_a_batch_from_the_interests(client, db_session, fake_search):
@@ -248,10 +371,8 @@ def test_a_first_request_builds_a_batch_from_the_interests(client, db_session, f
     assert body["interests"] == ["jazz"]
     assert body["interests_used"] == ["jazz"]
     assert body["generated_at"] is not None
-    assert [v["video_id"] for v in body["videos"]] == ["jazz-0", "jazz-1", "jazz-2"]
-    assert [c["channel_id"] for c in body["channels"]] == ["jazz-0", "jazz-1", "jazz-2"]
     assert [p["playlist_id"] for p in body["playlists"]] == ["jazz-0", "jazz-1", "jazz-2"]
-    assert sorted(fake_search) == [("channels", "jazz"), ("playlists", "jazz"), ("videos", "jazz")]
+    assert sorted(fake_search) == [("playlists", "jazz")]
 
 
 def test_a_second_request_is_served_from_the_cache(client, db_session, fake_search):
@@ -274,7 +395,7 @@ def test_editing_the_interests_invalidates_the_cache(client, db_session, fake_se
     body = client.get("/recommendations").json()
 
     assert body["interests_used"] == ["funk"]
-    assert [q for _, q in fake_search] == ["funk", "funk", "funk"]
+    assert [q for _, q in fake_search] == ["funk"]
 
 
 def test_reordering_the_interests_does_not_invalidate_the_cache(client, db_session, fake_search):
@@ -289,9 +410,9 @@ def test_reordering_the_interests_does_not_invalidate_the_cache(client, db_sessi
 
 
 def test_a_batch_older_than_the_refresh_interval_is_rebuilt(client, db_session, fake_search):
-    # The TTL is whatever Settings' feed-refresh interval is set to, rather
+    # The TTL is whatever Settings' artist-refresh interval is set to, rather
     # than a cadence of its own — see routers/recommendations.py.
-    client.put("/settings", json={"feed_refresh_interval_minutes": 15})
+    client.put("/settings", json={"refresh_interval_minutes": 15})
     _set_interests(db_session, "jazz")
     client.get("/recommendations")
     fake_search.clear()
@@ -305,7 +426,7 @@ def test_a_batch_older_than_the_refresh_interval_is_rebuilt(client, db_session, 
 
 
 def test_a_batch_inside_the_refresh_interval_is_not_rebuilt(client, db_session, fake_search):
-    client.put("/settings", json={"feed_refresh_interval_minutes": 120})
+    client.put("/settings", json={"refresh_interval_minutes": 120})
     _set_interests(db_session, "jazz")
     client.get("/recommendations")
     fake_search.clear()
@@ -345,9 +466,9 @@ def test_only_a_sample_of_a_long_interest_list_is_searched(client, db_session, f
 
     assert len(body["interests_used"]) == rec.INTERESTS_PER_RUN
     assert set(body["interests_used"]) <= {f"tag{i}" for i in range(10)}
-    # Three searches per sampled interest, and not one more — this is the
+    # One search per sampled interest, and not one more — this is the
     # whole point of sampling.
-    assert len(fake_search) == rec.INTERESTS_PER_RUN * 3
+    assert len(fake_search) == rec.INTERESTS_PER_RUN
     # The full list is still reported, so Explore can say what it's working
     # from even though only a few of them were used.
     assert len(body["interests"]) == 10
@@ -356,11 +477,11 @@ def test_only_a_sample_of_a_long_interest_list_is_searched(client, db_session, f
 def test_results_from_several_interests_are_interleaved(client, db_session, fake_search):
     _set_interests(db_session, "a", "b")
 
-    videos = [v["video_id"] for v in client.get("/recommendations").json()["videos"]]
+    playlists = [p["playlist_id"] for p in client.get("/recommendations").json()["playlists"]]
 
     # Round-robin, so the front of the shelf represents both interests rather
     # than exhausting the first.
-    assert videos[:4] == ["a-0", "b-0", "a-1", "b-1"]
+    assert playlists[:4] == ["a-0", "b-0", "a-1", "b-1"]
 
 
 def test_a_result_two_interests_share_is_only_listed_once(client, db_session, monkeypatch):
@@ -368,54 +489,35 @@ def test_a_result_two_interests_share_is_only_listed_once(client, db_session, mo
         rec,
         "_SEARCHERS",
         {
-            "videos": lambda query: [_video("shared"), _video(f"{query}-own")],
-            "channels": lambda query: [],
-            "playlists": lambda query: [],
+            "playlists": lambda query: [_playlist("shared"), _playlist(f"{query}-own")],
         },
     )
     _set_interests(db_session, "a", "b")
 
-    videos = [v["video_id"] for v in client.get("/recommendations").json()["videos"]]
+    playlists = [p["playlist_id"] for p in client.get("/recommendations").json()["playlists"]]
 
-    assert videos == ["shared", "a-own", "b-own"]
+    assert playlists == ["shared", "a-own", "b-own"]
 
 
 def test_each_shelf_is_capped(client, db_session, monkeypatch):
-    many = [_video(f"v{i}") for i in range(rec.RESULTS_PER_SHELF + 20)]
-    monkeypatch.setattr(
-        rec,
-        "_SEARCHERS",
-        {
-            "videos": lambda query: many,
-            "channels": lambda query: [],
-            "playlists": lambda query: [],
-        },
-    )
+    many = [_playlist(f"p{i}") for i in range(rec.RESULTS_PER_SHELF + 20)]
+    monkeypatch.setattr(rec, "_SEARCHERS", {"playlists": lambda query: many})
     _set_interests(db_session, "jazz")
 
-    assert len(client.get("/recommendations").json()["videos"]) == rec.RESULTS_PER_SHELF
+    assert len(client.get("/recommendations").json()["playlists"]) == rec.RESULTS_PER_SHELF
 
 
-def test_one_failing_search_does_not_sink_the_batch(client, db_session, monkeypatch):
+def test_a_failing_search_does_not_sink_the_batch(client, db_session, monkeypatch):
     # search_* already flatten yt-dlp failures to an empty list (see
     # youtube/search.py) — this asserts the batch treats that as "this shelf
     # is empty", not as an error.
-    monkeypatch.setattr(
-        rec,
-        "_SEARCHERS",
-        {
-            "videos": lambda query: [_video("v1")],
-            "channels": lambda query: [],
-            "playlists": lambda query: [_playlist("p1")],
-        },
-    )
+    monkeypatch.setattr(rec, "_SEARCHERS", {"playlists": lambda query: []})
     _set_interests(db_session, "jazz")
 
     body = client.get("/recommendations").json()
 
-    assert [v["video_id"] for v in body["videos"]] == ["v1"]
-    assert body["channels"] == []
-    assert [p["playlist_id"] for p in body["playlists"]] == ["p1"]
+    assert body["playlists"] == []
+    assert body["interests_used"] == ["jazz"]
 
 
 def test_a_corrupt_cached_payload_is_treated_as_a_miss(client, db_session, fake_search):
@@ -429,31 +531,6 @@ def test_a_corrupt_cached_payload_is_treated_as_a_miss(client, db_session, fake_
 
     assert client.get("/recommendations").json()["interests_used"] == ["jazz"]
     assert fake_search != []
-
-
-def test_each_profile_gets_its_own_batch(client, db_session, fake_search):
-    _set_interests(db_session, "jazz")
-    client.get("/recommendations")
-
-    other = client.post("/profiles", json={"name": "Second"}).json()
-    client.post(f"/profiles/{other['id']}/switch")
-    client.put("/settings", json={"interests": ["funk"]})
-
-    assert client.get("/recommendations").json()["interests_used"] == ["funk"]
-
-
-def test_deleting_a_profile_takes_its_cached_batch_with_it(client, db_session, fake_search):
-    other = client.post("/profiles", json={"name": "Second"}).json()
-    client.post(f"/profiles/{other['id']}/switch")
-    client.put("/settings", json={"interests": ["funk"]})
-    client.get("/recommendations")
-    assert db_session.get(RecommendationCache, other["id"]) is not None
-
-    client.post(f"/profiles/{USER_ID}/switch")
-    assert client.delete(f"/profiles/{other['id']}").status_code == 204
-
-    db_session.expire_all()
-    assert db_session.get(RecommendationCache, other["id"]) is None
 
 
 def test_recommendation_routes_require_login():

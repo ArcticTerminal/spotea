@@ -23,10 +23,9 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request,
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
-from app.deps import get_current_profile, get_db, require_login
+from app.deps import get_current_user, get_db, require_login
 from app.models import User
 from app.page_context import (
-    channel_detail_context,
     downloads_context,
     home_context,
     library_context,
@@ -37,12 +36,12 @@ from app.page_context import (
 from app.services.remote_detail import (
     remote_artist_context,
     remote_artist_songs_context,
-    remote_channel_context,
+    remote_mood_context,
     remote_playlist_context,
     remote_release_context,
 )
 from app.templating import templates
-from app.youtube.urls import CHANNEL_ID_RE, PLAYLIST_ID_RE, RELEASE_ID_RE
+from app.youtube.urls import CHANNEL_ID_RE, MOOD_PARAMS_RE, PLAYLIST_ID_RE, RELEASE_ID_RE
 
 router = APIRouter(prefix="/partials", tags=["partials"], dependencies=[Depends(require_login)])
 
@@ -50,28 +49,28 @@ router = APIRouter(prefix="/partials", tags=["partials"], dependencies=[Depends(
 @router.get("/home", response_class=HTMLResponse)
 def home_fragment(
     request: Request,
-    profile: User = Depends(get_current_profile),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
     # No thumbnail caching queued here, unlike the full page render: a
     # fragment refresh only ever shows rows some earlier render already
     # queued, so doing it again would be a second pass over the same videos.
-    return templates.TemplateResponse(request, "_fragment_home.html", home_context(db, profile.id))
+    return templates.TemplateResponse(request, "_fragment_home.html", home_context(db, user.id))
 
 
 @router.get("/library", response_class=HTMLResponse)
 def library_fragment(
     request: Request,
-    profile: User = Depends(get_current_profile),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
-    return templates.TemplateResponse(request, "_fragment_library.html", library_context(db, profile.id))
+    return templates.TemplateResponse(request, "_fragment_library.html", library_context(db, user.id))
 
 
 @router.get("/downloads", response_class=HTMLResponse)
 def downloads_fragment(
     request: Request,
-    profile: User = Depends(get_current_profile),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
     # The Downloads modal's own full list — deliberately not part of the
@@ -79,14 +78,14 @@ def downloads_fragment(
     # refreshDownloadsBody. Fetched only when the modal is actually opened
     # or an action inside it changes what it shows.
     return templates.TemplateResponse(
-        request, "_fragment_downloads.html", downloads_context(db, profile.id)
+        request, "_fragment_downloads.html", downloads_context(db, user.id)
     )
 
 
 @router.get("/storage-summary", response_class=HTMLResponse)
 def storage_summary_fragment(
     request: Request,
-    profile: User = Depends(get_current_profile),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
     # The cheap half of what downloads_fragment above used to return in one
@@ -94,24 +93,8 @@ def storage_summary_fragment(
     # storage.usage_summary rather than collect_usage's per-row work. This is
     # what refreshFragments() actually calls after every save/favorite/play.
     return templates.TemplateResponse(
-        request, "_fragment_storage_summary.html", storage_summary_context(db, profile.id)
+        request, "_fragment_storage_summary.html", storage_summary_context(db, user.id)
     )
-
-
-@router.get("/detail/channel/{feed_id}", response_class=HTMLResponse)
-def channel_detail_fragment(
-    feed_id: int,
-    request: Request,
-    background_tasks: BackgroundTasks,
-    page: int = 1,
-    profile: User = Depends(get_current_profile),
-    db: Session = Depends(get_db),
-) -> HTMLResponse:
-    context = channel_detail_context(db, profile.id, feed_id, page)
-    if context is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Channel not found")
-    queue_thumbnail_caching(background_tasks, context["content"])
-    return templates.TemplateResponse(request, "_fragment_detail.html", context)
 
 
 @router.get("/detail/playlist/{kind}", response_class=HTMLResponse)
@@ -120,10 +103,10 @@ def playlist_detail_fragment(
     request: Request,
     background_tasks: BackgroundTasks,
     page: int = 1,
-    profile: User = Depends(get_current_profile),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
-    context = playlist_detail_context(db, profile.id, kind, page)
+    context = playlist_detail_context(db, user.id, kind, page)
     if context is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown playlist")
     queue_thumbnail_caching(background_tasks, context["content"])
@@ -151,34 +134,11 @@ def remote_playlist_fragment(playlist_id: str, request: Request) -> HTMLResponse
     return templates.TemplateResponse(request, "_fragment_detail.html", context)
 
 
-@router.get("/detail/yt-channel/{channel_id}", response_class=HTMLResponse)
-def remote_channel_fragment(
-    channel_id: str,
-    request: Request,
-    avatar: str | None = None,
-    profile: User = Depends(get_current_profile),
-    db: Session = Depends(get_db),
-) -> HTMLResponse:
-    if not CHANNEL_ID_RE.match(channel_id):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Channel not found")
-
-    # Whatever avatar the client already had rendered on the card it clicked
-    # through from — see remote_channel_context's own docstring on why this
-    # route has no avatar of its own to fetch. Untrusted input either way
-    # (remote_channel_context re-validates it against this app's own
-    # same-origin image routes before using it).
-    context = remote_channel_context(db, profile.id, channel_id, avatar_url=avatar)
-    if context is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Could not open this channel")
-    return templates.TemplateResponse(request, "_fragment_detail.html", context)
-
-
 @router.get("/detail/yt-artist/{browse_id}", response_class=HTMLResponse)
 def remote_artist_fragment(
     browse_id: str,
     request: Request,
-    avatar: str | None = None,
-    profile: User = Depends(get_current_profile),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
     """An artist's YouTube Music page. Same id shape as the channel route
@@ -190,7 +150,7 @@ def remote_artist_fragment(
     if not CHANNEL_ID_RE.match(browse_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artist not found")
 
-    context = remote_artist_context(db, profile.id, browse_id, avatar_url=avatar)
+    context = remote_artist_context(db, user.id, browse_id)
     if context is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Could not open this artist")
     return templates.TemplateResponse(request, "_fragment_detail.html", context)
@@ -200,8 +160,7 @@ def remote_artist_fragment(
 def remote_artist_songs_fragment(
     browse_id: str,
     request: Request,
-    avatar: str | None = None,
-    profile: User = Depends(get_current_profile),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
     """Everything an artist has, as one list — the profile's "See all".
@@ -211,7 +170,7 @@ def remote_artist_songs_fragment(
     if not CHANNEL_ID_RE.match(browse_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artist not found")
 
-    context = remote_artist_songs_context(db, profile.id, browse_id, avatar_url=avatar)
+    context = remote_artist_songs_context(db, user.id, browse_id)
     if context is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Could not open this artist")
     return templates.TemplateResponse(request, "_fragment_detail.html", context)
@@ -227,4 +186,23 @@ def remote_release_fragment(browse_id: str, request: Request) -> HTMLResponse:
     context = remote_release_context(browse_id)
     if context is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Could not open this release")
+    return templates.TemplateResponse(request, "_fragment_detail.html", context)
+
+
+@router.get("/detail/yt-mood/{params}", response_class=HTMLResponse)
+def remote_mood_fragment(params: str, request: Request, title: str | None = None) -> HTMLResponse:
+    """A mood's playlists, opened from Explore's "Moods & genres" row.
+
+    `title` arrives as a query param rather than being looked up here:
+    get_mood_playlists' own response carries no header naming its category
+    (see remote_detail.remote_mood_context), and the normal open-from-Explore
+    click already has it on hand from the list Explore just rendered — only
+    a reload or a shared link arrives without it, and remote_mood_context
+    falls back to one extra request for exactly that case."""
+    if not MOOD_PARAMS_RE.match(params):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    context = remote_mood_context(params, title)
+    if context is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Could not open this")
     return templates.TemplateResponse(request, "_fragment_detail.html", context)

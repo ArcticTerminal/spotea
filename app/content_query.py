@@ -13,12 +13,12 @@ from sqlalchemy import and_, or_
 from sqlalchemy.orm import Query, Session, joinedload
 from sqlalchemy.sql.elements import ColumnElement
 
-from app.models import Content, Feed, User
+from app.models import Artist, Content
 from app.timeutil import utcnow
 
 DEFAULT_PAGE_SIZE = 50
 
-# How far back "New Uploads" reaches — is_new_upload alone (see models.py's
+# How far back "New releases" reaches — is_new_upload alone (see models.py's
 # Content.is_new_upload) only means "RSS-sourced, not backfilled," which
 # without this stays true forever, so a channel's uploads from months ago
 # never age out of the shelf/list.
@@ -34,69 +34,53 @@ def new_upload_cutoff() -> datetime:
 
 
 def new_upload_filter() -> ColumnElement[bool]:
-    """What "New Uploads" means, in one place: RSS-sourced, recent, and from
+    """What "New releases" means, in one place: sync-sourced, recent, and from
     a channel still followed.
 
     All three conditions are load-bearing and none is implied by the others.
     is_new_upload alone never expires (see NEW_UPLOAD_MAX_AGE). The
-    Feed.followed check covers two separate cases: Explore-added content
-    keeps a live feed_id even after being favorited/saved, but that feed is
-    only a placeholder (see routers/explore.py's _get_or_create_placeholder_feed);
+    Artist.followed check covers two separate cases: Explore-added content
+    keeps a live artist_id even after being favorited/saved, but that artist is
+    only a placeholder (see routers/explore.py's _get_or_create_placeholder);
     and a channel that was unfollowed while some of its content was kept
-    (see routers/feeds.py's delete_feed) leaves is_new_upload=True rows
+    (see routers/artists.py's delete_feed) leaves is_new_upload=True rows
     behind that shouldn't keep surfacing as if still followed.
 
-    Expressed as `Content.feed.has(...)` rather than a join so it composes
+    Expressed as `Content.artist.has(...)` rather than a join so it composes
     into any query over Content without the caller having to arrange for
-    Feed to be joined first.
+    Artist to be joined first.
     """
     return and_(
         Content.is_new_upload.is_(True),
         Content.published_at >= new_upload_cutoff(),
-        Content.feed.has(Feed.followed.is_(True)),
+        Content.artist.has(Artist.followed.is_(True)),
     )
 
 
-def followed_feeds(
-    db: Session, user_id: int | None = None, account_id: int | None = None
-) -> Query[Feed]:
+def followed_artists(db: Session, user_id: int | None = None) -> Query[Artist]:
     """Feeds actually followed, newest first.
 
     followed=False rows are Explore placeholders auto-created to hold a
-    single video (see routers/explore.py's _get_or_create_placeholder_feed)
-    or channels unfollowed while keeping some content (see delete_feed).
+    single video (see routers/explore.py's _get_or_create_placeholder)
+    or artists unfollowed while keeping some content (see delete_feed).
     Either way they're invisible in Library and skipped by the background
-    refresh, so every "the user's channels" query has to exclude them —
+    refresh, so every "the user's artists" query has to exclude them —
     omitting the filter is what would silently turn "I grabbed one song"
-    into "I follow this channel now".
+    into "I follow this artist now".
 
-    Scoped one of three ways: everything (both filters omitted), one
-    profile's own (`user_id`, what a request handler scopes to), or one
-    whole account's across every one of its profiles (`account_id` — the
-    background scheduler refreshes per account now that the refresh
-    interval is per-Account rather than one shared setting; see
-    scheduler.py). `user_id` wins if both are somehow given.
+    `user_id` omitted means every user's, which is what the background
+    scheduler walks.
     """
-    query = db.query(Feed).filter(Feed.followed.is_(True))
+    query = db.query(Artist).filter(Artist.followed.is_(True))
     if user_id is not None:
-        query = query.filter(Feed.user_id == user_id)
-    elif account_id is not None:
-        query = query.join(User, Feed.user_id == User.id).filter(User.account_id == account_id)
-    return query.order_by(Feed.added_at.desc())
-
-
-# Distinct from a plain free-text filter: this is an *exact* channel match
-# (picked from a suggestion, e.g. clicking a Home channel chip), so a video
-# from a different channel whose title happens to contain the channel's name
-# (e.g. a reaction video titled "... Linus Tech Tips ...") can't sneak in
-# the way it would under the substring title-or-channel search below.
-CHANNEL_FILTER_PREFIX = "__channel__:"
+        query = query.filter(Artist.user_id == user_id)
+    return query.order_by(Artist.added_at.desc())
 
 
 def _content_query(
-    db: Session, user_id: int, filter: str = "", feed_id: int | None = None
+    db: Session, user_id: int, filter: str = "", artist_id: int | None = None
 ) -> Query[Content]:
-    """What one filter/feed selection *means*, ordered but unpaginated.
+    """What one filter/artist selection *means*, ordered but unpaginated.
 
     Split out because two callers need the same selection at different
     granularities: query_content_page below wants one page of full rows,
@@ -109,8 +93,8 @@ def _content_query(
     # routers/explore.py's add_single_video and routers/content.py's
     # add_favorite/add_saved. Favorites/Saved never actually hit this in
     # practice (favoriting/saving already clears is_preview as a side
-    # effect), but the channel-detail page (feed_id) could otherwise be
-    # reached directly for a placeholder feed, so it's filtered here for
+    # effect), but the channel-detail page (artist_id) could otherwise be
+    # reached directly for a placeholder artist, so it's filtered here for
     # every caller, not just some — except __played__ (Recently Played),
     # where a preview that's actually been listened to still belongs on the
     # list; same carve-out pages.py's home_recently_played shelf documents.
@@ -118,12 +102,12 @@ def _content_query(
     if filter != "__played__":
         query = query.filter(Content.is_preview.is_(False))
 
-    if feed_id is not None:
-        query = query.filter(Content.feed_id == feed_id)
+    if artist_id is not None:
+        query = query.filter(Content.artist_id == artist_id)
 
-    # Only the filters that actually match on a Feed column need the join.
+    # Only the filters that actually match on a Artist column need the join.
     # __new_uploads__ used to be in here too, back when it spelled its
-    # follow check out as `Feed.followed.is_(True)`; new_upload_filter()
+    # follow check out as `Artist.followed.is_(True)`; new_upload_filter()
     # carries its own EXISTS instead, so it composes without one.
     needs_feed_join = filter not in (
         "",
@@ -133,7 +117,7 @@ def _content_query(
         "__new_uploads__",
     )
     if needs_feed_join:
-        query = query.join(Feed)
+        query = query.join(Artist)
 
     if filter == "__favorites__":
         query = query.filter(Content.is_favorite.is_(True))
@@ -143,15 +127,12 @@ def _content_query(
         query = query.filter(Content.last_played_at.isnot(None))
     elif filter == "__new_uploads__":
         query = query.filter(new_upload_filter())
-    elif filter.startswith(CHANNEL_FILTER_PREFIX):
-        channel_title = filter[len(CHANNEL_FILTER_PREFIX) :]
-        query = query.filter(Feed.channel_title == channel_title)
     elif filter:
         # Substring, case-insensitive, against either field: this is the
         # free-text search box, not a channel picklist, so a search for a
         # video title shouldn't require also typing its channel.
         pattern = f"%{filter}%"
-        query = query.filter(or_(Feed.channel_title.ilike(pattern), Content.title.ilike(pattern)))
+        query = query.filter(or_(Artist.name.ilike(pattern), Content.title.ilike(pattern)))
 
     # Most filters sort by publish date; __played__ reads differently enough
     # that publish date wouldn't make sense as its order.
@@ -167,7 +148,7 @@ def query_content_page(
     page: int = 1,
     filter: str = "",
     page_size: int = DEFAULT_PAGE_SIZE,
-    feed_id: int | None = None,
+    artist_id: int | None = None,
 ) -> tuple[list[Content], int, int]:
     """A page of a user's content, newest first, optionally filtered. Shared
     by the Library grid's server-rendered first page (pages.py) and the
@@ -175,17 +156,17 @@ def query_content_page(
     (routers/partials.py), so the two never disagree on what "page 1, no
     filter" actually contains.
 
-    feed_id restricts to a single channel — used by the channel detail page,
+    artist_id restricts to a single channel — used by the channel detail page,
     which has no other filter UI, so it's applied independently of `filter`.
 
     Returns (items, clamped page, total_pages).
     """
     # joinedload lives here rather than in _content_query: every renderer of
-    # these rows reads .feed (channel name, avatar), but query_content_ids
+    # these rows reads .artist (channel name, avatar), but query_content_ids
     # never materialises a Content object at all and would only pay for the
     # join.
-    query = _content_query(db, user_id, filter=filter, feed_id=feed_id).options(
-        joinedload(Content.feed)
+    query = _content_query(db, user_id, filter=filter, artist_id=artist_id).options(
+        joinedload(Content.artist)
     )
 
     total_items = query.count()
@@ -196,7 +177,7 @@ def query_content_page(
     return items, page, total_pages
 
 
-def count_content(db: Session, user_id: int, filter: str = "", feed_id: int | None = None) -> int:
+def count_content(db: Session, user_id: int, filter: str = "", artist_id: int | None = None) -> int:
     """The exact count query_content_page's own page would have, without
     paginating it — for a tile or header count that has to agree with the
     list it describes.
@@ -208,7 +189,7 @@ def count_content(db: Session, user_id: int, filter: str = "", feed_id: int | No
     below them the moment is_preview needed excluding — measured live as a
     channel tile reading 156 while its own page listed 154.
     """
-    return _content_query(db, user_id, filter=filter, feed_id=feed_id).count()
+    return _content_query(db, user_id, filter=filter, artist_id=artist_id).count()
 
 
 # How far a "Play all" reaches. A followed channel that's been backfilled can
@@ -221,7 +202,7 @@ QUEUE_MAX_ITEMS = 1000
 
 
 def query_content_ids(
-    db: Session, user_id: int, filter: str = "", feed_id: int | None = None
+    db: Session, user_id: int, filter: str = "", artist_id: int | None = None
 ) -> list[int]:
     """Every content id one channel/playlist selects, in the same order its
     track list shows them — the play queue behind "Play all" (see
@@ -232,5 +213,5 @@ def query_content_ids(
     shipping full rows for a thousand-track queue would be almost entirely
     waste.
     """
-    query = _content_query(db, user_id, filter=filter, feed_id=feed_id)
+    query = _content_query(db, user_id, filter=filter, artist_id=artist_id)
     return [row[0] for row in query.with_entities(Content.id).limit(QUEUE_MAX_ITEMS).all()]

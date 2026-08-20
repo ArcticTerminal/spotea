@@ -1,29 +1,39 @@
-"""Explore's browse shelves: songs, channels and playlists picked from the
-interests a profile listed in Settings, plus the charts and one mood shelf,
-which belong to nobody in particular.
+"""Explore's browse shelves: playlists picked from the interests listed in
+Settings; songs and similar artists picked from who's actually followed;
+plus the charts and the full list of mood/genre categories, which belong
+to nobody in particular.
 
-There is no recommender model here and no user-behaviour signal — an interest
-is a free-text phrase, and a recommendation is what YouTube search returns for
-it. That's deliberate: Spotea knows what a profile follows and plays, but it
-has no way to turn that into *new* discovery on its own, whereas "tell me what
-you like" turns straight into a query. The charts and mood shelves are the
-answer to the other case: a profile that has said nothing about itself yet,
-which until they existed had an empty Explore tab and a nag.
+Playlists is the one shelf still built from plain search, not a recommender
+model — an interest is a free-text phrase, and a result is what YouTube
+search returns for it, which covers "tell me what you like" turning
+straight into a query. Songs and Artists used to work the same way, keyed
+on that same free text, and both went badly for anything that wasn't
+literally a song title or an artist's name: an interest was routinely a
+genre or a mood instead ("Hip Hop", not "Drake" or "SICKO MODE"), and
+YouTube Music's artist search in particular answers that kind of query with
+beatmaker/compilation channels, not real artists (measured live). Both were
+replaced by shelves built from artists actually followed instead of typed
+text — similar_artists and songs from their own page previews (see
+_similar_to_followed and _songs_from_followed) — which are the two shelves
+here that *are* a real signal about this profile, not a search. The charts
+and mood shelves answer the remaining case: a library that has said nothing
+about itself yet and followed nobody, which until charts/moods existed had
+an empty Explore tab and a nag.
 
 The interesting part is therefore not the ranking, it's the request budget.
-One batch is a dozen live searches, each of them seconds long, against a
+One batch is several live searches, each of them seconds long, against a
 service that rate-limits an unauthenticated residential IP. So:
 
   * a batch is cached in the database (models.RecommendationCache), keyed by
     what the interests hashed to, and reused until it expires or the interests
     change — opening the Explore tab costs nothing;
   * "expires" means the same interval the user already chose for background
-    feed refreshes (Settings → Feed updates), rather than a second cadence
+    artist refreshes (Settings → Artist updates), rather than a second cadence
     nobody asked for. There is deliberately no separate refresh control:
     recommendations go stale on that interval, when the interest list is
     edited, and when the app-wide Refresh button is pressed — the same three
     moments everything else on the page does;
-  * a run samples INTERESTS_PER_RUN of the profile's interests rather than
+  * a run samples INTERESTS_PER_RUN of the interests rather than
     searching all of them, which bounds the cost of a run regardless of how
     many interests are listed (and makes "Refresh" surface different corners
     of the list, which is the behaviour you want anyway);
@@ -43,68 +53,64 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.interests import interests_signature, parse_interests
-from app.models import Content, Feed, RecommendationCache, User
+from app.models import Artist, Content, RecommendationCache, User
 from app.timeutil import utcnow
-from app.youtube.music import fetch_charts, fetch_mood_categories, fetch_mood_playlists, search_songs
+from app.youtube.music import fetch_charts, fetch_mood_categories
 from app.youtube.music import search_playlists as search_music_playlists
-from app.youtube.search import search_channels
-from app.youtube.urls import extract_channel_id
 
 logger = logging.getLogger(__name__)
 
 # Floor on how old a batch can be before the next visit to Explore rebuilds
-# it. Not a constant of its own: callers pass the profile's account's
-# configured feed refresh interval (see Account.feed_refresh_interval_minutes),
+# it. Not a constant of its own: callers pass the user's
+# configured artist refresh interval (see User.refresh_interval_minutes),
 # so "how often does this app go and look at YouTube again" stays one setting
 # rather than two. This is only the fallback for a caller that passes no ttl.
 DEFAULT_TTL = timedelta(minutes=30)
 
-# Interests sampled per run. Each one costs three searches (songs, channels,
-# playlists), so this is the knob that decides a run's request count — nine
-# searches, run in parallel, is a few seconds of wall time and a request burst
-# YouTube tolerates.
+# Interests sampled per run. Each one costs one search (playlists — see
+# _SEARCHERS), so this is the knob that decides a run's request count —
+# three searches, run in parallel, is well under a second of wall time.
 INTERESTS_PER_RUN = 3
 
-# Wide enough for every sampled interest's three searches at once, plus the
-# two browse jobs (see _BROWSE_BUILDERS) that don't depend on interests at
-# all. Nothing else here overlaps.
-_POOL_SIZE = INTERESTS_PER_RUN * 3 + 2
+# Wide enough for every sampled interest's one search at once, plus the two
+# browse jobs (see _BROWSE_BUILDERS) that don't depend on interests at all.
+# Nothing else here overlaps.
+_POOL_SIZE = INTERESTS_PER_RUN * 1 + 2
 
 # Per shelf, after merging every sampled interest's results. Roughly a shelf
 # and a half of horizontal scrolling, which is as far as anyone browses one.
 RESULTS_PER_SHELF = 12
-
-# How many mood categories a run will try before giving up on that shelf.
-# Only the first is paid for on a normal run — see _mood_shelf.
-MOOD_SHELF_ATTEMPTS = 3
 
 # Bumped whenever the shape of a stored batch changes. It rides along on the
 # cached signature, so every existing row stops matching and rebuilds on its
 # own — which is what keeps this module free to add a shelf without a
 # migration, and without a reader having to defend against a payload written
 # by an older version of itself.
-PAYLOAD_VERSION = "v2"
+PAYLOAD_VERSION = "v5"
 
-# Songs and playlists come from YouTube Music (app/youtube/music.py), which
-# indexes tracks rather than videos — the same reason Explore's search box
-# moved. Channels deliberately do not: that shelf is where a podcast gets
-# found, and YouTube Music is measurably worse at finding one (see
-# routers/explore.py's search_feeds).
+# No artist or song search here any more — an interest is free text, and it
+# was routinely a genre or a mood rather than an artist's name or a song
+# title ("Hip Hop", not "Drake" or "SICKO MODE"). YouTube Music's artist
+# search answers that kind of query with beatmaker/compilation channels, not
+# real artists (measured live: searching "Hip Hop" returned "Hip hop beats",
+# "Oldschool Hip-Hop Instrumentalist"); its song search does better but is
+# still inconsistent the same way (the same query's top results mixed real
+# hits like "SICKO MODE" in with a nameless "Aggressive Fight Epic Hip Hop
+# Motivation Music #3 (Instrumental Mix)"). See _similar_to_followed and
+# _songs_from_followed for what replaced both: YouTube Music's own data off
+# artists actually followed, which needs no search at all.
 _SEARCHERS = {
-    "videos": search_songs,
-    "channels": search_channels,
     "playlists": search_music_playlists,
 }
 
 # Result key -> the field that identifies one result, for cross-interest
 # deduplication. Two interests in the same genre routinely return the same
-# channel; showing it twice in one shelf reads as a bug.
-_IDENTITY_FIELDS = {"videos": "video_id", "channels": "channel_id", "playlists": "playlist_id"}
+# playlist; showing it twice in one shelf reads as a bug.
+_IDENTITY_FIELDS = {"playlists": "playlist_id"}
 
 # Serializes batch building process-wide. Not about data races (each run
-# writes only its own profile's row) — it's a second, cruder brake on how many
-# yt-dlp searches can be in flight at once, so two profiles refreshing
-# together can't double the burst _POOL_SIZE is sized for.
+# writes only its own row) — it's a second, cruder brake on how many
+# searches can be in flight at once.
 _build_lock = threading.Lock()
 
 
@@ -113,12 +119,10 @@ def empty_batch() -> dict:
     run that came back with nothing at all looks like."""
     return {
         "interests_used": [],
-        "videos": [],
-        "channels": [],
         "playlists": [],
         "charts": [],
         "chart_artists": [],
-        "mood": None,
+        "moods": [],
     }
 
 
@@ -127,7 +131,7 @@ def _charts_shelves() -> dict:
     is what everyone in a country is listening to this week. Included in the
     batch rather than served from a route of its own so it shares the cache,
     the TTL and the refresh button that already exist for the shelves beside
-    it; the cost of that is one duplicated copy per profile, which is a few
+    it; the cost of that is one duplicated copy per user, which is a few
     kilobytes of JSON against a whole second endpoint."""
     charts = fetch_charts(settings.music_chart_country)
     return {
@@ -136,39 +140,24 @@ def _charts_shelves() -> dict:
     }
 
 
-def _mood_shelf() -> dict:
-    """One of YouTube Music's forty-odd moods and genres, picked at random,
-    with its playlists.
+def _mood_categories() -> dict:
+    """Every one of YouTube Music's moods (not genres — see
+    fetch_mood_categories' MOOD_SECTION on why only that section is safe to
+    list), for Explore's own "Moods & genres" browse row.
 
-    One rather than all of them for the same reason interests are sampled:
-    a run should cost a bounded number of requests, and refreshing should
-    land somewhere different rather than redrawing the same shelf. The
-    category's own name is the shelf title — "Chill" and "Bollywood &
-    Indian" say what they are, and a generic "Moods" heading over one of
-    them would not.
+    All of them rather than one at random: the user picks which to open, so
+    this has to be the full list, not a sample — the point of showing it at
+    all is letting someone see "Sad" is an option before they'd think to ask
+    for it. Still bounded to one request: this lists categories, not their
+    playlists, and a category's playlists are only fetched once someone
+    actually opens it (see remote_detail.remote_mood_context).
     """
-    categories = fetch_mood_categories()
-    # A second and third pick, only if the first comes back empty. Even
-    # inside the section that mostly works, the occasional category still
-    # trips ytmusicapi's playlist parser (see music.MOOD_SECTION), and
-    # losing the whole shelf to one of those is a worse outcome than one
-    # extra request on the rare run that hits one.
-    for category in random.sample(categories, min(len(categories), MOOD_SHELF_ATTEMPTS)):
-        playlists = fetch_mood_playlists(category.params, RESULTS_PER_SHELF)
-        if playlists:
-            return {
-                "mood": {
-                    "title": category.title,
-                    "section": category.section,
-                    "playlists": [asdict(playlist) for playlist in playlists],
-                }
-            }
-    return {"mood": None}
+    return {"moods": [asdict(category) for category in fetch_mood_categories()]}
 
 
-# Shelves built without reference to the profile's interests, so they fill in
-# even for a profile that has listed none.
-_BROWSE_BUILDERS = (_charts_shelves, _mood_shelf)
+# Shelves built without reference to the interest list, so they fill in even
+# for a library that has listed none.
+_BROWSE_BUILDERS = (_charts_shelves, _mood_categories)
 
 
 def _sample(interests: list[str]) -> list[str]:
@@ -204,7 +193,7 @@ def build_batch(interests: list[str]) -> dict:
     """Runs the searches for a fresh batch. Pure — no database, no caching —
     so the caching policy above stays in one place (get_recommendations).
 
-    A profile with no interests still gets a batch: the interest searches
+    A library with no interests still gets a batch: the interest searches
     are simply skipped and the charts and mood shelves are the whole of it.
     That is the case Explore used to have nothing at all to show.
     """
@@ -231,15 +220,13 @@ def build_batch(interests: list[str]) -> dict:
         batch[kind] = _interleave(per_interest, _IDENTITY_FIELDS[kind])
 
     logger.info(
-        "Built recommendations for %s: %d songs, %d channels, %d playlists, "
-        "%d charts, %d charting artists, mood %s",
+        "Built recommendations for %s: %d playlists, "
+        "%d charts, %d charting artists, %d moods",
         ", ".join(sampled) or "no interests",
-        len(batch["videos"]),
-        len(batch["channels"]),
         len(batch["playlists"]),
         len(batch["charts"]),
         len(batch["chart_artists"]),
-        (batch["mood"] or {}).get("title", "—"),
+        len(batch["moods"]),
     )
     return batch
 
@@ -267,60 +254,127 @@ def _cached_batch(
         return None
 
 
-def _drop_already_in_library(db: Session, profile: User, batch: dict) -> dict:
+def _merge_from_followed(db: Session, user: User, column, exclude_ids: set[str], identity_field: str) -> list[dict]:
+    """Shared machinery behind _similar_to_followed and _songs_from_followed:
+    merge every followed artist's own stored JSON list (whichever column is
+    asked for), deduped by identity_field, capped at RESULTS_PER_SHELF.
+
+    Deliberately not part of `batch`/build_batch: unlike the searches and
+    the browse builders, this costs nothing but a query over data this
+    profile already has, so there's no reason to cache it, sample it, or
+    make a library with nothing followed wait for a rebuild to see it stay
+    empty — it just is empty, same as _drop_already_in_library's filtering
+    is always fresh regardless of the batch's own cache state.
+
+    A profile with nothing followed gets nothing here at all — no seeded
+    default, unlike the old interest-based shelves this replaced. That's
+    the point: both callers only ever reflect artists actually followed.
+    """
+    rows = db.query(column).filter(
+        Artist.user_id == user.id, Artist.followed.is_(True), column.isnot(None)
+    )
+
+    seen = set(exclude_ids)
+    merged: list[dict] = []
+    for (raw,) in rows:
+        try:
+            candidates = json.loads(raw)
+        except (TypeError, ValueError):
+            continue
+        for candidate in candidates:
+            identity = candidate.get(identity_field)
+            if not identity or identity in seen:
+                continue
+            seen.add(identity)
+            merged.append(candidate)
+            if len(merged) == RESULTS_PER_SHELF:
+                return merged
+    return merged
+
+
+def _similar_to_followed(db: Session, user: User, exclude_ids: set[str]) -> list[dict]:
+    """Every followed artist's own "fans also like" list (see
+    Artist.related_artists, refreshed on every sync alongside
+    monthly_listeners — no network call happens here), merged and deduped.
+    """
+    return _merge_from_followed(db, user, Artist.related_artists, exclude_ids, "channel_id")
+
+
+def _songs_from_followed(db: Session, user: User, exclude_ids: set[str]) -> list[dict]:
+    """Every followed artist's own page-preview songs (see Artist.top_tracks,
+    refreshed on every sync alongside monthly_listeners/related_artists —
+    no network call happens here), merged and deduped.
+
+    Replaces the interest-based Songs shelf (see _SEARCHERS' comment on
+    why): a genre or mood typed as free text found real songs
+    inconsistently, mixing real hits in with nameless instrumental filler.
+    This can't do that — every result here is a real song by an artist this
+    profile actually follows — at the cost of not necessarily being their
+    newest: a sync's all_songs=False call reads the artist page's own
+    preview, which YouTube Music orders by popularity, not release date.
+    """
+    return _merge_from_followed(db, user, Artist.top_tracks, exclude_ids, "video_id")
+
+
+def _drop_already_in_library(db: Session, user: User, batch: dict) -> dict:
     """Recommending something already in the library adds nothing — a
-    followed channel or an added video isn't new. Applied here, at read
+    followed artist or an added video isn't new. Applied here, at read
     time, against every batch (freshly built or cached) rather than inside
     build_batch: a cached batch can outlive what's added to the library
     after it was built, and re-checking on every read is what makes
-    following a recommended channel make it disappear from the shelf on the
+    following a recommended artist make it disappear from the shelf on the
     very next load, rather than waiting for the batch to expire and rebuild.
     Playlists aren't filtered — YouTube's search results don't expose enough
     to match one against the library reliably.
 
-    Observed live before this: a profile whose interests included "devops"
-    was recommended a channel it already followed.
-
-    The charting-artists shelf is filtered on the same rule as the channels
-    one: it is a list of channels to follow, and one already followed isn't.
+    The charting-artists and similar-artists shelves both get the same
+    rule: each is a list of artists to follow, and one already followed
+    isn't. videos and similar_artists are computed here too (see
+    _songs_from_followed and _similar_to_followed) rather than in `batch`
+    — piggybacking on the owned_video_ids/followed_ids queries below rather
+    than two more of their own.
     """
     owned_video_ids = {
-        video_id for (video_id,) in db.query(Content.video_id).filter(Content.user_id == profile.id)
+        video_id for (video_id,) in db.query(Content.video_id).filter(Content.user_id == user.id)
     }
-    followed_channel_ids = {
-        channel_id
-        for (channel_id,) in (
-            db.query(Feed.rss_url).filter(Feed.user_id == profile.id, Feed.followed.is_(True))
+    # Both the Topic channel a follow is keyed by and the browse id an
+    # artist's page is addressed by: a search result carries the browse id,
+    # a chart entry can carry either, and a shelf that still offers someone
+    # already in the library is the bug this exists to stop.
+    followed_ids = {
+        value
+        for row in db.query(Artist.channel_id, Artist.browse_id).filter(
+            Artist.user_id == user.id, Artist.followed.is_(True)
         )
-        for channel_id in [extract_channel_id(channel_id)]
-        if channel_id is not None
+        for value in row
+        if value is not None
     }
 
     return {
         **batch,
-        "videos": [v for v in batch["videos"] if v["video_id"] not in owned_video_ids],
-        "channels": [c for c in batch["channels"] if c["channel_id"] not in followed_channel_ids],
+        "videos": _songs_from_followed(db, user, owned_video_ids),
         "chart_artists": [
-            c for c in batch["chart_artists"] if c["channel_id"] not in followed_channel_ids
+            c for c in batch["chart_artists"] if c["channel_id"] not in followed_ids
         ],
+        "similar_artists": _similar_to_followed(db, user, followed_ids),
     }
 
 
 def get_recommendations(
-    db: Session, profile: User, *, ttl: timedelta = DEFAULT_TTL, force: bool = False
+    db: Session, user: User, *, ttl: timedelta = DEFAULT_TTL, force: bool = False
 ) -> tuple[dict, datetime]:
-    """One profile's current batch plus when it was built, rebuilding only if
+    """The current batch plus when it was built, rebuilding only if
     it's missing, older than `ttl`, built from different interests, or
     `force`d — then filtered against the current library (see
     _drop_already_in_library), always fresh regardless of whether the batch
     itself came from cache.
 
-    Every profile has a batch, including one with no interests listed: the
+    There is always a batch, including with no interests listed: the
     charts and mood shelves don't depend on any (see build_batch), so
     generated_at is never None.
     """
-    batch, generated_at = _get_or_build_batch(db, profile, ttl=ttl, force=force)
-    return _drop_already_in_library(db, profile, batch), generated_at
+    batch, generated_at = _get_or_build_batch(db, user, ttl=ttl, force=force)
+    return _drop_already_in_library(db, user, batch), generated_at
 
 
 def _cache_signature(interests: list[str]) -> str:
@@ -331,13 +385,13 @@ def _cache_signature(interests: list[str]) -> str:
 
 
 def _get_or_build_batch(
-    db: Session, profile: User, *, ttl: timedelta, force: bool
+    db: Session, user: User, *, ttl: timedelta, force: bool
 ) -> tuple[dict, datetime]:
     """The caching/locking half of get_recommendations, unfiltered — split
     out so the library filter above wraps every return path (three of them,
     below) from a single point instead of needing to be threaded through
     each one."""
-    interests = parse_interests(profile.interests)
+    interests = parse_interests(user.interests)
 
     # Read before the lock, so a refresh that waits behind another one can
     # still tell "built while I waited" from "already there when I arrived".
@@ -345,7 +399,7 @@ def _get_or_build_batch(
     signature = _cache_signature(interests)
     if not force:
         cached = _cached_batch(
-            profile.recommendation_cache, signature, not_before=started - ttl
+            user.recommendation_cache, signature, not_before=started - ttl
         )
         if cached:
             return cached
@@ -357,7 +411,7 @@ def _get_or_build_batch(
         # this session's older snapshot. Safe to roll back: nothing of this
         # request's own is pending at this point.
         db.rollback()
-        cache = db.get(RecommendationCache, profile.id)
+        cache = db.get(RecommendationCache, user.id)
         cached = _cached_batch(
             cache, signature, not_before=started if force else utcnow() - ttl
         )
@@ -369,7 +423,7 @@ def _get_or_build_batch(
         if cache is None:
             db.add(
                 RecommendationCache(
-                    user_id=profile.id,
+                    user_id=user.id,
                     interests_signature=signature,
                     payload=json.dumps(batch),
                     generated_at=generated_at,

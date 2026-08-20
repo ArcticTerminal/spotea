@@ -20,7 +20,7 @@ def test_discard_drops_an_entry_ahead_of_expiry():
     registry.discard(1)
     assert registry.get(1) is None
     # Discarding something that isn't there is a no-op, not an error —
-    # delete_feed calls it for every feed, including ones that never ran a
+    # delete_feed calls it for every artist, including ones that never ran a
     # backfill.
     registry.discard(1)
 

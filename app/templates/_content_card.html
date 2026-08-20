@@ -24,7 +24,7 @@
     <div class="card-meta-row">
       <div class="card-meta-text">
         <p class="card-channel">
-          <a class="card-link" href="/#player/{{ item.id }}">{{ item.feed.channel_title }}</a>
+          <a class="card-link" href="/#player/{{ item.id }}">{{ item.artist.name }}</a>
         </p>
         {% if item.published_at %}
         <p class="card-date">{{ item.published_at.strftime('%d %b %Y') }}</p>
