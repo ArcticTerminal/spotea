@@ -2764,15 +2764,39 @@ audio {
 /* Range inputs (seek + volume) — the played portion is painted via --fill,
    which player.js keeps in sync with the current value. */
 
+/* The element is finger-height and transparent; the 4px line you actually see
+   is painted on the track pseudo-element inside it.
+
+   It used to be the input itself that was 4px tall, which made it a 4px touch
+   target: hitting the bar at all was luck on a phone, and missing it does
+   nothing at all, so seeking read as a bar that "sometimes" works. Nothing
+   about the appearance changes here — only how much of the screen responds. */
 .range {
   -webkit-appearance: none;
   appearance: none;
   width: 100%;
-  height: 4px;
-  border-radius: 999px;
-  background: linear-gradient(to right, var(--white) var(--fill, 0%), var(--track-empty) var(--fill, 0%));
+  height: 28px;
+  background: none;
   cursor: pointer;
   outline: none;
+  /* The horizontal axis belongs to the slider, the vertical one still scrolls
+     the page. `manipulation` (inherited from the global * rule) leaves the
+     browser free to claim a sideways drag as a pan and abandon the scrub
+     mid-gesture; `none` would fix that by making a full-width bar a place
+     where the page can't be scrolled at all. */
+  touch-action: pan-y;
+}
+
+.range::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(to right, var(--white) var(--fill, 0%), var(--track-empty) var(--fill, 0%));
+}
+
+.range::-moz-range-track {
+  height: 4px;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(to right, var(--white) var(--fill, 0%), var(--track-empty) var(--fill, 0%));
 }
 
 .range::-webkit-slider-thumb {
@@ -2780,7 +2804,11 @@ audio {
   appearance: none;
   width: 12px;
   height: 12px;
-  border-radius: 50%;
+  /* Centres the thumb on the 4px track: half the track less half the thumb.
+     WebKit measures the thumb from the top of the track, not from the middle
+     of the input, so without this it hangs below the line. */
+  margin-top: -4px;
+  border-radius: var(--radius-circle);
   background: var(--white);
   border: none;
   opacity: 0;
@@ -2805,13 +2833,23 @@ audio {
 .range::-moz-range-thumb {
   width: 12px;
   height: 12px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   background: var(--white);
   border: none;
 }
 
-.range:hover {
+.range:hover::-webkit-slider-runnable-track {
   background: linear-gradient(to right, var(--accent) var(--fill, 0%), var(--track-empty) var(--fill, 0%));
+}
+
+.range:hover::-moz-range-track {
+  background: linear-gradient(to right, var(--accent) var(--fill, 0%), var(--track-empty) var(--fill, 0%));
+}
+
+/* Removed outright where the browser won't honour a volume change at all —
+   see player.js's volumeIsSettable. */
+.range[hidden] {
+  display: none;
 }
 
 .prepare-state {
@@ -3153,14 +3191,17 @@ audio {
 /* A control now, not a strip. A 3px line is impossible to aim at, so the
    button keeps a padded 11px box while the track inside it stays a hairline;
    both track and fill thicken on hover to say it is grabbable. */
+/* Same touch-target problem as .range, same fix: the padding is the target,
+   the 3px line inside it is all you see. */
 .mini-player-progress {
   position: relative;
   display: block;
   width: 100%;
-  padding: 4px 0;
+  padding: 9px 0;
   border: none;
   background: none;
   cursor: pointer;
+  touch-action: pan-y;
 }
 
 .mini-player-progress::before {
@@ -3173,7 +3214,10 @@ audio {
 .mini-player-progress-fill {
   position: absolute;
   left: 0;
-  top: 4px;
+  /* Centred rather than offset by the padding, so growing the touch target
+     doesn't need this number changed to match. */
+  top: 50%;
+  transform: translateY(-50%);
   height: 3px;
   width: 0%;
   background: var(--accent);

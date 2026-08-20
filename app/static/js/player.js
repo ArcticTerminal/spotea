@@ -267,6 +267,26 @@ export function paintRange(input) {
   input.style.setProperty("--fill", `${pct}%`);
 }
 
+/**
+ * Whether this browser lets a page set the playback volume at all.
+ *
+ * Feature-detected by writing and reading back rather than sniffed from the
+ * user agent: the restriction is per-browser behaviour, not per-OS, and it
+ * has moved before. Safe to run at startup because nothing is loaded yet —
+ * the value is restored either way.
+ */
+function volumeIsSettable(audio) {
+  const original = audio.volume;
+  try {
+    audio.volume = original === 0.5 ? 0.4 : 0.5;
+    const settable = audio.volume !== original;
+    audio.volume = original;
+    return settable;
+  } catch {
+    return false;
+  }
+}
+
 export function setupPlayer() {
   if (!activeAudio()) return;
 
@@ -359,13 +379,23 @@ export function setupPlayer() {
     scrubbing = false;
   });
 
-  volume.addEventListener("input", () => {
-    const audio = activeAudio();
-    audio.volume = Number(volume.value) / 100;
-    audio.muted = false;
-    paintRange(volume);
-    syncMuteIcon();
-  });
+  // iOS hands volume to the hardware buttons and makes the property
+  // read-only: the assignment below is accepted and then quietly ignored, so
+  // the slider moves and nothing gets louder. A control that responds to you
+  // but doesn't do its job is worse than one that isn't there, so it's
+  // removed where the write doesn't take. Mute is a separate property and
+  // does work, so that button stays either way.
+  if (volumeIsSettable(activeAudio())) {
+    volume.addEventListener("input", () => {
+      const audio = activeAudio();
+      audio.volume = Number(volume.value) / 100;
+      audio.muted = false;
+      paintRange(volume);
+      syncMuteIcon();
+    });
+  } else {
+    volume.hidden = true;
+  }
 
   muteBtn.addEventListener("click", () => {
     activeAudio().muted = !activeAudio().muted;
