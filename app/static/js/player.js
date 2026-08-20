@@ -106,7 +106,20 @@ let activeVisibilityHandler = null;
 // they're what *every* track produces whether or not anything actually went
 // wrong. The four kept here are exactly the ones that only fire when
 // something didn't happen the way it should have.
-const REPORTED_EVENTS = new Set(["play-rejected", "playback-stalled", "prepare-failed", "outgoing-ended"]);
+//
+// "gain-routed" and "gain-suspended" belong to that set for the same reason:
+// both only happen on the iOS software-volume path (see applyGain), the first
+// at most once per page load, and together they answer "did this session
+// reroute its audio, and was its context being suspended?" — which is the
+// first thing to check if background playback ever regresses on a phone.
+const REPORTED_EVENTS = new Set([
+  "play-rejected",
+  "playback-stalled",
+  "prepare-failed",
+  "outgoing-ended",
+  "gain-routed",
+  "gain-suspended",
+]);
 
 export function reportPlayback(event, detail = {}) {
   if (!REPORTED_EVENTS.has(event)) return;
@@ -287,6 +300,93 @@ function volumeIsSettable(audio) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Software volume (iOS)
+//
+// Where the volume property is read-only, the only way a page can turn its
+// own output down is to route the element through a Web Audio graph and
+// attenuate it with a GainNode. That is a real change to the playback path,
+// on the one platform whose playback path this project has spent the most
+// time getting right — so it is built to cost nothing until it is used:
+//
+//   - The graph is created on the first slider move that actually asks for
+//     less than full volume. Someone who never touches the slider (or drags
+//     it back to 100) plays audio through exactly the same path as before.
+//   - createMediaElementSource can only be called once per element and can't
+//     be undone, so once it happens the element is on Web Audio for the rest
+//     of the page load. Reloading gets the untouched path back, which is the
+//     escape hatch if this ever turns out to break something on device.
+//   - iOS suspends an AudioContext when it likes, and a suspended context is
+//     silence rather than quiet audio, so anything that could plausibly be
+//     the app coming back to life resumes it.
+//
+// The two breadcrumbs are here for one specific question: if background
+// playback ever stops working on a phone, the log says whether that session
+// had rerouted itself and whether its context was being suspended.
+// ---------------------------------------------------------------------------
+
+let gainContext = null;
+let gainNode = null;
+let gainLevel = 1;
+let gainBlocked = false;
+
+function audioContextCtor() {
+  return window.AudioContext || window.webkitAudioContext || null;
+}
+
+function resumeGainContext() {
+  if (gainContext?.state !== "suspended") return;
+  reportPlayback("gain-suspended", { state: gainContext.state });
+  gainContext.resume().catch(() => {});
+}
+
+/** The gain node for `audio`, building the graph on first use. */
+function ensureGain(audio) {
+  if (gainNode || gainBlocked) return gainNode;
+  const Ctx = audioContextCtor();
+  if (!Ctx) {
+    gainBlocked = true;
+    return null;
+  }
+  try {
+    gainContext = new Ctx();
+    const source = gainContext.createMediaElementSource(audio);
+    gainNode = gainContext.createGain();
+    source.connect(gainNode);
+    gainNode.connect(gainContext.destination);
+  } catch (err) {
+    // Half a graph is worse than none — an element connected to a source node
+    // that goes nowhere is silent.
+    gainBlocked = true;
+    gainContext = null;
+    gainNode = null;
+    return null;
+  }
+  reportPlayback("gain-routed", {});
+  // A context built inside a gesture still starts suspended in WebKit.
+  resumeGainContext();
+  document.addEventListener("visibilitychange", resumeGainContext);
+  audio.addEventListener("play", resumeGainContext);
+  audio.addEventListener("playing", resumeGainContext);
+  return gainNode;
+}
+
+/**
+ * Turns the output down to `level` (0-1). Returns false if this browser
+ * turned out not to be able to do it after all, which is the caller's cue to
+ * stop offering a control that does nothing.
+ */
+function applyGain(audio, level) {
+  gainLevel = level;
+  // Full volume with no graph yet is the whole point: don't build one.
+  if (level === 1 && !gainNode) return true;
+  const node = ensureGain(audio);
+  if (!node) return false;
+  // Ramped, not assigned: a step change in gain is an audible click.
+  node.gain.setTargetAtTime(level, gainContext.currentTime, 0.01);
+  return true;
+}
+
 export function setupPlayer() {
   if (!activeAudio()) return;
 
@@ -324,7 +424,10 @@ export function setupPlayer() {
 
   function syncMuteIcon() {
     const audio = activeAudio();
-    const silent = audio.muted || audio.volume === 0;
+    // gainLevel too: where the slider drives a GainNode the element's own
+    // volume stays at 1 however far down the output actually is, so reading
+    // only that would leave the speaker icon claiming sound at zero.
+    const silent = audio.muted || audio.volume === 0 || gainLevel === 0;
     showIcon(iconVolume, !silent);
     showIcon(iconMuted, silent);
     muteBtn.setAttribute("aria-label", silent ? "Unmute" : "Mute");
@@ -380,16 +483,20 @@ export function setupPlayer() {
   });
 
   // iOS hands volume to the hardware buttons and makes the property
-  // read-only: the assignment below is accepted and then quietly ignored, so
-  // the slider moves and nothing gets louder. A control that responds to you
-  // but doesn't do its job is worse than one that isn't there, so it's
-  // removed where the write doesn't take. Mute is a separate property and
-  // does work, so that button stays either way.
-  if (volumeIsSettable(activeAudio())) {
+  // read-only: the assignment is accepted and then quietly ignored, so the
+  // slider moves and nothing gets quieter. Where that's the case the slider
+  // drives a GainNode instead (see applyGain above) — and if even that turns
+  // out not to work, the control is removed, because one that responds to you
+  // without doing its job is worse than one that isn't there. Mute is a
+  // separate property and works everywhere, so that button stays regardless.
+  const volumeIsNative = volumeIsSettable(activeAudio());
+  if (volumeIsNative || audioContextCtor()) {
     volume.addEventListener("input", () => {
       const audio = activeAudio();
-      audio.volume = Number(volume.value) / 100;
+      const level = Number(volume.value) / 100;
       audio.muted = false;
+      if (volumeIsNative) audio.volume = level;
+      else if (!applyGain(audio, level)) volume.hidden = true;
       paintRange(volume);
       syncMuteIcon();
     });
