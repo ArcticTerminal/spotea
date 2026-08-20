@@ -51,7 +51,7 @@ export function setupStorage() {
   document.getElementById("downloads-body")?.addEventListener("click", (event) => {
     if (event.target.closest("#clear-storage")) {
       confirmedAction(
-        "Delete all downloaded audio? Your channels and saved items stay — you can download anything again by playing it.",
+        "Delete all downloaded audio? Your artists and saved songs stay — you can download anything again by playing it.",
         "Clear all",
         "/storage",
         { method: "DELETE", errorMessage: "Could not clear downloads" },

@@ -33,7 +33,7 @@ export function renderChannelResults(results, containerId = "channel-search-resu
   if (!list) return;
 
   if (!results.length) {
-    list.innerHTML = `<li class="search-empty">No channels found</li>`;
+    list.innerHTML = `<li class="search-empty">No artists found</li>`;
     return;
   }
 
@@ -61,7 +61,7 @@ export function renderChannelResults(results, containerId = "channel-search-resu
             <span class="search-result-title">${escapeHtml(r.title)}</span>
             ${subs}
           </div>
-          <button type="button" class="btn-add-channel" data-channel-url="${escapeHtml(r.channel_url)}">Add</button>
+          <button type="button" class="btn-add-channel" data-channel-url="${escapeHtml(r.channel_url)}">Follow</button>
         </li>
       `;
     })

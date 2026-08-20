@@ -150,12 +150,12 @@ def test_library_fragment_counts_follow_the_data(client, db_session):
     content = db_session.query(Content).filter(Content.video_id == "partnew0001").first()
 
     before = _fragment_body(client.get("/partials/library").text, "library-grid")
-    assert "1 video</span>" in before  # one saved item
+    assert "1 song</span>" in before  # one saved item
 
     client.post(f"/content/{content.id}/save")
 
     after = _fragment_body(client.get("/partials/library").text, "library-grid")
-    assert "2 videos</span>" in after
+    assert "2 songs</span>" in after
 
 
 def test_an_artists_library_card_opens_their_profile(client, db_session):
@@ -190,7 +190,7 @@ def test_an_artists_card_prefers_its_own_synced_track_count(client, db_session):
 def test_a_followed_artists_card_falls_back_to_its_release_count(client, db_session):
     """The common case: following only starts recording releases from here
     on (see services/artist_sync.py), so most cards have no synced track of
-    their own to show — nothing here reads as "0 videos" any more, since
+    their own to show — nothing here reads as "0 songs" any more, since
     the release snapshot every followed artist already carries is worth
     more than a count that's almost always zero."""
     artist = Artist(
@@ -207,10 +207,10 @@ def test_a_followed_artists_card_falls_back_to_its_release_count(client, db_sess
 
     assert "2 releases</span>" in body
     # Scoped to the artist's own card, not the four pinned playlist tiles
-    # above it (Favorites/Saved/New releases/Recently played), which still
-    # say "N videos" and are unrelated to this artist.
+    # above it (Favorites/Saved/New releases/Recently played), which say
+    # "N songs" and are unrelated to this artist.
     card = body[body.index('data-detail-id="UCreleasefallback0000000"') :]
-    assert "0 video" not in card[: card.index("</a>")]
+    assert "0 song" not in card[: card.index("</a>")]
 
 
 def test_a_followed_artist_with_neither_count_just_says_following(client, db_session):

@@ -48,7 +48,7 @@ async function toggleSaved(contentId, button) {
  */
 export async function unfollowArtist(artistId, onConfirmed) {
   const confirmed = await confirmDialog(
-    "Unfollow this channel? Its videos will be removed from your library.",
+    "Unfollow this artist? Their songs will be removed from your library.",
     "Unfollow"
   );
   if (!confirmed) return false;
