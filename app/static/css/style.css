@@ -1062,10 +1062,15 @@ html[data-active-tab="detail"] .tab-panel[data-tab-panel="detail"] {
   min-height: 0;
   /* A channel name is often one unbroken word (norahjonesVEVO), which normal
      word wrapping can't split — so it overflowed the card sideways instead of
-     wrapping, and .card-title's 2-line clamp never got the chance to put an
+     wrapping, and .card-title's clamp never got the chance to put an
      ellipsis on it. Breaking anywhere keeps the name inside the card and
      hands the clamp something to truncate. */
   overflow-wrap: anywhere;
+  /* One line, not the base .card-title's two — a long name (YoungBoy Never
+     Broke Again) wrapping to a second line made its card taller than every
+     other one in the same row, since min-height:0 above means nothing
+     reserves that second line's space up front. */
+  -webkit-line-clamp: 1;
 }
 
 .shelf-channel-card .card-body {
