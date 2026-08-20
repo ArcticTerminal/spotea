@@ -41,6 +41,10 @@ import {
 // How much of the current track has to have actually played before the next
 // one is pulled down in the background (see setupPlayerOverlay's timeupdate
 // handler for why it isn't immediate).
+// Arrow-key step on the mini bar's progress slider. Matches player.js's
+// SKIP_SECONDS so scrubbing feels the same wherever the focus happens to be.
+const SEEK_STEP_SECONDS = 15;
+
 const PREFETCH_AFTER_SECONDS = 8;
 
 // How the prefetch follows its own download to completion, so the handoff
@@ -408,7 +412,11 @@ function syncQueueControls() {
 
   document.getElementById("next-track").disabled = !hasNext;
   document.getElementById("prev-track").disabled = !hasPrevious;
+  // Hidden rather than disabled on the bar: the overlay's row keeps its shape
+  // so the play button stays put, but the bar has no shape to keep and a dead
+  // control there is just clutter.
   document.getElementById("mini-player-next").hidden = !hasNext;
+  document.getElementById("mini-player-prev").hidden = !hasPrevious;
 
   const shuffleBtn = document.getElementById("player-shuffle");
   shuffleBtn.classList.toggle("is-on", isShuffled());
@@ -488,15 +496,45 @@ export function setupPlayerOverlay() {
     miniPlayBtn.setAttribute("aria-label", paused ? "Play" : "Pause");
   };
 
-  // Thin passive progress line along the mini-bar's top edge — not
-  // interactive, just a glance-able sense of how far into the track you are
-  // without expanding the overlay.
+  // The progress line along the mini-bar's top edge. It used to be a passive
+  // strip; on desktop this bar is the player for most of a listening session,
+  // so it seeks — by click anywhere along it, and by arrow key, since it is
+  // exposed as a slider.
+  const miniProgress = document.getElementById("mini-player-progress");
   const miniProgressFill = document.getElementById("mini-player-progress-fill");
+  const miniTime = document.getElementById("mini-player-time");
+
   const syncMiniProgress = () => {
     const audio = activeAudio();
     const pct = audio.duration ? (audio.currentTime / audio.duration) * 100 : 0;
     miniProgressFill.style.width = `${pct}%`;
+    miniProgress.setAttribute("aria-valuenow", String(Math.round(pct)));
+    miniTime.textContent = audio.duration
+      ? `${formatDuration(audio.currentTime)} / ${formatDuration(audio.duration)}`
+      : "";
   };
+
+  const seekToEventX = (event) => {
+    const audio = activeAudio();
+    if (!audio.duration) return;
+    const box = miniProgress.getBoundingClientRect();
+    const ratio = Math.min(1, Math.max(0, (event.clientX - box.left) / box.width));
+    audio.currentTime = ratio * audio.duration;
+    syncMiniProgress();
+  };
+
+  miniProgress.addEventListener("click", seekToEventX);
+  miniProgress.addEventListener("keydown", (event) => {
+    const step = event.key === "ArrowLeft" ? -SEEK_STEP_SECONDS : event.key === "ArrowRight" ? SEEK_STEP_SECONDS : 0;
+    if (!step) return;
+    // Otherwise the document-level arrow handler in player.js scrubs a second
+    // time and the track jumps twice as far.
+    event.preventDefault();
+    event.stopPropagation();
+    const audio = activeAudio();
+    audio.currentTime = Math.min(audio.duration || 0, Math.max(0, audio.currentTime + step));
+    syncMiniProgress();
+  });
 
   miniPlayBtn.addEventListener("click", () => {
     const audio = activeAudio();
@@ -568,6 +606,7 @@ export function setupPlayerOverlay() {
   document.getElementById("prev-track").addEventListener("click", () => playFromQueue(previousId()));
   document.getElementById("next-track").addEventListener("click", () => playFromQueue(nextId()));
   document.getElementById("mini-player-next").addEventListener("click", () => playFromQueue(nextId()));
+  document.getElementById("mini-player-prev").addEventListener("click", () => playFromQueue(previousId()));
   document.getElementById("player-shuffle").addEventListener("click", () => toggleShuffle());
   // Both announce a QUEUE_CHANGED, which is what repaints the buttons — no
   // handler here touches its own control's appearance.
