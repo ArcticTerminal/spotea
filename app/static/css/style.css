@@ -3026,9 +3026,9 @@ audio {
 
 /* Opens under the transport rather than over it: what's playing stays on
    screen and reachable while you look at what's next, which is the whole
-   reason to open a queue mid-track. Scrolls on its own so a long queue can't
-   push the controls off the bottom. */
-/* No scroll area of its own, deliberately.
+   reason to open a queue mid-track.
+
+   No scroll area of its own, deliberately.
 
    It used to cap itself at 45vh and scroll internally, which put a scroll
    container inside the overlay's scroll container. On a touch screen that
@@ -3082,6 +3082,15 @@ audio {
 
 .range-volume {
   flex: 1;
+}
+
+/* With the slider removed (iOS — see player.js's volumeIsSettable) the group
+   would otherwise keep growing to hold a control that isn't there, leaving
+   the mute button alone against 160px of nothing in the middle of the
+   footer. */
+.volume-group:has(.range[hidden]) {
+  flex: 0 0 auto;
+  max-width: none;
 }
 
 .btn-quiet-icon {
