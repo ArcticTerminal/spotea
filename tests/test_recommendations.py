@@ -7,6 +7,7 @@ make the suite slow, flaky and, on a residential IP, a genuine rate-limiting
 liability.
 """
 
+import json
 from datetime import timedelta
 
 import pytest
@@ -175,6 +176,86 @@ def test_a_charting_artist_already_followed_is_dropped(client, db_session, fake_
     body = client.get("/recommendations").json()
 
     assert [c["channel_id"] for c in body["chart_artists"]] == ["UCnew"]
+
+
+def _related_dict(channel_id, title):
+    """A related-artist entry as it's actually stored — see
+    ChannelSearchResult, whose every field RecommendationsOut requires
+    (nullable, but not omittable) when serializing similar_artists."""
+    return {
+        "channel_id": channel_id,
+        "title": title,
+        "thumbnail_url": None,
+        "subscriber_count": None,
+        "channel_url": f"https://www.youtube.com/channel/{channel_id}",
+    }
+
+
+def _followed_with_related(db_session, channel_id, *related):
+    artist = Artist(
+        user_id=USER_ID,
+        channel_id=channel_id,
+        name=f"Followed {channel_id}",
+        followed=True,
+        related_artists=json.dumps(list(related)),
+    )
+    db_session.add(artist)
+    db_session.commit()
+    return artist
+
+
+def test_similar_artists_is_empty_with_nothing_followed(client, db_session, fake_browse):
+    """No seeded default, unlike every other shelf — see
+    services.recommendations._similar_to_followed."""
+    fake_browse()
+
+    body = client.get("/recommendations").json()
+
+    assert body["similar_artists"] == []
+
+
+def test_similar_artists_merges_across_followed_artists(client, db_session, fake_browse):
+    fake_browse()
+    _followed_with_related(db_session, "UCfollowed1", _related_dict("UCsimilar1", "Similar One"))
+    _followed_with_related(db_session, "UCfollowed2", _related_dict("UCsimilar2", "Similar Two"))
+
+    body = client.get("/recommendations").json()
+
+    assert {a["channel_id"] for a in body["similar_artists"]} == {"UCsimilar1", "UCsimilar2"}
+
+
+def test_similar_artists_deduplicates_a_shared_recommendation(client, db_session, fake_browse):
+    fake_browse()
+    _followed_with_related(db_session, "UCfollowed1", _related_dict("UCshared", "Shared"))
+    _followed_with_related(db_session, "UCfollowed2", _related_dict("UCshared", "Shared"))
+
+    body = client.get("/recommendations").json()
+
+    assert [a["channel_id"] for a in body["similar_artists"]] == ["UCshared"]
+
+
+def test_similar_artists_excludes_one_already_followed(client, db_session, fake_browse):
+    fake_browse()
+    db_session.add(Artist(user_id=USER_ID, channel_id="UCalreadyfollowed", name="Already", followed=True))
+    _followed_with_related(db_session, "UCfollowed1", _related_dict("UCalreadyfollowed", "Already"))
+
+    body = client.get("/recommendations").json()
+
+    assert body["similar_artists"] == []
+
+
+def test_similar_artists_ignores_a_malformed_stored_list(client, db_session, fake_browse):
+    """A render failure over one bad row would be worse than skipping it —
+    see _similar_to_followed's try/except."""
+    fake_browse()
+    artist = Artist(user_id=USER_ID, channel_id="UCbad", name="Bad", followed=True)
+    artist.related_artists = "not json"
+    db_session.add(artist)
+    db_session.commit()
+
+    body = client.get("/recommendations").json()
+
+    assert body["similar_artists"] == []
 
 
 def test_a_video_already_in_the_library_is_dropped_from_the_batch(client, db_session, fake_search):

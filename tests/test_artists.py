@@ -10,6 +10,7 @@ tries it again.
 Every network call is monkeypatched out; nothing here goes online.
 """
 
+import json
 import logging
 from datetime import datetime
 
@@ -22,7 +23,7 @@ import app.services.initial_sync as initial_sync_module
 from app.models import Artist, Content, User
 from app.services.artist_follow import NotAnArtistError, follow_artist
 from app.services.artist_sync import ArtistFetchResult, apply_artist_data
-from app.youtube.models import VideoSearchResult
+from app.youtube.models import ChannelSearchResult, VideoSearchResult
 from app.youtube.music import ArtistProfile, ArtistRelease, ReleaseDetail
 
 USER_ID = 1
@@ -38,7 +39,13 @@ def _release(browse_id="MPREb_aaaaaaaaaaa", title="A Single", year="2026"):
 
 
 def _artist(
-    *, topic_channel_id=TOPIC_ID, browse_id=OFFICIAL_ID, albums=(), singles=(), monthly_listeners=None
+    *,
+    topic_channel_id=TOPIC_ID,
+    browse_id=OFFICIAL_ID,
+    albums=(),
+    singles=(),
+    monthly_listeners=None,
+    related=(),
 ):
     return ArtistProfile(
         browse_id=browse_id,
@@ -53,6 +60,7 @@ def _artist(
         track_count=0,
         albums=list(albums),
         singles=list(singles),
+        related=list(related),
     )
 
 
@@ -258,6 +266,70 @@ def test_monthly_listeners_is_refreshed_on_every_sync(db_session, monkeypatch):
     apply_artist_data(db_session, artist, result)
 
     assert artist.monthly_listeners == "2.4M"
+
+
+def _related(channel_id, title):
+    return ChannelSearchResult(
+        channel_id=channel_id,
+        title=title,
+        thumbnail_url=None,
+        subscriber_count=None,
+        channel_url=f"https://www.youtube.com/channel/{channel_id}",
+    )
+
+
+def test_a_first_sync_still_records_related_artists(db_session, monkeypatch):
+    """Same free-data reasoning as monthly_listeners — YouTube Music's own
+    "fans also like" list arrives on the same response a first sync already
+    pays for."""
+    monkeypatch.setattr(
+        artist_sync,
+        "fetch_artist",
+        lambda browse_id, all_songs=True: _artist(
+            related=[_related("UCrelatedaaaaaaaaaaaaaaa", "Related One")]
+        ),
+    )
+
+    artist = _followed(db_session)
+    result = artist_sync.fetch_artist_data(artist.browse_id, artist.release_snapshot, None)
+    apply_artist_data(db_session, artist, result)
+
+    stored = json.loads(artist.related_artists)
+    assert [r["title"] for r in stored] == ["Related One"]
+
+
+def test_related_artists_is_refreshed_on_every_sync(db_session, monkeypatch):
+    """A moving list, not a fact settled once — a later sync overwrites
+    whatever it found before, same as monthly_listeners."""
+    monkeypatch.setattr(
+        artist_sync,
+        "fetch_artist",
+        lambda browse_id, all_songs=True: _artist(
+            related=[_related("UCrelatedbbbbbbbbbbbbbbb", "Related Two")]
+        ),
+    )
+
+    artist = _followed(db_session, release_snapshot="[]")
+    artist.related_artists = json.dumps([{"channel_id": "UCstale", "title": "Stale"}])
+    result = artist_sync.fetch_artist_data(artist.browse_id, artist.release_snapshot, None)
+    apply_artist_data(db_session, artist, result)
+
+    stored = json.loads(artist.related_artists)
+    assert [r["title"] for r in stored] == ["Related Two"]
+
+
+def test_an_artist_with_no_related_artists_clears_a_stale_list(db_session, monkeypatch):
+    """`related=[]` is a real answer (this artist genuinely has none listed
+    right now), not "unknown" — it has to overwrite, not preserve, an
+    earlier sync's stale list."""
+    monkeypatch.setattr(artist_sync, "fetch_artist", lambda browse_id, all_songs=True: _artist(related=[]))
+
+    artist = _followed(db_session, release_snapshot="[]")
+    artist.related_artists = json.dumps([{"channel_id": "UCstale", "title": "Stale"}])
+    result = artist_sync.fetch_artist_data(artist.browse_id, artist.release_snapshot, None)
+    apply_artist_data(db_session, artist, result)
+
+    assert json.loads(artist.related_artists) == []
 
 
 def test_a_later_sync_imports_only_what_appeared_since(db_session, monkeypatch):

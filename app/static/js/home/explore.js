@@ -284,6 +284,11 @@ function renderRecommendations(data) {
     shelfHtml("Songs", data.videos, recVideoCardHtml),
     shelfHtml("Artists", data.channels, channelCardHtml),
     shelfHtml("Playlists", data.playlists, recPlaylistCardHtml),
+    // Also about this profile, but from follows rather than typed
+    // interests — empty for a library with nothing followed yet, and
+    // deliberately not seeded with anything else in that case (see
+    // services/recommendations.py's _similar_to_followed).
+    shelfHtml("Similar artists", data.similar_artists, artistCardHtml),
     // Then what everyone gets: this week's charts and every mood to browse.
     shelfHtml("Charts", data.charts, recPlaylistCardHtml),
     shelfHtml("Charting artists", data.chart_artists, artistCardHtml),

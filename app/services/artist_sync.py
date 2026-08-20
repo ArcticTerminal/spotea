@@ -29,7 +29,7 @@ channel at all (measured: 3 of Drake's 45).
 import json
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 
 from sqlalchemy.orm import Session
 
@@ -37,7 +37,7 @@ from app.database import SessionLocal
 from app.images import download_avatar, download_thumbnail
 from app.models import Artist, Content
 from app.timeutil import utcnow
-from app.youtube.models import VideoSearchResult
+from app.youtube.models import ChannelSearchResult, VideoSearchResult
 from app.youtube.music import fetch_artist, fetch_release
 
 logger = logging.getLogger(__name__)
@@ -64,6 +64,7 @@ class ArtistFetchResult:
     name: str | None = None
     avatar_url: str | None = None
     monthly_listeners: str | None = None
+    related: list[ChannelSearchResult] | None = None
     release_ids: list[str] = field(default_factory=list)
     tracks: list[VideoSearchResult] = field(default_factory=list)
 
@@ -101,6 +102,7 @@ def fetch_artist_data(browse_id: str, snapshot: str | None, avatar_url: str | No
             name=artist.name,
             avatar_url=fetched_avatar_url,
             monthly_listeners=artist.monthly_listeners,
+            related=artist.related,
             release_ids=release_ids,
         )
 
@@ -122,6 +124,7 @@ def fetch_artist_data(browse_id: str, snapshot: str | None, avatar_url: str | No
         name=artist.name,
         avatar_url=fetched_avatar_url,
         monthly_listeners=artist.monthly_listeners,
+        related=artist.related,
         release_ids=release_ids,
         tracks=tracks,
     )
@@ -143,6 +146,13 @@ def apply_artist_data(db: Session, artist: Artist, result: ArtistFetchResult) ->
     # it.
     if result.monthly_listeners:
         artist.monthly_listeners = result.monthly_listeners
+    # Same as monthly_listeners above: a moving list, not a fact settled
+    # once, so a later sync overwrites it rather than keeping the first
+    # one ever seen. `is not None` rather than truthy — an artist with
+    # genuinely no related artists (rare, but real) should clear a stale
+    # list from before, not keep showing it forever.
+    if result.related is not None:
+        artist.related_artists = json.dumps([asdict(c) for c in result.related])
 
     new_count = 0
     if result.tracks:

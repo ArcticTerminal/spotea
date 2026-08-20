@@ -183,6 +183,11 @@ class RecommendationsOut(BaseModel):
     charts: list[PlaylistSearchResultOut]
     chart_artists: list[ChannelSearchResultOut]
     moods: list[MoodCategoryOut]
+    # Unlike everything above, not seeded with a default for a library with
+    # nothing followed yet — see services/recommendations.py's
+    # _similar_to_followed. Empty means exactly "nothing followed", not
+    # "still loading" or "YouTube had nothing to say".
+    similar_artists: list[ChannelSearchResultOut]
 
 
 class VideoAddCreate(BaseModel):

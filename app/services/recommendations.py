@@ -249,6 +249,44 @@ def _cached_batch(
         return None
 
 
+def _similar_to_followed(db: Session, user: User, exclude_ids: set[str]) -> list[dict]:
+    """Every followed artist's own "fans also like" list (see
+    Artist.related_artists, refreshed on every sync alongside
+    monthly_listeners — no network call happens here), merged and deduped.
+
+    Deliberately not part of `batch`/build_batch: unlike the searches and
+    the browse builders, this costs nothing but a query over data this
+    profile already has, so there's no reason to cache it, sample it, or
+    make a library with nothing followed wait for a rebuild to see it stay
+    empty — it just is empty, same as _drop_already_in_library's filtering
+    is always fresh regardless of the batch's own cache state.
+
+    A profile with nothing followed gets nothing here at all — no seeded
+    default, unlike the old interest-based channels shelf. That's the
+    point: this only ever reflects artists actually followed.
+    """
+    rows = db.query(Artist.related_artists).filter(
+        Artist.user_id == user.id, Artist.followed.is_(True), Artist.related_artists.isnot(None)
+    )
+
+    seen = set(exclude_ids)
+    merged: list[dict] = []
+    for (raw,) in rows:
+        try:
+            candidates = json.loads(raw)
+        except (TypeError, ValueError):
+            continue
+        for candidate in candidates:
+            channel_id = candidate.get("channel_id")
+            if not channel_id or channel_id in seen:
+                continue
+            seen.add(channel_id)
+            merged.append(candidate)
+            if len(merged) == RESULTS_PER_SHELF:
+                return merged
+    return merged
+
+
 def _drop_already_in_library(db: Session, user: User, batch: dict) -> dict:
     """Recommending something already in the library adds nothing — a
     followed channel or an added video isn't new. Applied here, at read
@@ -265,6 +303,10 @@ def _drop_already_in_library(db: Session, user: User, batch: dict) -> dict:
 
     The charting-artists shelf is filtered on the same rule as the channels
     one: it is a list of channels to follow, and one already followed isn't.
+
+    Also where similar_artists gets added (see _similar_to_followed) —
+    piggybacking on the followed_ids query below rather than a second one,
+    since exclude-already-followed is exactly what that shelf needs too.
     """
     owned_video_ids = {
         video_id for (video_id,) in db.query(Content.video_id).filter(Content.user_id == user.id)
@@ -289,6 +331,7 @@ def _drop_already_in_library(db: Session, user: User, batch: dict) -> dict:
         "chart_artists": [
             c for c in batch["chart_artists"] if c["channel_id"] not in followed_ids
         ],
+        "similar_artists": _similar_to_followed(db, user, followed_ids),
     }
 
 

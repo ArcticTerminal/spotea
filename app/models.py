@@ -126,6 +126,13 @@ class Artist(Base):
     # subscriber_count and description, which the same response carries but
     # nothing here persists.
     monthly_listeners: Mapped[str | None] = mapped_column(String(32), default=None)
+    # YouTube Music's own "fans also like" list for this artist, as a JSON
+    # array of ChannelSearchResult dicts — same free-data reasoning as
+    # monthly_listeners above, and refreshed the same way on every sync.
+    # What powers Explore's "Similar artists" shelf (see
+    # services/recommendations.py._similar_to_followed): merged across every
+    # artist this user follows, rather than fetched fresh at request time.
+    related_artists: Mapped[str | None] = mapped_column(Text, default=None)
 
     user: Mapped["User"] = relationship(back_populates="artists")
     content: Mapped[list["Content"]] = relationship(back_populates="artist", cascade="all, delete-orphan")
