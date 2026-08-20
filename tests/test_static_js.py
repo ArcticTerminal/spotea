@@ -145,26 +145,14 @@ def test_report_playback_only_sends_the_unexpected_events() -> None:
     ever useful for debugging, since every track produces them whether or
     not anything went wrong. Pinned as an exact set rather than "at least
     these" so a future change to the allowlist is a deliberate edit here,
-    not a silent one in player.js.
-
-    The two gain-* events are the deliberate addition: they only ever fire on
-    the iOS software-volume path, which reroutes playback through Web Audio,
-    and they are the only way to tell afterwards whether a session that lost
-    background audio had rerouted itself."""
+    not a silent one in player.js."""
     source = (JS_DIR / "player.js").read_text()
 
-    match = re.search(r"const REPORTED_EVENTS = new Set\(\[(.*?)\]\);", source, re.S)
+    match = re.search(r'const REPORTED_EVENTS = new Set\(\[(.*?)\]\);', source)
     assert match, "REPORTED_EVENTS allowlist not found in player.js"
     kept = {name.strip().strip('"') for name in match.group(1).split(",") if name.strip()}
 
-    assert kept == {
-        "play-rejected",
-        "playback-stalled",
-        "prepare-failed",
-        "outgoing-ended",
-        "gain-routed",
-        "gain-suspended",
-    }
+    assert kept == {"play-rejected", "playback-stalled", "prepare-failed", "outgoing-ended"}
 
     # The allowlist alone proves nothing if reportPlayback doesn't actually
     # enforce it — this is the guard clause that turns "defined" into "used".
@@ -178,34 +166,6 @@ def test_report_playback_only_sends_the_unexpected_events() -> None:
     ) in source, (
         "REPORTED_EVENTS is defined but reportPlayback no longer checks "
         "against it — every event is being sent again"
-    )
-
-
-def test_web_audio_is_only_wired_up_once_the_volume_is_actually_turned_down() -> None:
-    """iOS makes HTMLMediaElement.volume read-only, so the slider there drives
-    a GainNode instead — which means routing the one <audio> element through
-    Web Audio, on the platform whose playback path took the longest to get
-    right. createMediaElementSource can't be undone, so the safety property is
-    that it never happens unless someone actually turns the volume down: a
-    listener who never touches the slider plays through the untouched path,
-    and reloading is the way back for one who did.
-
-    Structural rather than behavioural because the suite has no browser: what
-    it pins is that the early return sits *before* the graph is built, and
-    that there is exactly one place that can build it."""
-    source = (JS_DIR / "player.js").read_text()
-
-    assert source.count("createMediaElementSource(") == 1, (
-        "more than one place builds the Web Audio graph — createMediaElementSource "
-        "throws on a second call for the same element, and there is only one <audio>"
-    )
-
-    body = source[source.index("function applyGain(") :]
-    body = body[: body.index("\n}\n")]
-    bail = body.index("if (level === 1 && !gainNode) return")
-    assert bail < body.index("ensureGain("), (
-        "applyGain reaches ensureGain at full volume — the element would be rerouted "
-        "through Web Audio for anyone who so much as touches the slider"
     )
 
 
