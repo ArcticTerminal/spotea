@@ -13,11 +13,14 @@
     </span>
     <span class="track-info">
       <span class="track-title" title="{{ item.title }}">{{ item.title }}</span>
-      {% if show_channel or item.published_at %}
-      <span class="track-date">
-        {%- if show_channel -%}{{ item.artist.name }}{% if item.published_at %} · {% endif %}{%- endif -%}
-        {%- if item.published_at -%}{{ item.published_at.strftime('%d %b %Y') }}{%- endif -%}
-      </span>
+      {# Artist only. published_at used to follow it, but it records when this
+         app first saw the track rather than when it came out — every row of a
+         freshly synced artist reads as today — so it was a second line of the
+         same date all the way down the list. Left out of a single-artist page
+         (show_channel is false there) where every row would name the artist
+         you are already looking at. #}
+      {% if show_channel %}
+      <span class="track-artist">{{ item.artist.name }}</span>
       {% endif %}
     </span>
   </a>

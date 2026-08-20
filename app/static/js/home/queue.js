@@ -26,7 +26,12 @@ const QUEUE_KEY = "spotea-queue";
 // queue would silently evaporate mid-listen and the track that was playing
 // would simply be the last one — same failure the resume record exists to
 // prevent, one level up.
-let state = { source: null, ids: [], order: [], position: -1, shuffle: false };
+// `repeat` is "off" | "all" | "one". Like shuffle it is a standing
+// preference rather than part of a particular queue, so it survives
+// clearQueue() and outlives whatever is playing.
+let state = { source: null, ids: [], order: [], position: -1, shuffle: false, repeat: "off" };
+
+const REPEAT_MODES = ["off", "all", "one"];
 
 function persist() {
   try {
@@ -53,6 +58,10 @@ function restore() {
     order: saved.order,
     position: Number.isInteger(saved.position) ? saved.position : -1,
     shuffle: saved.shuffle === true,
+    // Same shape check as the rest: a record from before repeat existed has
+    // no such field, and an unknown value would otherwise make peekIndex
+    // wrap on a mode nothing understands.
+    repeat: REPEAT_MODES.includes(saved.repeat) ? saved.repeat : "off",
   };
 }
 
@@ -97,11 +106,27 @@ export function queueSource() {
   return state.source;
 }
 
+/**
+ * The index `offset` steps from the current one, or null when there is
+ * nothing there.
+ *
+ * Under repeat "all" the ends join up, so the last track's next is the first
+ * one and the first track's previous is the last. That single rule is what
+ * makes both the transport buttons and auto-advance wrap, without either of
+ * them knowing about repeat at all.
+ */
+function peekIndex(offset) {
+  if (state.position < 0 || !state.order.length) return null;
+  const index = state.position + offset;
+  if (index >= 0 && index < state.order.length) return index;
+  if (state.repeat !== "all") return null;
+  return ((index % state.order.length) + state.order.length) % state.order.length;
+}
+
 /** The id `offset` steps from the current one, without moving the pointer. */
 function peek(offset) {
-  const index = state.position + offset;
-  if (state.position < 0 || index < 0 || index >= state.order.length) return null;
-  return state.order[index];
+  const index = peekIndex(offset);
+  return index === null ? null : state.order[index];
 }
 
 /** Read-only lookahead — drives both the transport's disabled state and the
@@ -118,12 +143,46 @@ export function isShuffled() {
   return state.shuffle;
 }
 
-function step(offset) {
-  const id = peek(offset);
-  if (id === null) return null;
-  state.position += offset;
+/** "off" | "all" | "one". */
+export function repeatMode() {
+  return state.repeat;
+}
+
+/**
+ * What's playing and everything after it, in play order — the Queue panel's
+ * whole input.
+ *
+ * Deliberately not the tracks already behind the pointer: a queue panel
+ * answers "what's next", and a played-through playlist would otherwise open
+ * it on a wall of history with the interesting part at the bottom.
+ */
+export function queueFromCurrent() {
+  if (state.position < 0) return [];
+  return state.order.slice(state.position);
+}
+
+/**
+ * Advances repeat one step: off -> all -> one -> off.
+ *
+ * "one" deliberately doesn't change what the Next button does — pressing
+ * Next means "play the next track", whatever repeat says. It only decides
+ * what happens when a track ends on its own (see home/overlay.js).
+ */
+export function cycleRepeat() {
+  const next = (REPEAT_MODES.indexOf(state.repeat) + 1) % REPEAT_MODES.length;
+  state.repeat = REPEAT_MODES[next];
   announce();
-  return id;
+  return state.repeat;
+}
+
+function step(offset) {
+  // The index rather than `position + offset`: under repeat "all" the step
+  // that runs off the end lands back at the other one.
+  const index = peekIndex(offset);
+  if (index === null) return null;
+  state.position = index;
+  announce();
+  return state.order[index];
 }
 
 export function nextId() {
@@ -157,7 +216,14 @@ export function noteCurrent(contentId) {
 }
 
 export function clearQueue() {
-  state = { source: null, ids: [], order: [], position: -1, shuffle: state.shuffle };
+  state = {
+    source: null,
+    ids: [],
+    order: [],
+    position: -1,
+    shuffle: state.shuffle,
+    repeat: state.repeat,
+  };
   announce();
 }
 

@@ -117,6 +117,15 @@
   outline: none;
 }
 
+/* An accent ring on an accent-filled control is invisible, so the controls
+   painted with --accent take the light ring instead. */
+.btn-primary:focus-visible,
+.btn-play-main:focus-visible,
+.mini-player-playpause:focus-visible,
+.empty-state-cta:focus-visible {
+  outline-color: var(--text-primary);
+}
+
 * {
   box-sizing: border-box;
   /* No gray flash on tap, and no double-tap-to-zoom on buttons/links —
@@ -1897,9 +1906,16 @@ button.track-link {
   white-space: nowrap;
 }
 
-.track-date {
+/* The row's second line. Named for the date it used to carry alongside the
+   artist; the date is gone (it was the day this app first saw the track, not
+   a release date) and the artist is all that's left. One line, because a
+   wrapped artist name made every row in a queue two lines tall. */
+.track-artist {
   color: var(--text-muted);
-  font-size: 0.76rem;
+  font-size: var(--text-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .track-duration {
@@ -1981,7 +1997,7 @@ button.track-link {
     min-width: 0;
   }
 
-  .track-date {
+  .track-artist {
     grid-area: meta;
     min-width: 0;
   }
@@ -2739,29 +2755,52 @@ audio {
   height: 26px;
 }
 
-.transport-num {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.5rem;
-  font-weight: 700;
-  padding-top: 2px;
+/* Shuffle and repeat sit at the ends of the same row as previous/next, but
+   they set a mode rather than move through the queue — smaller keeps the
+   three controls that actually move playback reading as the row's subject.
+   (.transport-num, which numbered the ±15s buttons that used to hold these
+   slots, went with them.) */
+.btn-transport.btn-shuffle svg,
+.btn-transport.btn-repeat svg {
+  width: 20px;
+  height: 20px;
 }
 
+/* Both are toggles on the same row and both mean "this is on". */
+.btn-shuffle.is-on,
+.btn-repeat.is-on {
+  color: var(--accent);
+}
+
+.btn-repeat svg[hidden] {
+  display: none;
+}
+
+/* The one control the whole overlay is built around, so it carries the brand
+   colour. It used to be a white rounded square — the only white surface in
+   the app, and a filled square reads as "stop" next to a row of transport
+   icons. It also disagreed with the mini player's own play button, which was
+   already a circle; both are the same action and now look it. */
 .btn-play-main {
   width: 60px;
   height: 60px;
-  border-radius: 6px;
+  border-radius: var(--radius-circle);
   border: none;
-  background: var(--white);
+  background: var(--accent);
   color: var(--black);
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: transform 0.12s ease, background 0.12s ease;
+  transition:
+    transform 0.12s ease,
+    background 0.12s ease;
+}
+
+/* Same optical correction as the mini player's: a play triangle carries its
+   weight to the left of its box, so a centred one looks off-centre. */
+#icon-play {
+  margin-left: 3px;
 }
 
 /* (hover: hover) excludes touch — without it, tapping this on mobile leaves
@@ -2787,7 +2826,46 @@ audio {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
+  gap: var(--space-4);
+}
+
+/* Opens under the transport rather than over it: what's playing stays on
+   screen and reachable while you look at what's next, which is the whole
+   reason to open a queue mid-track. Scrolls on its own so a long queue can't
+   push the controls off the bottom. */
+.queue-panel {
+  margin-top: var(--space-5);
+  border-top: 1px solid var(--border-subtle);
+  padding-top: var(--space-4);
+  max-height: 45vh;
+  overflow-y: auto;
+  text-align: left;
+}
+
+.queue-panel[hidden] {
+  display: none;
+}
+
+.queue-heading {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* The second heading follows a list, so it needs room the first one doesn't. */
+.queue-heading + .track-row + .queue-heading,
+.track-row + .queue-heading {
+  margin-top: var(--space-5);
+}
+
+.queue-empty {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: 1.55;
 }
 
 .volume-group {
@@ -2854,12 +2932,10 @@ audio {
   color: var(--accent);
 }
 
-/* The shuffle toggle appears twice — in the player's footer and above a
-   channel/playlist's track list — and both drive the same preference, so
-   both have to look the same when it's on. */
-.btn-shuffle.is-on {
-  color: var(--accent);
-}
+/* The shuffle toggle appears twice — in the player's transport row and above
+   a channel/playlist's track list — and both drive the same preference, so
+   both have to look the same when it's on. The rule itself lives with the
+   transport styles above, alongside repeat's. */
 
 .btn-fav:disabled {
   opacity: 0.5;
@@ -2996,10 +3072,11 @@ audio {
   flex-shrink: 0;
   width: 40px;
   height: 40px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   border: none;
-  background: var(--white);
-  color: var(--bg-page);
+  /* Matches the overlay's play button — same action, same colour. */
+  background: var(--accent);
+  color: var(--black);
   display: flex;
   align-items: center;
   justify-content: center;

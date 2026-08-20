@@ -320,14 +320,9 @@ export function setupPlayer() {
   onPlayerEvent("pause", syncPlayIcon);
   onPlayerEvent("ended", syncPlayIcon);
 
-  document.getElementById("back15").addEventListener("click", () => {
-    const audio = activeAudio();
-    audio.currentTime = Math.max(0, audio.currentTime - SKIP_SECONDS);
-  });
-  document.getElementById("fwd15").addEventListener("click", () => {
-    const audio = activeAudio();
-    audio.currentTime = Math.min(audio.duration || 0, audio.currentTime + SKIP_SECONDS);
-  });
+  // The ±15s buttons are gone from the transport (shuffle and repeat hold
+  // those slots now — see _player_controls.html), but skipping itself is
+  // still here on the arrow keys and on the Media Session handlers below.
 
   onPlayerEvent("loadedmetadata", () => {
     const audio = activeAudio();

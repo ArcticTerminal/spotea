@@ -11,7 +11,7 @@
 // several tracks in one page load instead of once per load.
 
 import { api, formatDuration, showToast } from "../core.js";
-import { refreshFragments } from "../fragments.js";
+import { refreshFragments, refreshQueuePanel } from "../fragments.js";
 import {
   activeAudio,
   applyNowPlayingMetadata,
@@ -25,12 +25,15 @@ import { clearResumeState, readResumeState } from "../resume.js";
 import {
   QUEUE_CHANGED,
   clearQueue,
+  cycleRepeat,
   isShuffled,
   nextId,
   noteCurrent,
   peekNextId,
   peekPreviousId,
   previousId,
+  queueFromCurrent,
+  repeatMode,
   toggleShuffle,
 } from "./queue.js";
 
@@ -368,6 +371,36 @@ function playFromQueue(contentId) {
  * QUEUE_CHANGED event rather than called from each mutation site, so a new
  * way of changing the queue can't forget to update the UI.
  */
+/**
+ * The "Queue" panel inside the player overlay: open/close, and keep it
+ * current while it's open.
+ *
+ * Only fetched while open. A queue is up to a thousand ids, and the panel is
+ * closed the vast majority of the time — the same reasoning that keeps the
+ * Downloads list out of refreshFragments()'s default sweep.
+ */
+function setupQueuePanel() {
+  const toggle = document.getElementById("queue-toggle");
+  const panel = document.getElementById("queue-panel");
+  if (!toggle || !panel) return;
+
+  const load = () => refreshQueuePanel(queueFromCurrent());
+
+  toggle.addEventListener("click", () => {
+    const opening = panel.hidden;
+    panel.hidden = !opening;
+    toggle.setAttribute("aria-expanded", String(opening));
+    toggle.classList.toggle("is-on", opening);
+    if (opening) load();
+  });
+
+  // Skipping a track, shuffling, or a track ending all change what "next" is
+  // while the panel is sitting open.
+  document.addEventListener(QUEUE_CHANGED, () => {
+    if (!panel.hidden) load();
+  });
+}
+
 function syncQueueControls() {
   const hasNext = peekNextId() !== null;
   const hasPrevious = peekPreviousId() !== null;
@@ -379,6 +412,20 @@ function syncQueueControls() {
   const shuffleBtn = document.getElementById("player-shuffle");
   shuffleBtn.classList.toggle("is-on", isShuffled());
   shuffleBtn.setAttribute("aria-pressed", String(isShuffled()));
+
+  // One button, three states. The label has to say which one is on: "Repeat"
+  // on its own leaves a screen reader with no way to tell them apart, and
+  // the difference between the two icons is a single numeral.
+  const repeat = repeatMode();
+  const repeatBtn = document.getElementById("player-repeat");
+  repeatBtn.dataset.repeat = repeat;
+  repeatBtn.classList.toggle("is-on", repeat !== "off");
+  repeatBtn.setAttribute(
+    "aria-label",
+    { off: "Repeat off", all: "Repeat queue", one: "Repeat this song" }[repeat]
+  );
+  document.getElementById("icon-repeat").hidden = repeat === "one";
+  document.getElementById("icon-repeat-one").hidden = repeat !== "one";
 
   if (!("mediaSession" in navigator)) return;
   // Nulled rather than left registered when there's nowhere to skip to: the
@@ -475,6 +522,17 @@ export function setupPlayerOverlay() {
       reportPlayback("outgoing-ended", { contentId: finished });
       return;
     }
+    // Repeat "one" only means anything here — pressing Next still means the
+    // next track. Rewinding and replaying rather than reopening the track
+    // keeps the already-loaded resource, so there's no "Preparing audio…"
+    // between loops.
+    if (repeatMode() === "one") {
+      const audio = activeAudio();
+      audio.currentTime = 0;
+      reportPlayback("track-ended", { contentId: finished, next: finished, repeat: "one" });
+      audio.play().catch(() => {});
+      return;
+    }
     const next = nextId();
     // The first breadcrumb of a handoff, and the one that makes the rest
     // legible: everything after it in the log either happened in this same
@@ -510,6 +568,11 @@ export function setupPlayerOverlay() {
   document.getElementById("next-track").addEventListener("click", () => playFromQueue(nextId()));
   document.getElementById("mini-player-next").addEventListener("click", () => playFromQueue(nextId()));
   document.getElementById("player-shuffle").addEventListener("click", () => toggleShuffle());
+  // Both announce a QUEUE_CHANGED, which is what repaints the buttons — no
+  // handler here touches its own control's appearance.
+  document.getElementById("player-repeat").addEventListener("click", () => cycleRepeat());
+
+  setupQueuePanel();
 
   document.addEventListener(QUEUE_CHANGED, syncQueueControls);
   syncQueueControls();
