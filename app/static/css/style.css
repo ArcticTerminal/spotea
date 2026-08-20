@@ -3187,11 +3187,17 @@ audio {
   height: 5px;
 }
 
+/* No safe-area padding here, deliberately. This bar only sits on the screen
+   edge on desktop, where the rule that adds it lives (see the min-width: 481px
+   block at the end of this file). On a phone the bottom navigation is below
+   it and already carries the inset, and .mini-player adds it a second time to
+   clear that bar — a third helping just left a band of empty raised
+   background under the controls. */
 .mini-player-bar {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.5rem 0.75rem calc(0.5rem + env(safe-area-inset-bottom, 0px)) 0.75rem;
+  padding: 0.5rem 0.75rem;
 }
 
 .mini-player-info {
@@ -3474,7 +3480,9 @@ body.has-mini-player .layout {
     grid-template-columns: 1fr auto 1fr;
     align-items: center;
     gap: var(--space-4);
-    padding: var(--space-2) var(--space-4);
+    /* The one place this bar really is against the bottom of the screen, so
+       the one place the inset belongs. */
+    padding: var(--space-2) var(--space-4) calc(var(--space-2) + env(safe-area-inset-bottom, 0px));
     max-width: 1100px;
     margin: 0 auto;
   }
@@ -3501,5 +3509,39 @@ body.has-mini-player .layout {
 @media (max-width: 480px) {
   #mini-player-prev {
     display: none;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   The on-screen keyboard.
+
+   js/viewport.js measures how much of the layout viewport the keyboard covers
+   and writes it here; see that file for why the measurement is done in JS
+   rather than left to the browser.
+
+   Last in the file on purpose. These override .layout and .mini-player rules
+   of equal specificity, and a rule that comes first simply loses — the same
+   trap the bottom-bar block above fell into.
+--------------------------------------------------------------------------- */
+:root {
+  --keyboard-inset: 0px;
+}
+
+@media (max-width: 480px) {
+  /* Both are docked to an edge the keyboard has taken over. Hiding them is
+     what every music app does while you type — the search field is the only
+     thing being used, and a transport bar wedged between the results and the
+     keys is in the way of both. They come straight back on blur. */
+  body.is-keyboard-open .tabs,
+  body.is-keyboard-open .mini-player {
+    display: none;
+  }
+
+  /* Room to scroll the rest of the page up out from under the keys. Without
+     it the last results are unreachable: the page ends where the keyboard
+     begins and there is nothing left to scroll. */
+  body.is-keyboard-open .layout,
+  body.has-mini-player.is-keyboard-open .layout {
+    padding-bottom: calc(var(--keyboard-inset) + 1rem);
   }
 }
