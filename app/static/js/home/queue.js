@@ -189,16 +189,22 @@ export function repeatMode() {
 }
 
 /**
- * What's playing and everything after it, in play order — the Queue panel's
- * whole input.
+ * The whole queue in play order — the Queue panel's input.
  *
- * Deliberately not the tracks already behind the pointer: a queue panel
- * answers "what's next", and a played-through playlist would otherwise open
- * it on a wall of history with the interesting part at the bottom.
+ * All of it, including what's already been played. The panel used to be
+ * handed only the tracks from the pointer onwards, which meant choosing the
+ * tenth row rebuilt the list without the nine above it: the rows moved under
+ * the finger that had just picked one, and there was no way back to a track
+ * you'd passed. With the full order the panel is a fixed list and playing
+ * something only moves a marker down it.
  */
-export function queueFromCurrent() {
-  if (state.position < 0) return [];
-  return state.order.slice(state.position);
+export function queueOrder() {
+  return state.order.slice();
+}
+
+/** What's playing, or null. The panel marks this row rather than re-rendering. */
+export function currentId() {
+  return state.position < 0 ? null : (state.order[state.position] ?? null);
 }
 
 /**

@@ -348,9 +348,12 @@ def test_queue_fragment_renders_the_ids_in_the_order_it_was_given(client, db_ses
 
     positions = [body.index(f'data-content-id="{content_id}"') for content_id in wanted]
     assert positions == sorted(positions)
-    # The first id is what's playing; the rest are what's next.
-    assert body.index("Now playing") < body.index("Saved And Played")
-    assert body.index("Next up") < body.index("Fresh Upload")
+    # Every id asked for, including the one being played. The panel used to be
+    # handed only the tracks ahead of the pointer, which meant picking a row
+    # rebuilt the list without the ones above it; which row is current is
+    # marked in the browser now, so nothing here says so.
+    assert body.count('class="track-row"') == len(wanted)
+    assert "is-current" not in body
 
 
 def test_queue_fragment_ignores_ids_that_arent_the_users(client, db_session):

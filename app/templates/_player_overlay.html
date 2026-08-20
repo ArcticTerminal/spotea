@@ -26,9 +26,18 @@
 
     <!-- Starts empty and closed. The queue lives in the browser, so there is
          nothing to render here until the panel is opened and home/overlay.js
-         fetches /partials/queue with the ids it holds. -->
-    <div id="queue-panel" class="queue-panel" hidden>
-      <div id="queue-panel-body"></div>
+         fetches /partials/queue with the ids it holds.
+
+         Closed by a class rather than `hidden`, and wrapped: `display: none`
+         has nothing to animate between, so the panel is a grid collapsed to
+         0fr and the wrapper is what clips its contents on the way. The
+         border and padding live on the body inside that wrapper so they are
+         clipped too — left on the panel they'd draw a stray line under the
+         controls with nothing beneath it. -->
+    <div id="queue-panel" class="queue-panel">
+      <div class="queue-panel-inner">
+        <div id="queue-panel-body"></div>
+      </div>
     </div>
   </div>
 </div>

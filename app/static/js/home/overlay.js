@@ -25,6 +25,7 @@ import { clearResumeState, readResumeState } from "../resume.js";
 import {
   QUEUE_CHANGED,
   clearQueue,
+  currentId,
   cycleRepeat,
   isShuffled,
   loadQueue,
@@ -33,7 +34,7 @@ import {
   peekNextId,
   peekPreviousId,
   previousId,
-  queueFromCurrent,
+  queueOrder,
   repeatMode,
   toggleShuffle,
 } from "./queue.js";
@@ -384,31 +385,101 @@ function playFromQueue(contentId) {
  * closed the vast majority of the time — the same reasoning that keeps the
  * Downloads list out of refreshFragments()'s default sweep.
  */
+/** Moves the "playing" marker without touching a single row's markup. */
+function markCurrentQueueRow() {
+  const playing = currentId();
+  for (const row of document.querySelectorAll("#queue-panel-body .track-row")) {
+    row.classList.toggle("is-current", Number(row.dataset.contentId) === playing);
+  }
+}
+
+/**
+ * Scrolls the open panel into view while leaving the bottom half of the
+ * artwork on screen.
+ *
+ * Not scrollIntoView: that puts the panel's top edge at the top of the
+ * viewport and takes the whole player with it, so opening the queue read as
+ * leaving the track you were listening to. Stopping at the middle of the
+ * cover keeps what's playing visible above what's next, which is the reason
+ * to open a queue mid-track at all.
+ */
+function scrollQueueIntoView() {
+  const overlay = document.getElementById("player-overlay");
+  const art = document.querySelector(".player-art");
+  if (!overlay || !art) return;
+  const artRect = art.getBoundingClientRect();
+  const top = overlay.scrollTop + artRect.top - overlay.getBoundingClientRect().top + artRect.height / 2;
+  overlay.scrollTo({ top, behavior: "smooth" });
+}
+
+/** Resolves when `el` finishes a transition, or after `timeout` regardless —
+ *  a transition that never starts (reduced motion, an already-open panel)
+ *  would otherwise leave the caller waiting forever. */
+function transitionEnd(el, timeout) {
+  return new Promise((resolve) => {
+    const done = () => {
+      el.removeEventListener("transitionend", done);
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(done, timeout);
+    el.addEventListener("transitionend", done);
+  });
+}
+
 function setupQueuePanel() {
   const toggle = document.getElementById("queue-toggle");
   const panel = document.getElementById("queue-panel");
   if (!toggle || !panel) return;
 
-  const load = () => refreshQueuePanel(queueFromCurrent());
+  // The order the rows on screen were drawn from, so a QUEUE_CHANGED can tell
+  // "the pointer moved" from "the list is different".
+  let rendered = [];
+
+  // The full order, not just what's ahead: the panel is a fixed list and the
+  // marker moves down it (see queue.js's queueOrder).
+  const load = async () => {
+    const order = queueOrder();
+    const ok = await refreshQueuePanel(order);
+    if (ok) rendered = order;
+    markCurrentQueueRow();
+    return ok;
+  };
 
   toggle.addEventListener("click", async () => {
-    const opening = panel.hidden;
-    panel.hidden = !opening;
+    const opening = !panel.classList.contains("is-open");
     toggle.setAttribute("aria-expanded", String(opening));
     toggle.classList.toggle("is-on", opening);
-    if (!opening) return;
-    // The panel opens below the transport, which on a phone is already at the
-    // bottom of the screen — so without this, tapping Queue looks like it did
-    // nothing at all. Awaited first: scrolling to an empty container just
-    // scrolls to the bottom of the card and lands nowhere near the rows.
+    if (!opening) {
+      panel.classList.remove("is-open");
+      // Back to the player, rather than leaving the card parked wherever the
+      // now-collapsed queue had pushed it.
+      document.getElementById("player-overlay")?.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+    // Loaded before the class goes on, so the panel expands to its real
+    // height in one movement rather than opening empty and then jumping.
     await load();
-    panel.scrollIntoView({ behavior: "smooth", block: "start" });
+    panel.classList.add("is-open");
+    // Only once the expansion is done: the overlay can't scroll further than
+    // it currently reaches, so a scroll issued mid-transition stops short.
+    await transitionEnd(panel, 400);
+    scrollQueueIntoView();
   });
 
-  // Skipping a track, shuffling, or a track ending all change what "next" is
-  // while the panel is sitting open.
+  // Everything that changes the queue lands here. Two different jobs: when
+  // only the pointer moved — a track ended, or one of these very rows was
+  // picked — the list on screen is still correct and re-fetching it would
+  // rebuild it under the user, so only the marker moves. A different order
+  // (shuffle toggled, a new queue loaded) genuinely needs new rows.
   document.addEventListener(QUEUE_CHANGED, () => {
-    if (!panel.hidden) load();
+    if (!panel.classList.contains("is-open")) return;
+    const order = queueOrder();
+    if (order.length === rendered.length && order.every((id, i) => id === rendered[i])) {
+      markCurrentQueueRow();
+      return;
+    }
+    load();
   });
 }
 

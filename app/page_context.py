@@ -296,11 +296,14 @@ def queue_panel_context(db: Session, user_id: int, ids: list[int]) -> dict:
 
     The queue itself lives in the browser (static/js/home/queue.js owns the
     order, and shuffle makes it one the server never computed), so the ids
-    arrive from the client and this only turns them into rows. The first id
-    is whatever is playing; the rest are what's next.
+    arrive from the client and this only turns them into rows.
+
+    All of them, in order, with no notion of which one is playing: that moves
+    every time a track ends, and asking the server again each time is what
+    used to rebuild the list under the user. The browser owns the pointer and
+    marks the row itself.
     """
-    rows = query_content_by_ids(db, user_id, ids)
-    return {"queue_current": rows[0] if rows else None, "queue_upcoming": rows[1:]}
+    return {"queue_items": query_content_by_ids(db, user_id, ids)}
 
 
 def playlist_filter(kind: str) -> str | None:

@@ -3038,16 +3038,61 @@ audio {
 
    Letting the panel take its full height leaves the overlay as the only
    thing that scrolls, so a swipe means one thing wherever it starts. A long
-   queue makes a long page, which is what a queue is. */
+   queue makes a long page, which is what a queue is.
+
+   The open/close is a grid row animating 0fr to 1fr, which is the one way to
+   transition to a height nobody knows in advance — `height: auto` isn't
+   interpolable, and a max-height guess either clips a long queue or spends
+   the whole transition animating empty space. */
 .queue-panel {
-  margin-top: var(--space-5);
-  border-top: 1px solid var(--border-subtle);
-  padding-top: var(--space-4);
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 260ms ease;
   text-align: left;
 }
 
-.queue-panel[hidden] {
-  display: none;
+.queue-panel.is-open {
+  grid-template-rows: 1fr;
+}
+
+/* The clipper. visibility, not just overflow: a collapsed row still holds
+   focusable rows, and tabbing into a list you can't see is worse than not
+   reaching it. Delayed on the way out so it doesn't blink away before the
+   collapse has finished. */
+.queue-panel-inner {
+  overflow: hidden;
+  visibility: hidden;
+  transition: visibility 0s linear 260ms;
+}
+
+.queue-panel.is-open .queue-panel-inner {
+  visibility: visible;
+  transition-delay: 0s;
+}
+
+/* On the body rather than the panel so the collapse clips them too. */
+#queue-panel-body {
+  margin-top: var(--space-5);
+  border-top: 1px solid var(--border-subtle);
+  padding-top: var(--space-4);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .queue-panel,
+  .queue-panel-inner {
+    transition: none;
+  }
+}
+
+/* Which row is playing. Set by the browser, not the server — see
+   _queue_panel.html. */
+.track-row.is-current {
+  background: var(--bg-raised);
+}
+
+.track-row.is-current .track-title,
+.track-row.is-current .track-index {
+  color: var(--accent);
 }
 
 .queue-heading {
