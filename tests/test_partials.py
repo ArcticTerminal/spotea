@@ -354,6 +354,11 @@ def test_queue_fragment_renders_the_ids_in_the_order_it_was_given(client, db_ses
     # marked in the browser now, so nothing here says so.
     assert body.count('class="track-row"') == len(wanted)
     assert "is-current" not in body
+    # A queue row is for playing, and nothing else: bookmarking a track out of
+    # the list you are already listening to saves it to listen to later. The
+    # same template still renders the button everywhere else, which is what
+    # makes this worth pinning.
+    assert "btn-save" not in body
 
 
 def test_queue_fragment_ignores_ids_that_arent_the_users(client, db_session):

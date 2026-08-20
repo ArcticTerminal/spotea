@@ -98,6 +98,10 @@ function expandPlayer() {
 }
 
 function collapsePlayer() {
+  // Shut behind us: the overlay is the full-size player, and coming back to
+  // it half-collapsed under a queue nobody asked to reopen is a state the
+  // user never chose.
+  setQueueOpen(false);
   document.getElementById("player-overlay").hidden = true;
 }
 
@@ -394,38 +398,31 @@ function markCurrentQueueRow() {
 }
 
 /**
- * Scrolls the open panel into view while leaving the bottom half of the
- * artwork on screen.
+ * Opens or closes the queue.
  *
- * Not scrollIntoView: that puts the panel's top edge at the top of the
- * viewport and takes the whole player with it, so opening the queue read as
- * leaving the track you were listening to. Stopping at the middle of the
- * cover keeps what's playing visible above what's next, which is the reason
- * to open a queue mid-track at all.
+ * Nothing scrolls and nothing is measured: the panel's height is the space
+ * the card has spare, and the artwork gives that space up over the same
+ * transition (see style.css's .queue-panel). The class on the overlay is
+ * what stops the overlay scrolling while it's open, so the player can't be
+ * pushed off the top of the screen by a flick through the list.
+ *
+ * Module-level rather than part of setupQueuePanel's closure because
+ * collapsing or closing the player has to be able to shut the panel too.
  */
-function scrollQueueIntoView() {
+function setQueueOpen(open) {
+  const panel = document.getElementById("queue-panel");
+  const toggle = document.getElementById("queue-toggle");
   const overlay = document.getElementById("player-overlay");
-  const art = document.querySelector(".player-art");
-  if (!overlay || !art) return;
-  const artRect = art.getBoundingClientRect();
-  const top = overlay.scrollTop + artRect.top - overlay.getBoundingClientRect().top + artRect.height / 2;
-  overlay.scrollTo({ top, behavior: "smooth" });
+  if (!panel || !toggle || !overlay) return;
+  panel.classList.toggle("is-open", open);
+  overlay.classList.toggle("is-queue-open", open);
+  toggle.classList.toggle("is-on", open);
+  toggle.setAttribute("aria-expanded", String(open));
 }
 
-/** Resolves when `el` finishes a transition, or after `timeout` regardless —
- *  a transition that never starts (reduced motion, an already-open panel)
- *  would otherwise leave the caller waiting forever. */
-function transitionEnd(el, timeout) {
-  return new Promise((resolve) => {
-    const done = () => {
-      el.removeEventListener("transitionend", done);
-      clearTimeout(timer);
-      resolve();
-    };
-    const timer = setTimeout(done, timeout);
-    el.addEventListener("transitionend", done);
-  });
-}
+// How far down the player has to be dragged before the queue closes: past
+// the wobble in a tap, well short of a deliberate pull.
+const QUEUE_DRAG_CLOSE_PX = 48;
 
 function setupQueuePanel() {
   const toggle = document.getElementById("queue-toggle");
@@ -446,26 +443,38 @@ function setupQueuePanel() {
     return ok;
   };
 
-  toggle.addEventListener("click", async () => {
+  toggle.addEventListener("click", () => {
     const opening = !panel.classList.contains("is-open");
-    toggle.setAttribute("aria-expanded", String(opening));
-    toggle.classList.toggle("is-on", opening);
-    if (!opening) {
-      panel.classList.remove("is-open");
-      // Back to the player, rather than leaving the card parked wherever the
-      // now-collapsed queue had pushed it.
-      document.getElementById("player-overlay")?.scrollTo({ top: 0, behavior: "smooth" });
-      return;
-    }
-    // Loaded before the class goes on, so the panel expands to its real
-    // height in one movement rather than opening empty and then jumping.
-    await load();
-    panel.classList.add("is-open");
-    // Only once the expansion is done: the overlay can't scroll further than
-    // it currently reaches, so a scroll issued mid-transition stops short.
-    await transitionEnd(panel, 400);
-    scrollQueueIntoView();
+    // The class goes on first and the rows land whenever they land. The panel
+    // opens to a share of the card's height rather than to the height of its
+    // contents, so the animation has nothing to wait for — and waiting is
+    // what used to make the button read as doing nothing for a moment and
+    // then jumping.
+    setQueueOpen(opening);
+    if (opening) load();
   });
+
+  // Grab the player, pull down, the queue closes — the gesture that dismisses
+  // a sheet everywhere else. Bound to the card so it can skip the queue
+  // itself (which scrolls) and the controls, whose own drags already mean
+  // something: pulling down on the seek slider must not close anything.
+  const card = document.getElementById("player-root");
+  let dragFrom = null;
+  card.addEventListener("pointerdown", (event) => {
+    if (!panel.classList.contains("is-open")) return;
+    if (event.target.closest("#queue-panel, input, button, a")) return;
+    dragFrom = event.clientY;
+  });
+  card.addEventListener("pointermove", (event) => {
+    if (dragFrom === null || event.clientY - dragFrom < QUEUE_DRAG_CLOSE_PX) return;
+    dragFrom = null;
+    setQueueOpen(false);
+  });
+  const endDrag = () => {
+    dragFrom = null;
+  };
+  card.addEventListener("pointerup", endDrag);
+  card.addEventListener("pointercancel", endDrag);
 
   // Everything that changes the queue lands here. Two different jobs: when
   // only the pointer moved — a track ended, or one of these very rows was
@@ -510,8 +519,15 @@ function syncQueueControls() {
     "aria-label",
     { off: "Repeat off", all: "Repeat queue", one: "Repeat this song" }[repeat]
   );
-  document.getElementById("icon-repeat").hidden = repeat === "one";
-  document.getElementById("icon-repeat-one").hidden = repeat !== "one";
+  // toggleAttribute, not `.hidden =`. These are <svg> elements, and
+  // SVGElement has no `hidden` IDL property — the assignment quietly created
+  // a plain JS property and never touched the attribute, so CSS's
+  // `svg[hidden]` never matched and the icon never changed. Both repeat
+  // states therefore drew the same icon: pressing twice looked like the
+  // button had stuck on. (player.js's showIcon carries the same note; this
+  // is the one place that forgot it.)
+  document.getElementById("icon-repeat").toggleAttribute("hidden", repeat === "one");
+  document.getElementById("icon-repeat-one").toggleAttribute("hidden", repeat !== "one");
 
   if (!("mediaSession" in navigator)) return;
   // Nulled rather than left registered when there's nowhere to skip to: the
@@ -543,6 +559,7 @@ export function closePlayer() {
   root.dataset.stream = "";
   upcomingTrack = null;
 
+  setQueueOpen(false);
   document.getElementById("player-overlay").hidden = true;
   document.getElementById("mini-player").hidden = true;
   document.body.classList.remove("has-mini-player");

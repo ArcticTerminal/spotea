@@ -2689,11 +2689,22 @@ button.track-link {
   transform: translateY(0);
 }
 
+/* A full-height column, not a block that happens to be centred, so that
+   opening the queue is a matter of how the card divides its own height —
+   the artwork gives space up, the queue takes it — rather than of scrolling
+   the card around inside the overlay. See .queue-panel.
+
+   `safe center` keeps the contents centred while they're shorter than the
+   card and falls back to the top once they aren't, which is the overflow
+   trap .player-overlay's note describes. A browser without `safe` drops the
+   declaration entirely and lands on flex-start, i.e. the same fallback. */
 .player-card {
   width: 100%;
   max-width: 380px;
-  /* Centres vertically without the overflow trap — see .player-overlay. */
-  margin: auto;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: safe center;
 }
 
 .back-link {
@@ -2733,6 +2744,15 @@ button.track-link {
   margin: 0 auto var(--space-5);
   background: var(--bg-input);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
+  /* The cap is what the queue opens against: it animates down to
+     ART_COMPACT_HEIGHT and the space it gives up is what the queue grows
+     into (see .queue-panel). Stated here as well as there because a
+     transition needs a length at both ends — from `none` there is nothing to
+     interpolate — and 340px is the width cap above, so it changes nothing
+     while the queue is shut. */
+  flex: 0 0 auto;
+  max-height: 340px;
+  transition: max-height 260ms ease;
 }
 
 .player-art img {
@@ -3028,38 +3048,45 @@ audio {
    screen and reachable while you look at what's next, which is the whole
    reason to open a queue mid-track.
 
-   No scroll area of its own, deliberately.
+   The panel takes a share of the card's own height rather than adding to it,
+   which is what keeps the player still. Two earlier versions both moved it:
+   capping the panel at 45vh with its own scroller put a scroll container
+   inside the overlay's, and on a touch screen the gesture gets handed from
+   one to the other the moment the inner one hits an end — a flick stops dead
+   partway and the last row can't be brought up. Letting the panel run to its
+   full height instead made the card taller than the screen, so reaching the
+   queue meant scrolling the player off the top of it.
 
-   It used to cap itself at 45vh and scroll internally, which put a scroll
-   container inside the overlay's scroll container. On a touch screen that
-   means the gesture gets handed from one to the other the moment the inner
-   one hits an end: a flick stops dead partway, and the last row often can't
-   be brought up at all because the hand-off eats the rest of the swipe.
+   Here the overlay stops scrolling altogether while the panel is open (see
+   .player-overlay.is-queue-open), so there is still only ever one scroller —
+   it's just this one rather than the overlay. The player cannot move,
+   because there is nowhere for it to move to.
 
-   Letting the panel take its full height leaves the overlay as the only
-   thing that scrolls, so a swipe means one thing wherever it starts. A long
-   queue makes a long page, which is what a queue is.
-
-   The open/close is a grid row animating 0fr to 1fr, which is the one way to
-   transition to a height nobody knows in advance — `height: auto` isn't
-   interpolable, and a max-height guess either clips a long queue or spends
-   the whole transition animating empty space. */
+   The open/close animates flex-grow, 0 to 1: the panel's height is whatever
+   space the card has spare, and the artwork's max-height transition is
+   what's freeing that space over the same 260ms. Nothing here needs to know
+   how tall the queue is — `height: auto` isn't interpolable and a max-height
+   guess either clips a long queue or animates empty space. */
 .queue-panel {
-  display: grid;
-  grid-template-rows: 0fr;
-  transition: grid-template-rows 260ms ease;
+  display: flex;
+  flex-direction: column;
+  flex: 0 1 0;
+  min-height: 0;
+  transition: flex-grow 260ms ease;
   text-align: left;
 }
 
 .queue-panel.is-open {
-  grid-template-rows: 1fr;
+  flex-grow: 1;
 }
 
-/* The clipper. visibility, not just overflow: a collapsed row still holds
-   focusable rows, and tabbing into a list you can't see is worse than not
-   reaching it. Delayed on the way out so it doesn't blink away before the
-   collapse has finished. */
+/* The clipper, and once open the scroller. visibility, not just overflow: a
+   collapsed panel still holds focusable rows, and tabbing into a list you
+   can't see is worse than not reaching it. Delayed on the way out so it
+   doesn't blink away before the collapse has finished. */
 .queue-panel-inner {
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: hidden;
   visibility: hidden;
   transition: visibility 0s linear 260ms;
@@ -3067,6 +3094,11 @@ audio {
 
 .queue-panel.is-open .queue-panel-inner {
   visibility: visible;
+  overflow-y: auto;
+  /* The overlay behind this can't scroll while the panel is open, but the
+     page behind *that* can — without this a flick that runs off the end of
+     the queue scrolls Home underneath the player. */
+  overscroll-behavior: contain;
   transition-delay: 0s;
 }
 
@@ -3079,7 +3111,8 @@ audio {
 
 @media (prefers-reduced-motion: reduce) {
   .queue-panel,
-  .queue-panel-inner {
+  .queue-panel-inner,
+  .player-art {
     transition: none;
   }
 }
@@ -3210,12 +3243,13 @@ audio {
   inset: 0;
   z-index: 1000;
   display: flex;
-  /* flex-start plus `margin: auto` on the card, not `align-items: center`.
-     A centred flex item taller than its scroll container overflows in both
-     directions and the top half becomes unreachable — there is no scroll
-     position that reveals it. Auto margins centre the card while it's short
-     and give way once it isn't, which is what an open queue makes it. */
-  align-items: flex-start;
+  /* stretch, not `align-items: center`. A centred flex item taller than its
+     scroll container overflows in both directions and the top half becomes
+     unreachable — there is no scroll position that reveals it. Stretching
+     hands the card the full height and lets it centre its own contents
+     instead (see .player-card), which has a defined answer for the case
+     where they don't fit. */
+  align-items: stretch;
   justify-content: center;
   /* The bottom inset matters now that a queue can run past the fold: without
      it the last row ends under the home indicator. */
@@ -3231,6 +3265,31 @@ audio {
   display: none;
 }
 
+/* With the queue open the overlay is not a scroller at all: the queue is
+   (see .queue-panel), and the player above it has to stay exactly where it
+   is however hard the list is flicked. */
+.player-overlay.is-queue-open {
+  overflow: hidden;
+}
+
+/* Half the cover, so the queue has somewhere to go. Cropped rather than
+   scaled — object-fit keeps the artwork's proportions and takes the crop off
+   both edges, so it reads as the cover closing rather than squashing. */
+.player-overlay.is-queue-open .player-art {
+  max-height: 150px;
+}
+
+/* The drag handle for "pull the player down to close the queue" (see
+   home/overlay.js). Without this the browser claims the downward swipe for
+   the page behind the overlay and cancels the gesture halfway through.
+   Scoped to these two elements rather than the card so that the seek and
+   volume sliders inside it keep their own touch behaviour — an ancestor
+   saying `none` would override theirs. */
+.player-overlay.is-queue-open .player-art,
+.player-overlay.is-queue-open .player-meta {
+  touch-action: none;
+}
+
 
 /* Unlike .back-link elsewhere (the detail panel, sitting under the sticky
    topbar, which already clears the notch/Dynamic Island itself), this one is
@@ -3238,6 +3297,9 @@ audio {
    above it — it has to clear that safe area on its own. */
 .player-overlay .back-link {
   margin-top: env(safe-area-inset-top, 0px);
+  /* It's an inline-flex elsewhere; as a flex item of the card it would
+     stretch to the full width and turn the whole line into a tap target. */
+  align-self: flex-start;
 }
 
 /* Modeled on YouTube Music/Apple Music's mobile mini-player: a flush bar
