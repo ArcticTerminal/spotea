@@ -15,6 +15,22 @@ export function setupDownloadsOverlay() {
   });
 }
 
+/** What "Clear all" is about to delete, in the numbers already on screen.
+ *
+ *  A confirmation that only says "delete all downloaded audio?" leaves the
+ *  user to remember how much that is. The summary line right above the button
+ *  knows — it is rendered from the same usage figures (see _downloads.html) —
+ *  so the prompt quotes it back, and then says what *isn't* going away, which
+ *  is the part that actually decides the answer. */
+function clearDownloadsPrompt() {
+  const total = document.getElementById("storage-total")?.textContent.trim();
+  const scale = total ? ` (${total})` : "";
+  return (
+    `Delete every downloaded file${scale}? ` +
+    "Your artists and saved songs stay, and anything you play downloads again."
+  );
+}
+
 /** Confirm, then call, then re-render whatever it changed. `alsoDownloads`
     is for the two actions below that run *from inside* the open Downloads
     modal (clear all, remove one) — refreshFragments() alone no longer
@@ -51,7 +67,7 @@ export function setupStorage() {
   document.getElementById("downloads-body")?.addEventListener("click", (event) => {
     if (event.target.closest("#clear-storage")) {
       confirmedAction(
-        "Delete all downloaded audio? Your artists and saved songs stay — you can download anything again by playing it.",
+        clearDownloadsPrompt(),
         "Clear all",
         "/storage",
         { method: "DELETE", errorMessage: "Could not clear downloads" },

@@ -2440,19 +2440,25 @@ button.track-link {
   color: var(--white);
 }
 
+/* Quiet by default. This was a solid fill, which made deleting every
+   downloaded file the loudest control on the panel — louder than the
+   harmless "Export all" beside it — so visual weight ran opposite to how
+   much the action costs. The red arrives on hover, once the pointer is
+   already on it. */
 .btn-danger {
-  background: var(--danger);
-  border: none;
-  color: var(--black);
-  border-radius: 6px;
-  padding: 0.5rem 1.15rem;
-  font-size: 0.85rem;
-  font-weight: 700;
+  background: transparent;
+  border: 1px solid var(--border-default);
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-md);
+  font-weight: 600;
   cursor: pointer;
 }
 
 .btn-danger:hover {
-  background: var(--danger-hover);
+  color: var(--danger);
+  border-color: var(--danger);
 }
 
 .btn-primary {
