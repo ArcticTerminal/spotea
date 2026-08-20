@@ -1661,6 +1661,14 @@ button.track-link {
   white-space: nowrap;
 }
 
+/* _mood_panel.html reuses .channel-hero-title's type but skips
+   .channel-hero's own layout entirely (no avatar, no Play/Shuffle to pin
+   against) — so it needs its own bottom margin, matching .channel-hero's,
+   to keep the same gap above the playlist shelf below it. */
+.mood-panel-title {
+  margin-bottom: 1.75rem;
+}
+
 /* Narrow phones: shrink the avatar and title so the row still has room for
    the detail-actions (Play/Shuffle) column on the right. Title/count/
    Unfollow already stack inside .channel-hero-info at every width. */

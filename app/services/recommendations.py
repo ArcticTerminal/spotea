@@ -1,6 +1,6 @@
 """Explore's browse shelves: songs, channels and playlists picked from the
-interests listed in Settings, plus the charts and one mood shelf,
-which belong to nobody in particular.
+interests listed in Settings, plus the charts and the full list of mood/
+genre categories, which belong to nobody in particular.
 
 There is no recommender model here and no user-behaviour signal — an interest
 is a free-text phrase, and a recommendation is what YouTube search returns for
@@ -48,7 +48,6 @@ from app.timeutil import utcnow
 from app.youtube.music import (
     fetch_charts,
     fetch_mood_categories,
-    fetch_mood_playlists,
     search_artists,
     search_songs,
 )
@@ -78,16 +77,12 @@ _POOL_SIZE = INTERESTS_PER_RUN * 3 + 2
 # and a half of horizontal scrolling, which is as far as anyone browses one.
 RESULTS_PER_SHELF = 12
 
-# How many mood categories a run will try before giving up on that shelf.
-# Only the first is paid for on a normal run — see _mood_shelf.
-MOOD_SHELF_ATTEMPTS = 3
-
 # Bumped whenever the shape of a stored batch changes. It rides along on the
 # cached signature, so every existing row stops matching and rebuilds on its
 # own — which is what keeps this module free to add a shelf without a
 # migration, and without a reader having to defend against a payload written
 # by an older version of itself.
-PAYLOAD_VERSION = "v3"
+PAYLOAD_VERSION = "v4"
 
 # Every shelf comes from YouTube Music, which indexes tracks and artists
 # rather than videos and channels. The "channels" key is what the cached
@@ -120,7 +115,7 @@ def empty_batch() -> dict:
         "playlists": [],
         "charts": [],
         "chart_artists": [],
-        "mood": None,
+        "moods": [],
     }
 
 
@@ -138,39 +133,24 @@ def _charts_shelves() -> dict:
     }
 
 
-def _mood_shelf() -> dict:
-    """One of YouTube Music's forty-odd moods and genres, picked at random,
-    with its playlists.
+def _mood_categories() -> dict:
+    """Every one of YouTube Music's moods (not genres — see
+    fetch_mood_categories' MOOD_SECTION on why only that section is safe to
+    list), for Explore's own "Moods & genres" browse row.
 
-    One rather than all of them for the same reason interests are sampled:
-    a run should cost a bounded number of requests, and refreshing should
-    land somewhere different rather than redrawing the same shelf. The
-    category's own name is the shelf title — "Chill" and "Bollywood &
-    Indian" say what they are, and a generic "Moods" heading over one of
-    them would not.
+    All of them rather than one at random: the user picks which to open, so
+    this has to be the full list, not a sample — the point of showing it at
+    all is letting someone see "Sad" is an option before they'd think to ask
+    for it. Still bounded to one request: this lists categories, not their
+    playlists, and a category's playlists are only fetched once someone
+    actually opens it (see remote_detail.remote_mood_context).
     """
-    categories = fetch_mood_categories()
-    # A second and third pick, only if the first comes back empty. Even
-    # inside the section that mostly works, the occasional category still
-    # trips ytmusicapi's playlist parser (see music.MOOD_SECTION), and
-    # losing the whole shelf to one of those is a worse outcome than one
-    # extra request on the rare run that hits one.
-    for category in random.sample(categories, min(len(categories), MOOD_SHELF_ATTEMPTS)):
-        playlists = fetch_mood_playlists(category.params, RESULTS_PER_SHELF)
-        if playlists:
-            return {
-                "mood": {
-                    "title": category.title,
-                    "section": category.section,
-                    "playlists": [asdict(playlist) for playlist in playlists],
-                }
-            }
-    return {"mood": None}
+    return {"moods": [asdict(category) for category in fetch_mood_categories()]}
 
 
 # Shelves built without reference to the interest list, so they fill in even
 # for a library that has listed none.
-_BROWSE_BUILDERS = (_charts_shelves, _mood_shelf)
+_BROWSE_BUILDERS = (_charts_shelves, _mood_categories)
 
 
 def _sample(interests: list[str]) -> list[str]:
@@ -234,14 +214,14 @@ def build_batch(interests: list[str]) -> dict:
 
     logger.info(
         "Built recommendations for %s: %d songs, %d channels, %d playlists, "
-        "%d charts, %d charting artists, mood %s",
+        "%d charts, %d charting artists, %d moods",
         ", ".join(sampled) or "no interests",
         len(batch["videos"]),
         len(batch["channels"]),
         len(batch["playlists"]),
         len(batch["charts"]),
         len(batch["chart_artists"]),
-        (batch["mood"] or {}).get("title", "—"),
+        len(batch["moods"]),
     )
     return batch
 

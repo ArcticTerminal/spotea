@@ -24,17 +24,18 @@
     //
     // An artist/playlist hash resolves to the "detail" panel instead — kept
     // out of VALID_TABS itself so those routes can't get treated as a
-    // remembered tab. That includes the two yt-* routes, which are the same
-    // panel showing a YouTube Music playlist or an artist (see
-    // services/remote_detail.py). home/detail.js re-parses the hash after module load to
-    // actually fetch and fill the panel; this only has to get first paint
-    // right. A player/<id> hash is deliberately not handled here at all — it
+    // remembered tab. That includes every yt-* route, which are all the
+    // same panel showing something YouTube Music has that this app doesn't
+    // (see services/remote_detail.py). home/detail.js re-parses the hash
+    // after module load to actually fetch and fill the panel; this only has
+    // to get first paint right. A player/<id> hash is deliberately not
+    // handled here at all — it
     // opens the overlay on top of whatever tab/detail this same logic
     // resolves to, not a tab switch of its own.
     (function () {
       var VALID_TABS = ["home", "library", "explore", "settings"];
       var PLAYLIST_KINDS = ["favorites", "saved", "new-uploads", "recently-played"];
-      var DETAIL_PREFIXES = ["yt-artist/", "yt-artist-songs/", "yt-release/", "yt-playlist/"];
+      var DETAIL_PREFIXES = ["yt-artist/", "yt-artist-songs/", "yt-release/", "yt-playlist/", "yt-mood/"];
       var hash = location.hash.slice(1).split("?")[0];
       var isDetail =
         PLAYLIST_KINDS.indexOf(hash) !== -1 ||

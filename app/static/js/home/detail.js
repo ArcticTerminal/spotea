@@ -5,17 +5,18 @@
 // mini-bar alive while browsing one, since there's no longer a document
 // boundary for that DOM to fall off of.
 //
-// Five things open it, and they differ only in where the rows come from:
-//   channel/{feed_id}     a followed channel        (from Library)
+// Several things open it, and they differ only in where the rows come from:
 //   {playlist kind}       one of the four pinned    (from Library)
 //   yt-playlist/{id}      a YouTube playlist        (from Explore)
 //   yt-artist/{id}        an artist's profile       (from Explore)
 //   yt-artist-songs/{id}  that artist's whole list   (from the profile)
 //   yt-release/{id}       one album or single        (from the profile)
-// All but the first two are "remote": their rows have no Content row yet, so
+//   yt-mood/{params}      a mood's playlists         (from Explore)
+// All but the first are "remote": their rows have no Content row yet, so
 // playing from them goes through home/remote.js, which materializes the list
-// first. The artist profile is the one body that isn't a track list at all
-// (see templates/_artist_panel.html); its shelves are wired below.
+// first. The artist profile and a mood's playlist shelf are the two bodies
+// that aren't a track list at all (see templates/_artist_panel.html and
+// _mood_panel.html); their cards are wired below.
 
 import { unfollowArtist } from "../content-actions.js";
 import { classifyHash, showToast } from "../core.js";
@@ -27,7 +28,7 @@ import { ARTIST_FOLLOWED, followArtist, playRemoteList, playRemoteVideo } from "
 import { activate } from "./tabs.js";
 
 // Detail kinds whose rows come from YouTube rather than the database.
-const REMOTE_KINDS = ["yt-playlist", "yt-artist", "yt-artist-songs", "yt-release"];
+const REMOTE_KINDS = ["yt-playlist", "yt-artist", "yt-artist-songs", "yt-release", "yt-mood"];
 const isRemoteKind = (kind) => REMOTE_KINDS.includes(kind);
 
 // Remote fragment HTML already fetched this session, keyed by the exact
@@ -62,10 +63,16 @@ let current = null;
 // the kind itself, and take the /playlist/{kind} route.
 const hasId = isRemoteKind;
 
-function detailUrl(kind, id, page) {
+function detailUrl(kind, id, page, title) {
   const base = hasId(kind) ? `/partials/detail/${kind}/${id}` : `/partials/detail/playlist/${kind}`;
   const params = new URLSearchParams();
   if (page > 1) params.set("page", page);
+  // Only yt-mood takes this (see routers/partials.py's remote_mood_fragment)
+  // — passed straight through rather than threaded into hashFor/classifyHash
+  // too, since it's a display optimization, not part of what a mood route
+  // means: a reload or a shared link works fine without it, just at the cost
+  // of one extra lookup server-side.
+  if (title) params.set("title", title);
   const query = params.toString();
   return query ? `${base}?${query}` : base;
 }
@@ -93,7 +100,7 @@ function showLoading() {
  * so the back button can return where it came from.
  *
  */
-export async function openDetail(kind, id, { page = 1, replace = false } = {}) {
+export async function openDetail(kind, id, { page = 1, replace = false, title } = {}) {
   // A pagination click within the view that's already open keeps whatever
   // "is there a Library entry behind this" answer the original open
   // established — pagination itself always replaces, so it must not flip a
@@ -107,7 +114,7 @@ export async function openDetail(kind, id, { page = 1, replace = false } = {}) {
   if (replace) history.replaceState(null, "", hash);
   else history.pushState(null, "", hash);
 
-  const url = detailUrl(kind, id, page);
+  const url = detailUrl(kind, id, page, title);
   const cached = isRemoteKind(kind) ? remoteFragmentCache.get(url) : undefined;
   if (cached !== undefined) {
     swapFragmentHtml(cached);
@@ -307,6 +314,16 @@ export function setupDetailPanel() {
     const videoCard = event.target.closest(".rec-card[data-video-id]");
     if (videoCard) {
       playRemoteVideo(videoCard.dataset, videoCard.querySelector(".rec-play"));
+      return;
+    }
+
+    // A mood panel's playlist cards (_mood_panel.html) — same target shape
+    // Explore's own chart/mood shelves use for the same reason (see
+    // explore.js's body click handler), just wired here instead since these
+    // live inside the detail panel, not Explore's browse panel.
+    const playlistCard = event.target.closest(".rec-card[data-playlist-id]");
+    if (playlistCard) {
+      openDetail("yt-playlist", playlistCard.dataset.playlistId);
       return;
     }
 

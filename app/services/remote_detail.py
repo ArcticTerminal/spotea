@@ -23,7 +23,14 @@ from sqlalchemy.orm import Session
 from app.images import cached_avatar_or_hotlink
 from app.models import Artist
 from app.timeutil import utcnow
-from app.youtube.music import ARTIST_PREVIEW_SONGS, fetch_artist, fetch_playlist, fetch_release
+from app.youtube.music import (
+    ARTIST_PREVIEW_SONGS,
+    fetch_artist,
+    fetch_mood_categories,
+    fetch_mood_playlists,
+    fetch_playlist,
+    fetch_release,
+)
 from app.youtube.urls import CHANNEL_PAGE_URL_TEMPLATE
 
 
@@ -242,3 +249,45 @@ def remote_release_context(browse_id: str) -> dict | None:
         }
     )
     return context
+
+
+def _mood_title(params: str) -> str | None:
+    """The category name behind an opaque params token, for the rare caller
+    that doesn't already know it (a page reload, or a shared/deep link to a
+    mood — see routers/partials.py's yt-mood route). get_mood_playlists'
+    own response carries no header naming its category, so the normal
+    open-from-Explore path passes the title along as a query param instead
+    of paying this extra request every time."""
+    return next(
+        (category.title for category in fetch_mood_categories() if category.params == params),
+        None,
+    )
+
+
+def remote_mood_context(params: str, title: str | None) -> dict | None:
+    """A mood's playlists — YouTube Music's own browse category, opened
+    from Explore's "Moods & genres" row.
+
+    Rendered by _mood_panel.html rather than the track-list panel every
+    other remote kind uses (see _base_context): there's no single list of
+    tracks here, only playlists to drill into, and each of those already
+    opens through the ordinary yt-playlist route once clicked — this panel
+    is one level up from that, not a variant of it.
+    """
+    if title is None:
+        title = _mood_title(params)
+        if title is None:
+            return None
+
+    playlists = fetch_mood_playlists(params)
+    if not playlists:
+        return None
+
+    return {
+        "kind": "yt-mood",
+        "remote": True,
+        "artist": None,
+        "title": title,
+        "back_label": "Explore",
+        "playlists": playlists,
+    }

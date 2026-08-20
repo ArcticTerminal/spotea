@@ -56,20 +56,20 @@ def _playlist(playlist_id):
 
 @pytest.fixture(autouse=True)
 def _no_browse_shelves(monkeypatch):
-    """Charts and the mood shelf are built on every run, interests or not —
-    so unlike the searches they can't be neutralised by leaving the interest
-    list empty. Stubbed out for every test in this file for exactly the
-    reason the module docstring gives; the two that are *about* them install
-    their own (see fake_browse)."""
+    """Charts and the mood category list are built on every run, interests
+    or not — so unlike the searches they can't be neutralised by leaving the
+    interest list empty. Stubbed out for every test in this file for exactly
+    the reason the module docstring gives; the two that are *about* them
+    install their own (see fake_browse)."""
     monkeypatch.setattr(rec, "_BROWSE_BUILDERS", ())
 
 
 @pytest.fixture
 def fake_browse(monkeypatch):
-    """Puts a known chart pair and mood shelf back, for the tests that check
-    what happens to them."""
+    """Puts a known chart pair and mood category list back, for the tests
+    that check what happens to them."""
 
-    def install(*, charts=(), chart_artists=(), mood=None):
+    def install(*, charts=(), chart_artists=(), moods=()):
         monkeypatch.setattr(
             rec,
             "_BROWSE_BUILDERS",
@@ -78,7 +78,7 @@ def fake_browse(monkeypatch):
                     "charts": [_playlist(p).__dict__ for p in charts],
                     "chart_artists": [_channel(c).__dict__ for c in chart_artists],
                 },
-                lambda: {"mood": mood},
+                lambda: {"moods": list(moods)},
             ),
         )
 
@@ -117,8 +117,8 @@ def _set_interests(db_session, *interests):
 
 def test_no_interests_means_no_interest_searches(client, db_session, fake_search):
     """The interest shelves stay empty and cost nothing. What a profile with
-    no interests *does* get is the charts and the mood shelf, which don't
-    come from the interest list — see the two tests below."""
+    no interests *does* get is the charts and the mood category list, which
+    don't come from the interest list — see the two tests below."""
     body = client.get("/recommendations").json()
 
     assert body["interests"] == []
@@ -129,14 +129,33 @@ def test_no_interests_means_no_interest_searches(client, db_session, fake_search
 
 def test_a_profile_with_no_interests_still_gets_the_charts(client, db_session, fake_browse):
     """The case Explore used to answer with nothing but a nag."""
-    fake_browse(charts=["top-40"], chart_artists=["UCchart"], mood={"title": "Chill", "section": "Moods & moments", "playlists": []})
+    fake_browse(
+        charts=["top-40"],
+        chart_artists=["UCchart"],
+        moods=[{"title": "Chill", "params": "abc123", "section": "Moods & moments"}],
+    )
 
     body = client.get("/recommendations").json()
 
     assert [p["playlist_id"] for p in body["charts"]] == ["top-40"]
     assert [c["channel_id"] for c in body["chart_artists"]] == ["UCchart"]
-    assert body["mood"]["title"] == "Chill"
+    assert [m["title"] for m in body["moods"]] == ["Chill"]
     assert body["generated_at"] is not None
+
+
+def test_mood_categories_lists_every_one_not_just_a_sample(monkeypatch):
+    """Unlike the old rotating single mood shelf, the user picks which
+    category to open — so this has to be the whole list YouTube Music
+    reported, not a sample of it."""
+    from app.youtube.music import MoodCategory
+
+    categories = [MoodCategory(title=f"Mood {i}", params=f"p{i}", section="Moods & moments") for i in range(14)]
+    monkeypatch.setattr(rec, "fetch_mood_categories", lambda: categories)
+
+    result = rec._mood_categories()
+
+    assert [m["title"] for m in result["moods"]] == [c.title for c in categories]
+    assert all("params" in m and "section" in m for m in result["moods"])
 
 
 def test_a_charting_artist_already_followed_is_dropped(client, db_session, fake_browse):

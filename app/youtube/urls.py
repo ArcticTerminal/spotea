@@ -24,6 +24,13 @@ CHANNEL_ID_RE = re.compile(r"^UC[\w-]{22}$")
 # channel id's is, so this bounds it rather than pinning it.
 RELEASE_ID_RE = re.compile(r"^MPREb_[\w-]{1,32}$")
 
+# A mood/genre category's opaque browse token (see youtube/music.py's
+# MoodCategory) — measured live across all 40 of YouTube Music's current
+# categories: always exactly 24 URL-safe characters, but nothing says that's
+# guaranteed to stay true, so this bounds rather than pins the length, same
+# as RELEASE_ID_RE above.
+MOOD_PARAMS_RE = re.compile(r"^[\w-]{1,32}$")
+
 CHANNEL_ID_URL_RE = re.compile(r"youtube\.com/channel/(UC[\w-]{22})")
 CHANNEL_ID_PARAM_RE = re.compile(r"channel_id=([\w-]+)")
 

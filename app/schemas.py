@@ -149,15 +149,16 @@ class PlaylistSearchResultOut(BaseModel):
     channel_title: str | None
 
 
-class MoodShelfOut(BaseModel):
-    """One of YouTube Music's moods or genres and its playlists. `title` is
-    the shelf's heading ("Chill", "Bollywood & Indian") and `section` is
-    which of the two menus it came from, so the client can say whether it's
-    showing a mood or a genre."""
+class MoodCategoryOut(BaseModel):
+    """One entry of YouTube Music's mood browse menu — a category to open,
+    not its playlists yet (see routers/partials.py's yt-mood route for
+    that). `params` is the opaque token that route takes; `section` is kept
+    around even though every category here is currently "Moods & moments"
+    (see youtube.music.MOOD_SECTION) in case that filter ever loosens."""
 
     title: str
+    params: str
     section: str
-    playlists: list[PlaylistSearchResultOut]
 
 
 class RecommendationsOut(BaseModel):
@@ -181,7 +182,7 @@ class RecommendationsOut(BaseModel):
     # they're filled in even for a library that has listed none.
     charts: list[PlaylistSearchResultOut]
     chart_artists: list[ChannelSearchResultOut]
-    mood: MoodShelfOut | None
+    moods: list[MoodCategoryOut]
 
 
 class VideoAddCreate(BaseModel):

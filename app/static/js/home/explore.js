@@ -1,10 +1,12 @@
 // Explore: one search box over both songs and channels, and the
-// interest-based "For you" shelves under it.
+// browse shelves under it — interest-based ones when there are interests,
+// charts and moods to browse either way (see services/recommendations.py).
 //
 // What happens when you act on a result lives in home/remote.js (playing a
-// song, following a channel) or in the detail panel (opening a playlist or an
-// unfollowed channel drills into home/detail.js's yt-playlist/yt-artist
-// kinds, rather than Explore growing a track list of its own).
+// song, following a channel) or in the detail panel (opening a playlist, an
+// artist, or a mood's playlists drills into home/detail.js's yt-playlist/
+// yt-artist/yt-mood kinds, rather than Explore growing a track list of its
+// own).
 //
 // The tab shows one of two regions at a time: the browse/recommendations
 // panel by default, and the search results while there's a query.
@@ -243,6 +245,36 @@ function shelfHtml(title, items, cardHtml) {
   `;
 }
 
+function moodChipHtml(mood) {
+  return `
+    <button
+      type="button"
+      class="channel-chip"
+      data-mood-params="${escapeHtml(mood.params)}"
+      data-mood-title="${escapeHtml(mood.title)}"
+    >
+      <span>${escapeHtml(mood.title)}</span>
+    </button>
+  `;
+}
+
+/** Moods & genres: a chip row rather than shelfHtml's card grid. A mood
+ *  category has no artwork of its own — only the playlists inside it do —
+ *  so a text chip (the same one Home's "Recently followed" row uses) reads
+ *  better than an image card with nothing to show. Clicking one opens all
+ *  of that mood's playlists (see templates/_mood_panel.html), not a track
+ *  list, so the user picks a playlist from there rather than this app
+ *  guessing which one they meant. */
+function moodsShelfHtml(moods) {
+  if (!moods.length) return "";
+  return `
+    <div class="shelf">
+      <div class="shelf-header"><h3 class="shelf-title">Moods &amp; genres</h3></div>
+      <div class="channel-row">${moods.map(moodChipHtml).join("")}</div>
+    </div>
+  `;
+}
+
 function renderRecommendations(data) {
   const body = document.getElementById("recommendations-body");
   if (!body) return;
@@ -252,14 +284,10 @@ function renderRecommendations(data) {
     shelfHtml("Songs", data.videos, recVideoCardHtml),
     shelfHtml("Artists", data.channels, channelCardHtml),
     shelfHtml("Playlists", data.playlists, recPlaylistCardHtml),
-    // Then what everyone gets: this week's charts and one rotating mood.
+    // Then what everyone gets: this week's charts and every mood to browse.
     shelfHtml("Charts", data.charts, recPlaylistCardHtml),
     shelfHtml("Charting artists", data.chart_artists, artistCardHtml),
-    // The only shelf whose heading comes from YouTube rather than from this
-    // file, so the only one that needs escaping.
-    data.mood
-      ? shelfHtml(escapeHtml(data.mood.title), data.mood.playlists, recPlaylistCardHtml)
-      : "",
+    moodsShelfHtml(data.moods),
   ].join("");
 
   body.innerHTML =
@@ -408,6 +436,16 @@ export function setupRecommendations() {
     const channelCard = event.target.closest(".shelf-channel-card");
     if (channelCard) {
       openDetail("yt-artist", channelCard.dataset.channelId);
+      return;
+    }
+
+    // A "Moods & genres" chip — opens that mood's whole playlist shelf
+    // (see templates/_mood_panel.html), not a track list. The title rides
+    // along so the panel doesn't have to pay an extra lookup for it (see
+    // routers/partials.py's yt-mood route).
+    const moodChip = event.target.closest(".channel-chip[data-mood-params]");
+    if (moodChip) {
+      openDetail("yt-mood", moodChip.dataset.moodParams, { title: moodChip.dataset.moodTitle });
       return;
     }
 
