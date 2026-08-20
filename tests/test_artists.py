@@ -46,6 +46,7 @@ def _artist(
     singles=(),
     monthly_listeners=None,
     related=(),
+    tracks=(),
 ):
     return ArtistProfile(
         browse_id=browse_id,
@@ -56,7 +57,7 @@ def _artist(
         subscriber_count=1_000_000,
         monthly_listeners=monthly_listeners,
         avatar_url=None,
-        tracks=[],
+        tracks=list(tracks),
         track_count=0,
         albums=list(albums),
         singles=list(singles),
@@ -330,6 +331,40 @@ def test_an_artist_with_no_related_artists_clears_a_stale_list(db_session, monke
     apply_artist_data(db_session, artist, result)
 
     assert json.loads(artist.related_artists) == []
+
+
+def test_a_first_sync_still_records_top_tracks(db_session, monkeypatch):
+    """Same free-data reasoning as monthly_listeners/related_artists — the
+    artist page's own preview songs arrive on the same response a first
+    sync already pays for."""
+    monkeypatch.setattr(
+        artist_sync,
+        "fetch_artist",
+        lambda browse_id, all_songs=True: _artist(tracks=[_track("trackaaaaaa1", "Popular Song")]),
+    )
+
+    artist = _followed(db_session)
+    result = artist_sync.fetch_artist_data(artist.browse_id, artist.release_snapshot, None)
+    apply_artist_data(db_session, artist, result)
+
+    stored = json.loads(artist.top_tracks)
+    assert [t["title"] for t in stored] == ["Popular Song"]
+
+
+def test_top_tracks_is_refreshed_on_every_sync(db_session, monkeypatch):
+    monkeypatch.setattr(
+        artist_sync,
+        "fetch_artist",
+        lambda browse_id, all_songs=True: _artist(tracks=[_track("trackbbbbbbb2", "New Preview")]),
+    )
+
+    artist = _followed(db_session, release_snapshot="[]")
+    artist.top_tracks = json.dumps([{"video_id": "stale", "title": "Stale"}])
+    result = artist_sync.fetch_artist_data(artist.browse_id, artist.release_snapshot, None)
+    apply_artist_data(db_session, artist, result)
+
+    stored = json.loads(artist.top_tracks)
+    assert [t["title"] for t in stored] == ["New Preview"]
 
 
 def test_a_later_sync_imports_only_what_appeared_since(db_session, monkeypatch):

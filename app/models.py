@@ -133,6 +133,17 @@ class Artist(Base):
     # services/recommendations.py._similar_to_followed): merged across every
     # artist this user follows, rather than fetched fresh at request time.
     related_artists: Mapped[str | None] = mapped_column(Text, default=None)
+    # The artist's own page-preview songs — YouTube Music's page shows five
+    # before you have to open the full list (see youtube/music.py's
+    # _artist_songs, which is what a sync's all_songs=False call reads) — as
+    # a JSON array of VideoSearchResult dicts. Same free-data reasoning as
+    # related_artists:
+    # arrives on the same get_artist call a sync already makes. Powers
+    # Explore's "Songs" shelf (see
+    # services/recommendations.py._songs_from_followed) — merged across
+    # every followed artist rather than searched from typed interests, which
+    # went the same way genre-as-artist-search did (see similar_artists).
+    top_tracks: Mapped[str | None] = mapped_column(Text, default=None)
 
     user: Mapped["User"] = relationship(back_populates="artists")
     content: Mapped[list["Content"]] = relationship(back_populates="artist", cascade="all, delete-orphan")

@@ -58,6 +58,8 @@ class ArtistFetchResult:
     store, not just the new ones. `tracks` are the tracks of the releases
     that turned out to be new; empty on a first sync, which deliberately
     records the snapshot without importing anything (see fetch_artist_data).
+    `top_tracks` is unrelated to either — the artist's own page-preview
+    songs, present on every successful fetch regardless of what's new.
     """
 
     ok: bool
@@ -65,6 +67,10 @@ class ArtistFetchResult:
     avatar_url: str | None = None
     monthly_listeners: str | None = None
     related: list[ChannelSearchResult] | None = None
+    # The artist's own page-preview songs (see Artist.top_tracks) — distinct
+    # from `tracks` below, which is new releases' tracks to insert into
+    # Content, not this artist's popular songs.
+    top_tracks: list[VideoSearchResult] | None = None
     release_ids: list[str] = field(default_factory=list)
     tracks: list[VideoSearchResult] = field(default_factory=list)
 
@@ -103,6 +109,7 @@ def fetch_artist_data(browse_id: str, snapshot: str | None, avatar_url: str | No
             avatar_url=fetched_avatar_url,
             monthly_listeners=artist.monthly_listeners,
             related=artist.related,
+            top_tracks=artist.tracks,
             release_ids=release_ids,
         )
 
@@ -125,6 +132,7 @@ def fetch_artist_data(browse_id: str, snapshot: str | None, avatar_url: str | No
         avatar_url=fetched_avatar_url,
         monthly_listeners=artist.monthly_listeners,
         related=artist.related,
+        top_tracks=artist.tracks,
         release_ids=release_ids,
         tracks=tracks,
     )
@@ -153,6 +161,10 @@ def apply_artist_data(db: Session, artist: Artist, result: ArtistFetchResult) ->
     # list from before, not keep showing it forever.
     if result.related is not None:
         artist.related_artists = json.dumps([asdict(c) for c in result.related])
+    # Same reasoning again: refreshed every sync, cleared rather than kept
+    # stale if an artist's page genuinely has no songs listed right now.
+    if result.top_tracks is not None:
+        artist.top_tracks = json.dumps([asdict(t) for t in result.top_tracks])
 
     new_count = 0
     if result.tracks:

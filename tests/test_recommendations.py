@@ -15,7 +15,7 @@ import pytest
 from app.models import Artist, Content, RecommendationCache, User
 from app.services import recommendations as rec
 from app.timeutil import utcnow
-from app.youtube.models import ChannelSearchResult, PlaylistSearchResult, VideoSearchResult
+from app.youtube.models import ChannelSearchResult, PlaylistSearchResult
 
 USER_ID = 1
 
@@ -28,12 +28,6 @@ def _reset_interests(db_session):
     profile = db_session.get(User, USER_ID)
     profile.interests = None
     db_session.commit()
-
-
-def _video(video_id, title="Song"):
-    return VideoSearchResult(
-        video_id=video_id, title=title, thumbnail_url=None, duration_seconds=200, channel_title="Ch"
-    )
 
 
 def _channel(channel_id):
@@ -88,9 +82,10 @@ def fake_browse(monkeypatch):
 
 @pytest.fixture
 def fake_search(monkeypatch):
-    """Replaces both searches with deterministic, query-derived results,
-    and records every query that was run so tests can assert on the request
-    budget rather than only on the output."""
+    """Replaces the interest search (playlists — see _SEARCHERS) with a
+    deterministic, query-derived result, and records every query that was
+    run so tests can assert on the request budget rather than only on the
+    output."""
     calls = []
 
     def make(kind, factory):
@@ -101,7 +96,6 @@ def fake_search(monkeypatch):
         return search
 
     searchers = {
-        "videos": make("videos", lambda seed: _video(seed)),
         "playlists": make("playlists", _playlist),
     }
     monkeypatch.setattr(rec, "_SEARCHERS", searchers)
@@ -256,20 +250,71 @@ def test_similar_artists_ignores_a_malformed_stored_list(client, db_session, fak
     assert body["similar_artists"] == []
 
 
-def test_a_video_already_in_the_library_is_dropped_from_the_batch(client, db_session, fake_search):
-    _set_interests(db_session, "jazz")
-    artist = Artist(user_id=USER_ID, channel_id="https://example.com/already-owned-artist", name="Owner")
+def _track_dict(video_id, title):
+    """A top-track entry as it's actually stored — see VideoSearchResult,
+    whose every field RecommendationsOut requires when serializing videos."""
+    return {
+        "video_id": video_id,
+        "title": title,
+        "thumbnail_url": None,
+        "duration_seconds": 200,
+        "channel_title": "An Artist",
+        "channel_id": "UCartist",
+    }
+
+
+def _followed_with_tracks(db_session, channel_id, *tracks):
+    artist = Artist(
+        user_id=USER_ID,
+        channel_id=channel_id,
+        name=f"Followed {channel_id}",
+        followed=True,
+        top_tracks=json.dumps(list(tracks)),
+    )
     db_session.add(artist)
     db_session.commit()
-    db_session.refresh(artist)
+    return artist
+
+
+def test_songs_is_empty_with_nothing_followed(client, db_session, fake_browse):
+    """No seeded default, unlike the old interest-based Songs shelf — see
+    services.recommendations._songs_from_followed."""
+    fake_browse()
+
+    body = client.get("/recommendations").json()
+
+    assert body["videos"] == []
+
+
+def test_songs_merges_across_followed_artists(client, db_session, fake_browse):
+    fake_browse()
+    _followed_with_tracks(db_session, "UCfollowed1", _track_dict("videoaaaaaa", "Song One"))
+    _followed_with_tracks(db_session, "UCfollowed2", _track_dict("videobbbbbb", "Song Two"))
+
+    body = client.get("/recommendations").json()
+
+    assert {v["video_id"] for v in body["videos"]} == {"videoaaaaaa", "videobbbbbb"}
+
+
+def test_a_video_already_in_the_library_is_dropped_from_the_batch(client, db_session, fake_browse):
+    """A followed artist's own preview song is not "new" once it's actually
+    in the library — same rule owned_video_ids already applies to
+    interest-based results, now applied to _songs_from_followed too."""
+    fake_browse()
+    artist = _followed_with_tracks(
+        db_session,
+        "UCfollowed1",
+        _track_dict("alreadyowned", "Already Have This"),
+        _track_dict("videocccccc", "Not Owned Yet"),
+    )
     db_session.add(
-        Content(artist_id=artist.id, user_id=USER_ID, video_id="jazz-1", title="Already have this")
+        Content(artist_id=artist.id, user_id=USER_ID, video_id="alreadyowned", title="Already Have This")
     )
     db_session.commit()
 
     body = client.get("/recommendations").json()
 
-    assert [v["video_id"] for v in body["videos"]] == ["jazz-0", "jazz-2"]
+    assert [v["video_id"] for v in body["videos"]] == ["videocccccc"]
 
 
 def test_an_unfollowed_placeholder_artist_does_not_hide_a_chart_artist(client, db_session, fake_browse):
@@ -326,9 +371,8 @@ def test_a_first_request_builds_a_batch_from_the_interests(client, db_session, f
     assert body["interests"] == ["jazz"]
     assert body["interests_used"] == ["jazz"]
     assert body["generated_at"] is not None
-    assert [v["video_id"] for v in body["videos"]] == ["jazz-0", "jazz-1", "jazz-2"]
     assert [p["playlist_id"] for p in body["playlists"]] == ["jazz-0", "jazz-1", "jazz-2"]
-    assert sorted(fake_search) == [("playlists", "jazz"), ("videos", "jazz")]
+    assert sorted(fake_search) == [("playlists", "jazz")]
 
 
 def test_a_second_request_is_served_from_the_cache(client, db_session, fake_search):
@@ -351,7 +395,7 @@ def test_editing_the_interests_invalidates_the_cache(client, db_session, fake_se
     body = client.get("/recommendations").json()
 
     assert body["interests_used"] == ["funk"]
-    assert [q for _, q in fake_search] == ["funk", "funk"]
+    assert [q for _, q in fake_search] == ["funk"]
 
 
 def test_reordering_the_interests_does_not_invalidate_the_cache(client, db_session, fake_search):
@@ -422,9 +466,9 @@ def test_only_a_sample_of_a_long_interest_list_is_searched(client, db_session, f
 
     assert len(body["interests_used"]) == rec.INTERESTS_PER_RUN
     assert set(body["interests_used"]) <= {f"tag{i}" for i in range(10)}
-    # Two searches per sampled interest, and not one more — this is the
+    # One search per sampled interest, and not one more — this is the
     # whole point of sampling.
-    assert len(fake_search) == rec.INTERESTS_PER_RUN * 2
+    assert len(fake_search) == rec.INTERESTS_PER_RUN
     # The full list is still reported, so Explore can say what it's working
     # from even though only a few of them were used.
     assert len(body["interests"]) == 10
@@ -433,11 +477,11 @@ def test_only_a_sample_of_a_long_interest_list_is_searched(client, db_session, f
 def test_results_from_several_interests_are_interleaved(client, db_session, fake_search):
     _set_interests(db_session, "a", "b")
 
-    videos = [v["video_id"] for v in client.get("/recommendations").json()["videos"]]
+    playlists = [p["playlist_id"] for p in client.get("/recommendations").json()["playlists"]]
 
     # Round-robin, so the front of the shelf represents both interests rather
     # than exhausting the first.
-    assert videos[:4] == ["a-0", "b-0", "a-1", "b-1"]
+    assert playlists[:4] == ["a-0", "b-0", "a-1", "b-1"]
 
 
 def test_a_result_two_interests_share_is_only_listed_once(client, db_session, monkeypatch):
@@ -445,50 +489,35 @@ def test_a_result_two_interests_share_is_only_listed_once(client, db_session, mo
         rec,
         "_SEARCHERS",
         {
-            "videos": lambda query: [_video("shared"), _video(f"{query}-own")],
-            "playlists": lambda query: [],
+            "playlists": lambda query: [_playlist("shared"), _playlist(f"{query}-own")],
         },
     )
     _set_interests(db_session, "a", "b")
 
-    videos = [v["video_id"] for v in client.get("/recommendations").json()["videos"]]
+    playlists = [p["playlist_id"] for p in client.get("/recommendations").json()["playlists"]]
 
-    assert videos == ["shared", "a-own", "b-own"]
+    assert playlists == ["shared", "a-own", "b-own"]
 
 
 def test_each_shelf_is_capped(client, db_session, monkeypatch):
-    many = [_video(f"v{i}") for i in range(rec.RESULTS_PER_SHELF + 20)]
-    monkeypatch.setattr(
-        rec,
-        "_SEARCHERS",
-        {
-            "videos": lambda query: many,
-            "playlists": lambda query: [],
-        },
-    )
+    many = [_playlist(f"p{i}") for i in range(rec.RESULTS_PER_SHELF + 20)]
+    monkeypatch.setattr(rec, "_SEARCHERS", {"playlists": lambda query: many})
     _set_interests(db_session, "jazz")
 
-    assert len(client.get("/recommendations").json()["videos"]) == rec.RESULTS_PER_SHELF
+    assert len(client.get("/recommendations").json()["playlists"]) == rec.RESULTS_PER_SHELF
 
 
-def test_one_failing_search_does_not_sink_the_batch(client, db_session, monkeypatch):
+def test_a_failing_search_does_not_sink_the_batch(client, db_session, monkeypatch):
     # search_* already flatten yt-dlp failures to an empty list (see
     # youtube/search.py) — this asserts the batch treats that as "this shelf
     # is empty", not as an error.
-    monkeypatch.setattr(
-        rec,
-        "_SEARCHERS",
-        {
-            "videos": lambda query: [_video("v1")],
-            "playlists": lambda query: [],
-        },
-    )
+    monkeypatch.setattr(rec, "_SEARCHERS", {"playlists": lambda query: []})
     _set_interests(db_session, "jazz")
 
     body = client.get("/recommendations").json()
 
-    assert [v["video_id"] for v in body["videos"]] == ["v1"]
     assert body["playlists"] == []
+    assert body["interests_used"] == ["jazz"]
 
 
 def test_a_corrupt_cached_payload_is_treated_as_a_miss(client, db_session, fake_search):

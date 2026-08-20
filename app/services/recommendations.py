@@ -1,21 +1,24 @@
-"""Explore's browse shelves: songs and playlists picked from the interests
-listed in Settings, similar artists picked from who's actually followed,
+"""Explore's browse shelves: playlists picked from the interests listed in
+Settings; songs and similar artists picked from who's actually followed;
 plus the charts and the full list of mood/genre categories, which belong
 to nobody in particular.
 
-The interest-based shelves are plain search, not a recommender model — an
-interest is a free-text phrase, and a result is what YouTube search returns
-for it. That covers "tell me what you like" turning into a query, but it
-used to also carry the artist shelf, keyed on the same free text — which
-went badly for anything that wasn't literally an artist's name: searching
-YouTube Music's artist index for a genre like "Hip Hop" surfaces beatmaker
-and compilation channels, not real artists. similar_artists replaces that
-specifically, built from artists actually followed rather than typed text
-(see _similar_to_followed) — the one shelf here that *is* a real signal
-about this profile, not a search. The charts and mood shelves answer the
-remaining case: a library that has said nothing about itself yet and
-followed nobody, which until charts/moods existed had an empty Explore tab
-and a nag.
+Playlists is the one shelf still built from plain search, not a recommender
+model — an interest is a free-text phrase, and a result is what YouTube
+search returns for it, which covers "tell me what you like" turning
+straight into a query. Songs and Artists used to work the same way, keyed
+on that same free text, and both went badly for anything that wasn't
+literally a song title or an artist's name: an interest was routinely a
+genre or a mood instead ("Hip Hop", not "Drake" or "SICKO MODE"), and
+YouTube Music's artist search in particular answers that kind of query with
+beatmaker/compilation channels, not real artists (measured live). Both were
+replaced by shelves built from artists actually followed instead of typed
+text — similar_artists and songs from their own page previews (see
+_similar_to_followed and _songs_from_followed) — which are the two shelves
+here that *are* a real signal about this profile, not a search. The charts
+and mood shelves answer the remaining case: a library that has said nothing
+about itself yet and followed nobody, which until charts/moods existed had
+an empty Explore tab and a nag.
 
 The interesting part is therefore not the ranking, it's the request budget.
 One batch is several live searches, each of them seconds long, against a
@@ -52,11 +55,7 @@ from app.config import settings
 from app.interests import interests_signature, parse_interests
 from app.models import Artist, Content, RecommendationCache, User
 from app.timeutil import utcnow
-from app.youtube.music import (
-    fetch_charts,
-    fetch_mood_categories,
-    search_songs,
-)
+from app.youtube.music import fetch_charts, fetch_mood_categories
 from app.youtube.music import search_playlists as search_music_playlists
 
 logger = logging.getLogger(__name__)
@@ -68,16 +67,15 @@ logger = logging.getLogger(__name__)
 # rather than two. This is only the fallback for a caller that passes no ttl.
 DEFAULT_TTL = timedelta(minutes=30)
 
-# Interests sampled per run. Each one costs two searches (songs, playlists —
-# see _SEARCHERS), so this is the knob that decides a run's request count —
-# six searches, run in parallel, is a couple seconds of wall time and a
-# request burst YouTube tolerates.
+# Interests sampled per run. Each one costs one search (playlists — see
+# _SEARCHERS), so this is the knob that decides a run's request count —
+# three searches, run in parallel, is well under a second of wall time.
 INTERESTS_PER_RUN = 3
 
-# Wide enough for every sampled interest's two searches at once, plus the
-# two browse jobs (see _BROWSE_BUILDERS) that don't depend on interests at
-# all. Nothing else here overlaps.
-_POOL_SIZE = INTERESTS_PER_RUN * 2 + 2
+# Wide enough for every sampled interest's one search at once, plus the two
+# browse jobs (see _BROWSE_BUILDERS) that don't depend on interests at all.
+# Nothing else here overlaps.
+_POOL_SIZE = INTERESTS_PER_RUN * 1 + 2
 
 # Per shelf, after merging every sampled interest's results. Roughly a shelf
 # and a half of horizontal scrolling, which is as far as anyone browses one.
@@ -90,23 +88,25 @@ RESULTS_PER_SHELF = 12
 # by an older version of itself.
 PAYLOAD_VERSION = "v5"
 
-# No artist search here any more — an interest is free text, and it was
-# routinely a genre or a mood rather than an artist's name ("Hip Hop", not
-# "Drake"); YouTube Music's artist search answers that kind of query with
-# beatmaker/compilation channels, not real artists (measured live: searching
-# "Hip Hop" returned "Hip hop beats", "Oldschool Hip-Hop Instrumentalist" —
-# nothing a person would call an artist). See recommendations.
-# _similar_to_followed for what replaced it: YouTube Music's own "fans also
-# like" data off artists actually followed, which needs no search at all.
+# No artist or song search here any more — an interest is free text, and it
+# was routinely a genre or a mood rather than an artist's name or a song
+# title ("Hip Hop", not "Drake" or "SICKO MODE"). YouTube Music's artist
+# search answers that kind of query with beatmaker/compilation channels, not
+# real artists (measured live: searching "Hip Hop" returned "Hip hop beats",
+# "Oldschool Hip-Hop Instrumentalist"); its song search does better but is
+# still inconsistent the same way (the same query's top results mixed real
+# hits like "SICKO MODE" in with a nameless "Aggressive Fight Epic Hip Hop
+# Motivation Music #3 (Instrumental Mix)"). See _similar_to_followed and
+# _songs_from_followed for what replaced both: YouTube Music's own data off
+# artists actually followed, which needs no search at all.
 _SEARCHERS = {
-    "videos": search_songs,
     "playlists": search_music_playlists,
 }
 
 # Result key -> the field that identifies one result, for cross-interest
 # deduplication. Two interests in the same genre routinely return the same
-# video; showing it twice in one shelf reads as a bug.
-_IDENTITY_FIELDS = {"videos": "video_id", "playlists": "playlist_id"}
+# playlist; showing it twice in one shelf reads as a bug.
+_IDENTITY_FIELDS = {"playlists": "playlist_id"}
 
 # Serializes batch building process-wide. Not about data races (each run
 # writes only its own row) — it's a second, cruder brake on how many
@@ -119,7 +119,6 @@ def empty_batch() -> dict:
     run that came back with nothing at all looks like."""
     return {
         "interests_used": [],
-        "videos": [],
         "playlists": [],
         "charts": [],
         "chart_artists": [],
@@ -221,10 +220,9 @@ def build_batch(interests: list[str]) -> dict:
         batch[kind] = _interleave(per_interest, _IDENTITY_FIELDS[kind])
 
     logger.info(
-        "Built recommendations for %s: %d songs, %d playlists, "
+        "Built recommendations for %s: %d playlists, "
         "%d charts, %d charting artists, %d moods",
         ", ".join(sampled) or "no interests",
-        len(batch["videos"]),
         len(batch["playlists"]),
         len(batch["charts"]),
         len(batch["chart_artists"]),
@@ -256,10 +254,10 @@ def _cached_batch(
         return None
 
 
-def _similar_to_followed(db: Session, user: User, exclude_ids: set[str]) -> list[dict]:
-    """Every followed artist's own "fans also like" list (see
-    Artist.related_artists, refreshed on every sync alongside
-    monthly_listeners — no network call happens here), merged and deduped.
+def _merge_from_followed(db: Session, user: User, column, exclude_ids: set[str], identity_field: str) -> list[dict]:
+    """Shared machinery behind _similar_to_followed and _songs_from_followed:
+    merge every followed artist's own stored JSON list (whichever column is
+    asked for), deduped by identity_field, capped at RESULTS_PER_SHELF.
 
     Deliberately not part of `batch`/build_batch: unlike the searches and
     the browse builders, this costs nothing but a query over data this
@@ -269,11 +267,11 @@ def _similar_to_followed(db: Session, user: User, exclude_ids: set[str]) -> list
     is always fresh regardless of the batch's own cache state.
 
     A profile with nothing followed gets nothing here at all — no seeded
-    default, unlike the old interest-based channels shelf. That's the
-    point: this only ever reflects artists actually followed.
+    default, unlike the old interest-based shelves this replaced. That's
+    the point: both callers only ever reflect artists actually followed.
     """
-    rows = db.query(Artist.related_artists).filter(
-        Artist.user_id == user.id, Artist.followed.is_(True), Artist.related_artists.isnot(None)
+    rows = db.query(column).filter(
+        Artist.user_id == user.id, Artist.followed.is_(True), column.isnot(None)
     )
 
     seen = set(exclude_ids)
@@ -284,31 +282,57 @@ def _similar_to_followed(db: Session, user: User, exclude_ids: set[str]) -> list
         except (TypeError, ValueError):
             continue
         for candidate in candidates:
-            channel_id = candidate.get("channel_id")
-            if not channel_id or channel_id in seen:
+            identity = candidate.get(identity_field)
+            if not identity or identity in seen:
                 continue
-            seen.add(channel_id)
+            seen.add(identity)
             merged.append(candidate)
             if len(merged) == RESULTS_PER_SHELF:
                 return merged
     return merged
 
 
+def _similar_to_followed(db: Session, user: User, exclude_ids: set[str]) -> list[dict]:
+    """Every followed artist's own "fans also like" list (see
+    Artist.related_artists, refreshed on every sync alongside
+    monthly_listeners — no network call happens here), merged and deduped.
+    """
+    return _merge_from_followed(db, user, Artist.related_artists, exclude_ids, "channel_id")
+
+
+def _songs_from_followed(db: Session, user: User, exclude_ids: set[str]) -> list[dict]:
+    """Every followed artist's own page-preview songs (see Artist.top_tracks,
+    refreshed on every sync alongside monthly_listeners/related_artists —
+    no network call happens here), merged and deduped.
+
+    Replaces the interest-based Songs shelf (see _SEARCHERS' comment on
+    why): a genre or mood typed as free text found real songs
+    inconsistently, mixing real hits in with nameless instrumental filler.
+    This can't do that — every result here is a real song by an artist this
+    profile actually follows — at the cost of not necessarily being their
+    newest: a sync's all_songs=False call reads the artist page's own
+    preview, which YouTube Music orders by popularity, not release date.
+    """
+    return _merge_from_followed(db, user, Artist.top_tracks, exclude_ids, "video_id")
+
+
 def _drop_already_in_library(db: Session, user: User, batch: dict) -> dict:
     """Recommending something already in the library adds nothing — a
-    followed channel or an added video isn't new. Applied here, at read
+    followed artist or an added video isn't new. Applied here, at read
     time, against every batch (freshly built or cached) rather than inside
     build_batch: a cached batch can outlive what's added to the library
     after it was built, and re-checking on every read is what makes
-    following a recommended channel make it disappear from the shelf on the
+    following a recommended artist make it disappear from the shelf on the
     very next load, rather than waiting for the batch to expire and rebuild.
     Playlists aren't filtered — YouTube's search results don't expose enough
     to match one against the library reliably.
 
     The charting-artists and similar-artists shelves both get the same
-    rule: each is a list of channels to follow, and one already followed
-    isn't. similar_artists is computed here too (see _similar_to_followed),
-    piggybacking on the followed_ids query below rather than a second one.
+    rule: each is a list of artists to follow, and one already followed
+    isn't. videos and similar_artists are computed here too (see
+    _songs_from_followed and _similar_to_followed) rather than in `batch`
+    — piggybacking on the owned_video_ids/followed_ids queries below rather
+    than two more of their own.
     """
     owned_video_ids = {
         video_id for (video_id,) in db.query(Content.video_id).filter(Content.user_id == user.id)
@@ -328,7 +352,7 @@ def _drop_already_in_library(db: Session, user: User, batch: dict) -> dict:
 
     return {
         **batch,
-        "videos": [v for v in batch["videos"] if v["video_id"] not in owned_video_ids],
+        "videos": _songs_from_followed(db, user, owned_video_ids),
         "chart_artists": [
             c for c in batch["chart_artists"] if c["channel_id"] not in followed_ids
         ],
