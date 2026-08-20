@@ -15,7 +15,7 @@
         </span>
         <span class="channel-card-info">
           <span class="channel-card-title">Favorites</span>
-          <span class="channel-card-count">{{ favorites_count }} video{{ '' if favorites_count == 1 else 's' }}</span>
+          <span class="channel-card-count">{{ favorites_count }} song{{ '' if favorites_count == 1 else 's' }}</span>
         </span>
       </a>
       <a class="channel-card" href="/#saved" data-detail-kind="saved">
@@ -24,7 +24,7 @@
         </span>
         <span class="channel-card-info">
           <span class="channel-card-title">Saved for later</span>
-          <span class="channel-card-count">{{ saved_count }} video{{ '' if saved_count == 1 else 's' }}</span>
+          <span class="channel-card-count">{{ saved_count }} song{{ '' if saved_count == 1 else 's' }}</span>
         </span>
       </a>
       <a class="channel-card" href="/#new-uploads" data-detail-kind="new-uploads">
@@ -33,7 +33,7 @@
         </span>
         <span class="channel-card-info">
           <span class="channel-card-title">New releases</span>
-          <span class="channel-card-count">{{ new_uploads_count }} video{{ '' if new_uploads_count == 1 else 's' }}</span>
+          <span class="channel-card-count">{{ new_uploads_count }} song{{ '' if new_uploads_count == 1 else 's' }}</span>
         </span>
       </a>
       <a class="channel-card" href="/#recently-played" data-detail-kind="recently-played">
@@ -42,7 +42,7 @@
         </span>
         <span class="channel-card-info">
           <span class="channel-card-title">Recently Played</span>
-          <span class="channel-card-count">{{ recently_played_count }} video{{ '' if recently_played_count == 1 else 's' }}</span>
+          <span class="channel-card-count">{{ recently_played_count }} song{{ '' if recently_played_count == 1 else 's' }}</span>
         </span>
       </a>
       {% for artist in artists %}
@@ -102,7 +102,7 @@
       </a>
       {% endfor %}
     </div>
-    <p id="channel-search-empty" class="muted" hidden>No channels match your search.</p>
+    <p id="channel-search-empty" class="muted" hidden>No artists match your search.</p>
     {% else %}
     <p class="muted">No content yet — add a channel in the Explore tab to get started.</p>
     {% endif %}

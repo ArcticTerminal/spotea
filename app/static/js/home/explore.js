@@ -17,11 +17,15 @@ import { wireScrollers } from "./scrollers.js";
 import { followArtist, playRemoteVideo } from "./remote.js";
 import { onTabActivated } from "./tabs.js";
 
-function formatSubscribers(count) {
+// "monthly listeners", not "subscribers": the number comes from YouTube's
+// subscriber_count field, but Library already labels the same figure the way a
+// music app does (see _library_grid.html), and one number can't have two names
+// in one app.
+function formatListeners(count) {
   if (count == null) return "";
-  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M subscribers`;
-  if (count >= 1_000) return `${(count / 1_000).toFixed(1)}K subscribers`;
-  return `${count} subscribers`;
+  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M monthly listeners`;
+  if (count >= 1_000) return `${(count / 1_000).toFixed(1)}K monthly listeners`;
+  return `${count} monthly listeners`;
 }
 
 export function renderChannelResults(results, containerId = "channel-search-results") {
@@ -40,7 +44,7 @@ export function renderChannelResults(results, containerId = "channel-search-resu
         : `<span class="search-result-thumb"></span>`;
       const subs =
         r.subscriber_count != null
-          ? `<span class="search-result-subs">${formatSubscribers(r.subscriber_count)}</span>`
+          ? `<span class="search-result-subs">${formatListeners(r.subscriber_count)}</span>`
           : "";
       // Two targets on one row: the row itself previews what the channel
       // has (an artist's tracks where there are any, its latest uploads
@@ -149,45 +153,6 @@ function recVideoCardHtml(video) {
   `;
 }
 
-/**
- * One channel as a shelf card — avatar, name, Add. Exported because the
- * onboarding wizard's per-genre shelves are the same component (see
- * home/onboarding.js): same markup, same shelf geometry, same Add button, so
- * a channel reads identically wherever the app offers one.
- *
- * The subscriber line is dropped entirely when there is no count rather than
- * left empty — onboarding's suggestions never carry one (see
- * services/genre_artists._as_channel_dict), and an empty <p> there would
- * reserve a line of space for nothing.
- */
-export function channelCardHtml(channel) {
-  const avatar = channel.thumbnail_url
-    ? `<img class="shelf-channel-avatar" src="${escapeHtml(channel.thumbnail_url)}" alt="" loading="lazy" />`
-    : `<span class="shelf-channel-avatar"></span>`;
-  const subs =
-    channel.subscriber_count != null
-      ? `<p class="card-date">${escapeHtml(formatSubscribers(channel.subscriber_count))}</p>`
-      : "";
-  // Same two targets as a channel search result: the card previews, the
-  // button follows without looking first. (Explore wires both; the wizard
-  // wires only the button — a full-panel preview out from under that modal
-  // would strand it half-finished.)
-  return `
-    <article
-      class="card shelf-channel-card"
-      data-channel-id="${escapeHtml(channel.channel_id)}"
-      data-thumbnail-url="${escapeHtml(channel.thumbnail_url || "")}"
-    >
-      ${avatar}
-      <div class="card-body">
-        <h3 class="card-title" title="${escapeHtml(channel.title)}">${escapeHtml(channel.title)}</h3>
-        ${subs}
-        <button type="button" class="btn-add-channel" data-channel-url="${escapeHtml(channel.channel_url)}">Add</button>
-      </div>
-    </article>
-  `;
-}
-
 /** A charting artist. Same data shape as a channel card, and opens the same
  *  way; what it deliberately lacks is the Add button. The id on a chart
  *  entry is the artist's auto-generated "Topic" channel rather than the one
@@ -205,7 +170,7 @@ function artistCardHtml(artist) {
       ${avatar}
       <div class="card-body">
         <h3 class="card-title" title="${escapeHtml(artist.title)}">${escapeHtml(artist.title)}</h3>
-        <p class="card-date">${escapeHtml(formatSubscribers(artist.subscriber_count))}</p>
+        <p class="card-date">${escapeHtml(formatListeners(artist.subscriber_count))}</p>
       </div>
     </article>
   `;

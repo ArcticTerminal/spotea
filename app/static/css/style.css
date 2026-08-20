@@ -1118,11 +1118,9 @@ html[data-active-tab="detail"] .tab-panel[data-tab-panel="detail"] {
   -webkit-line-clamp: 1;
 }
 
-/* Channel cards aren't 16:9 — an avatar reads as a channel, a letterboxed
-   thumbnail doesn't. Centered so the row stays even whatever the name
-   length. Shared by Explore's "Channels" shelf and the onboarding wizard's
-   per-genre ones (see explore.js's channelCardHtml), which is why nothing
-   here is named for recommendations. */
+/* An artist card centres a round avatar instead of filling its top edge with
+   cover art, so the row stays even whatever the name length. Used by Explore's
+   charting-artist and similar-artist shelves. */
 .shelf-channel-card {
   align-items: center;
   text-align: center;
