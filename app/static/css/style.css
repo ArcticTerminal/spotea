@@ -1033,8 +1033,19 @@ html[data-active-tab="detail"] .tab-panel[data-tab-panel="detail"] {
   cursor: default;
 }
 
-/* Recommendation shelves nest inside the "For you" block, so their own
-   headings are a level down from it. */
+/* Charts/charting-artists/mood shelves read a level down from a page
+   heading even though there's no "For you" heading above them any more —
+   same muted, smaller treatment a Home/Library shelf title would get
+   nested under something bigger. */
+#recommendations-body {
+  /* Level with .shelf's own between-shelf rhythm (used below, between
+     Charts and Charting artists, etc.) rather than the tighter gap
+     .channel-search's margin-bottom leaves above it — this is the first
+     heading on the page now that "For you" is gone, and it read glued to
+     the search box at that gap. */
+  margin-top: 1.75rem;
+}
+
 #recommendations-body .shelf-title {
   font-size: 0.95rem;
   color: var(--text-secondary);
