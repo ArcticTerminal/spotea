@@ -614,6 +614,46 @@ def test_an_album_and_a_single_open_the_same_way(client):
     assert release.cover_url == _proxied("https://x/c=w544-h544-l90-rj")
 
 
+def test_a_tracks_missing_thumbnail_falls_back_to_the_album_cover(client):
+    """A track entry inside an album/single response carries no thumbnail
+    of its own — measured live on a real 14-track album, every one came
+    back thumbnails: None — since the whole release shares one cover. Every
+    row in an opened album rendered with no image at all before this."""
+    client(
+        get_album={
+            "title": "Schlau aber blond",
+            "year": "2025",
+            "type": "Album",
+            "artists": [{"name": "Shirin David"}],
+            "thumbnails": [{"url": "https://x/c=w226-h226-l90-rj"}],
+            "tracks": [{**SONG, "thumbnails": None}],
+        }
+    )
+
+    release = music.fetch_release("MPREb_HIQTwIoDtEM")
+
+    (track,) = release.tracks
+    assert track.thumbnail_url == release.cover_url == _proxied("https://x/c=w544-h544-l90-rj")
+
+
+def test_a_tracks_own_thumbnail_is_not_overwritten_by_the_album_cover(client):
+    client(
+        get_album={
+            "title": "Schlau aber blond",
+            "year": "2025",
+            "type": "Album",
+            "artists": [{"name": "Shirin David"}],
+            "thumbnails": [{"url": "https://x/c=w226-h226-l90-rj"}],
+            "tracks": [SONG],
+        }
+    )
+
+    release = music.fetch_release("MPREb_HIQTwIoDtEM")
+
+    (track,) = release.tracks
+    assert track.thumbnail_url == _proxied("https://yt3.ggpht.com/abc=w544-h544-l90-rj")
+
+
 @pytest.mark.parametrize("response", [None, {"title": "Gone", "tracks": []}, {"tracks": [SONG]}])
 def test_a_release_that_cannot_be_read_is_none(client, response):
     client(get_album=response)

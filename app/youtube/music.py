@@ -43,7 +43,7 @@ a 500.
 
 import logging
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from ytmusicapi import YTMusic
 
@@ -762,12 +762,25 @@ def fetch_release(browse_id: str) -> ReleaseDetail | None:
     if not tracks:
         return None
 
+    # A track entry inside an album/single response carries no thumbnail of
+    # its own — measured live on a 14-track album, every single one came
+    # back with thumbnails: None, since the whole release shares one cover
+    # rather than each track having its own. Without this, every row in an
+    # opened album rendered with no image at all. cover_url is already
+    # proxied (see _proxied_cover_url), so no extra wrapping needed here.
+    cover_url = _proxied_cover_url(release.get("thumbnails"))
+    if cover_url:
+        tracks = [
+            track if track.thumbnail_url else replace(track, thumbnail_url=cover_url)
+            for track in tracks
+        ]
+
     artists = [artist.get("name") for artist in release.get("artists") or [] if artist.get("name")]
     return ReleaseDetail(
         title=release["title"],
         year=release.get("year"),
         kind=release.get("type") or "Release",
-        cover_url=_proxied_cover_url(release.get("thumbnails")),
+        cover_url=cover_url,
         artist_names=", ".join(artists) or None,
         tracks=tracks,
     )
