@@ -284,3 +284,29 @@ export function setupOverlay(overlayId, closeBtnId, triggerIds = [], { dismissib
 
   return { open, close };
 }
+
+/**
+ * Wires a small × button next to a search input: hidden while the input is
+ * empty, visible the moment there's anything to clear. Clearing fires a
+ * real "input" event rather than just blanking the value, so whatever the
+ * input already does on every keystroke (Explore's search, Library's
+ * filter) runs exactly as if the text had been deleted by hand — no
+ * separate "and also re-run the search" step for each caller to remember.
+ */
+export function setupSearchClear(inputId, clearBtnId) {
+  const input = document.getElementById(inputId);
+  const clearBtn = document.getElementById(clearBtnId);
+  if (!input || !clearBtn) return;
+
+  const sync = () => {
+    clearBtn.hidden = !input.value;
+  };
+  sync();
+  input.addEventListener("input", sync);
+
+  clearBtn.addEventListener("click", () => {
+    input.value = "";
+    input.dispatchEvent(new Event("input"));
+    input.focus();
+  });
+}

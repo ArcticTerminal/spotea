@@ -868,6 +868,53 @@ html[data-active-tab="detail"] .tab-panel[data-tab-panel="detail"] {
   margin-bottom: 0.75rem;
 }
 
+/* Wraps a search input to position its clear button inside the field
+   rather than after it — the same "×" affordance interest-chip-remove
+   uses, just anchored to a text input instead of a chip. */
+.search-input-wrap {
+  position: relative;
+}
+
+.search-input-wrap input {
+  padding-right: 2rem;
+}
+
+.search-clear-btn {
+  position: absolute;
+  right: 0.35rem;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.search-clear-btn:hover {
+  background: var(--bg-hover-strong);
+  color: var(--text-primary);
+}
+
+.search-clear-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* `display: inline-flex` above is an author rule, so it beats the UA
+   stylesheet's [hidden] { display: none } on its own — same trap
+   .btn-icon[hidden] documents above. Without this, the button stayed on
+   screen with an empty input. */
+.search-clear-btn[hidden] {
+  display: none;
+}
+
 .search-results {
   list-style: none;
   margin: 0 0 1.5rem;

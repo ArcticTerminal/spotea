@@ -2,7 +2,7 @@
 // drag-to-scroll shelves, the collapsed mobile menu, and the manual feed
 // refresh those last two both trigger.
 
-import { api, showToast } from "../core.js";
+import { api, setupSearchClear, showToast } from "../core.js";
 import { onFragmentsSwapped, refreshFragments } from "../fragments.js";
 import { wireScrollers } from "./scrollers.js";
 import { openDetail } from "./detail.js";
@@ -128,6 +128,7 @@ export function setupLibrarySearch() {
   const input = document.getElementById("library-search-input");
   if (!input) return;
   input.addEventListener("input", applyLibraryFilter);
+  setupSearchClear("library-search-input", "library-search-clear");
   // A refreshed grid comes back unfiltered, so whatever is in the box has to
   // be applied again.
   onFragmentsSwapped(applyLibraryFilter);

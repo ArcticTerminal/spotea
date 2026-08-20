@@ -113,16 +113,21 @@
       <div class="content-header">
         <h2>Your channels</h2>
         {% if artists %}
-        <input
-          type="text"
-          id="library-search-input"
-          class="library-search-input"
-          placeholder="Search channels…"
-          autocomplete="off"
-          autocapitalize="off"
-          autocorrect="off"
-          aria-label="Search channels"
-        />
+        <div class="search-input-wrap">
+          <input
+            type="text"
+            id="library-search-input"
+            class="library-search-input"
+            placeholder="Search channels…"
+            autocomplete="off"
+            autocapitalize="off"
+            autocorrect="off"
+            aria-label="Search channels"
+          />
+          <button type="button" id="library-search-clear" class="search-clear-btn" aria-label="Clear search" hidden>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-close" /></svg>
+          </button>
+        </div>
         {% endif %}
       </div>
       <div id="library-grid">
@@ -132,8 +137,11 @@
 
     <section id="tab-explore" class="tab-panel" data-tab-panel="explore" hidden>
       <div class="channels-panel-inner">
-        <div class="channel-search">
+        <div class="channel-search search-input-wrap">
           <input type="text" id="explore-search-input" placeholder="Search a song or artist…" autocomplete="off" autocapitalize="off" autocorrect="off" />
+          <button type="button" id="explore-search-clear" class="search-clear-btn" aria-label="Clear search" hidden>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-close" /></svg>
+          </button>
         </div>
 
         <div id="explore-results-panel" hidden>

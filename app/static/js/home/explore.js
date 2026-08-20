@@ -9,11 +9,11 @@
 // The tab shows one of two regions at a time: the browse/recommendations
 // panel by default, and the search results while there's a query.
 
-import { api, debounce, escapeHtml, formatDuration } from "../core.js";
+import { api, debounce, escapeHtml, formatDuration, setupSearchClear } from "../core.js";
 import { openDetail } from "./detail.js";
 import { wireScrollers } from "./scrollers.js";
 import { followArtist, playRemoteVideo } from "./remote.js";
-import { activate, onTabActivated } from "./tabs.js";
+import { onTabActivated } from "./tabs.js";
 
 function formatSubscribers(count) {
   if (count == null) return "";
@@ -243,20 +243,6 @@ function shelfHtml(title, items, cardHtml) {
   `;
 }
 
-/** The nudge to go and list some interests. Shown above the shelves rather
- *  than instead of them: the charts and the mood shelf don't come from the
- *  interest list, so a profile that has listed none still has plenty to
- *  look at — it just isn't personal yet. */
-function interestsPromptHtml() {
-  return `
-    <p class="muted">
-      Tell Spotea what you're into — add a few interests in Settings and this fills up with
-      channels, songs and playlists picked for you.
-    </p>
-    <button type="button" id="recommendations-open-settings" class="btn-primary">Add interests</button>
-  `;
-}
-
 function renderRecommendations(data) {
   const body = document.getElementById("recommendations-body");
   if (!body) return;
@@ -276,11 +262,9 @@ function renderRecommendations(data) {
       : "",
   ].join("");
 
-  const prompt = data.interests.length ? "" : interestsPromptHtml();
   body.innerHTML =
-    prompt +
-    (shelves ||
-      `<p class="muted">Nothing came back this time. Try refreshing, or add a different interest in Settings.</p>`);
+    shelves ||
+    `<p class="muted">Nothing came back this time. Try refreshing, or add a different interest in Settings.</p>`;
   // Shelves built here never pass through the fragment swap that normally
   // wires drag-scrolling, so they have to ask for it themselves.
   wireScrollers();
@@ -399,12 +383,6 @@ export function setupRecommendations() {
   });
 
   body.addEventListener("click", (event) => {
-    if (event.target.closest("#recommendations-open-settings")) {
-      activate("settings");
-      document.getElementById("open-interests")?.click();
-      return;
-    }
-
     // Checked before anything else: the artist's name sits inside cards that
     // are themselves clickable, so the outer handler would otherwise swallow
     // it and start playing the song.
@@ -461,6 +439,8 @@ export function setupExploreSearch() {
   const videoResults = document.getElementById("video-search-results");
   const channelResults = document.getElementById("channel-search-results");
   if (!input || !resultsPanel || !browsePanel) return;
+
+  setupSearchClear("explore-search-input", "explore-search-clear");
 
   const runSearch = debounce(async (query) => {
     if (!query) {
