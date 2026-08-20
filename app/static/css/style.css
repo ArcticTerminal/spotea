@@ -3179,11 +3179,16 @@ body.has-mini-player .layout {
 /* Long enough to need collapsing — 729 characters for a mid-size artist,
    measured — but the full text is worth having, so it clamps rather than
    truncating server-side. */
+/* The only long-form prose in the app, and the one place the page's 1100px
+   container is too wide: at this size it ran about 130 characters a line,
+   well past the 60-80 where the eye still finds the next line reliably.
+   Capped in ch so the measure holds whatever the font resolves to. */
 .artist-bio {
-  margin: 0 0 0.35rem;
+  margin: 0 0 var(--space-1);
+  max-width: 72ch;
   color: var(--text-muted);
-  font-size: 0.9rem;
-  line-height: 1.5;
+  font-size: var(--text-md);
+  line-height: 1.6;
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
