@@ -1,0 +1,31 @@
+{# What's playing and what's next, inside the player overlay.
+
+   Rows come from _content_row.html — the same template a playlist's track
+   list uses — so a queue row has the same artwork, duration, download mark
+   and save button as the row it was queued from, and clicking one plays it
+   without any extra wiring: the href is the ordinary /#player/<id> route,
+   and queue.js's noteCurrent moves the pointer to whatever opens (see its
+   docstring).
+
+   Filled by GET /partials/queue, which is handed the ids by the client —
+   the queue's order lives in the browser, not the database. #}
+{% if queue_current %}
+<h2 class="queue-heading">Now playing</h2>
+{% with item = queue_current, index = '', show_channel = true %}
+{% include "_content_row.html" %}
+{% endwith %}
+{% endif %}
+
+<h2 class="queue-heading">Next up</h2>
+{% if queue_upcoming %}
+{% for item in queue_upcoming %}
+{% with index = loop.index, show_channel = true %}
+{% include "_content_row.html" %}
+{% endwith %}
+{% endfor %}
+{% else %}
+<p class="queue-empty">
+  Nothing queued. Press Play on an album, a playlist or an artist and the rest
+  of it lines up here.
+</p>
+{% endif %}

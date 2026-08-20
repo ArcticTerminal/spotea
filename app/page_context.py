@@ -20,6 +20,7 @@ from app.content_query import (
     count_content,
     followed_artists,
     new_upload_filter,
+    query_content_by_ids,
     query_content_page,
 )
 from app.images import needs_thumbnail_caching
@@ -288,6 +289,18 @@ PLAYLIST_KINDS: dict[str, PinnedPlaylist] = {
         "Find something to play",
     ),
 }
+
+
+def queue_panel_context(db: Session, user_id: int, ids: list[int]) -> dict:
+    """What the player's "Queue" panel shows.
+
+    The queue itself lives in the browser (static/js/home/queue.js owns the
+    order, and shuffle makes it one the server never computed), so the ids
+    arrive from the client and this only turns them into rows. The first id
+    is whatever is playing; the rest are what's next.
+    """
+    rows = query_content_by_ids(db, user_id, ids)
+    return {"queue_current": rows[0] if rows else None, "queue_upcoming": rows[1:]}
 
 
 def playlist_filter(kind: str) -> str | None:

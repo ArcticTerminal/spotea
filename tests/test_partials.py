@@ -333,6 +333,63 @@ def test_empty_playlist_detail_fragments_render_their_empty_state(client):
         assert 'id="detail-play-all"' not in res.text, kind
 
 
+def test_queue_fragment_renders_the_ids_in_the_order_it_was_given(client, db_session):
+    """The queue's order is the client's, not the database's — a shuffled
+    queue is a permutation the server never computed — so the rows come back
+    in exactly the order asked for rather than in any query order."""
+    _seed(db_session)
+    rows = {c.video_id: c.id for c in db_session.query(Content).all()}
+    wanted = [rows["partsave001"], rows["partnew0001"], rows["partfav0001"]]
+
+    body = _fragment_body(
+        client.get(f"/partials/queue?ids={','.join(str(i) for i in wanted)}").text,
+        "queue-panel-body",
+    )
+
+    positions = [body.index(f'data-content-id="{content_id}"') for content_id in wanted]
+    assert positions == sorted(positions)
+    # The first id is what's playing; the rest are what's next.
+    assert body.index("Now playing") < body.index("Saved And Played")
+    assert body.index("Next up") < body.index("Fresh Upload")
+
+
+def test_queue_fragment_ignores_ids_that_arent_the_users(client, db_session):
+    _seed(db_session)
+    mine = db_session.query(Content).first()
+    theirs = Content(
+        artist_id=_other_user_feed(db_session).id,
+        user_id=db_session.query(User).filter(User.email == "other3@example.com").first().id,
+        video_id="notyours001",
+        title="Not Yours",
+    )
+    db_session.add(theirs)
+    db_session.commit()
+    db_session.refresh(theirs)
+
+    body = _fragment_body(
+        client.get(f"/partials/queue?ids={mine.id},{theirs.id}").text, "queue-panel-body"
+    )
+
+    assert "Not Yours" not in body
+    assert f'data-content-id="{mine.id}"' in body
+
+
+def test_queue_fragment_survives_a_junk_id_list(client, db_session):
+    """The ids come from the client's own sessionStorage. A stale or
+    half-written record should cost the panel a row, not fail the request and
+    leave it blank."""
+    _seed(db_session)
+    real = db_session.query(Content).first().id
+
+    for ids in ("", "abc", f"{real},abc,,999999"):
+        res = client.get(f"/partials/queue?ids={ids}")
+        assert res.status_code == 200, ids
+        assert 'data-target="queue-panel-body"' in res.text, ids
+
+    empty = _fragment_body(client.get("/partials/queue?ids=").text, "queue-panel-body")
+    assert "Nothing queued" in empty
+
+
 def test_playlist_detail_fragment_404s_for_an_unknown_kind(client):
     assert client.get("/partials/detail/playlist/bogus").status_code == 404
 

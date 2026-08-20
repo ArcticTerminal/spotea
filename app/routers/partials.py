@@ -30,6 +30,7 @@ from app.page_context import (
     home_context,
     library_context,
     playlist_detail_context,
+    queue_panel_context,
     queue_thumbnail_caching,
     storage_summary_context,
 )
@@ -56,6 +57,33 @@ def home_fragment(
     # fragment refresh only ever shows rows some earlier render already
     # queued, so doing it again would be a second pass over the same videos.
     return templates.TemplateResponse(request, "_fragment_home.html", home_context(db, user.id))
+
+
+@router.get("/queue", response_class=HTMLResponse)
+def queue_fragment(
+    request: Request,
+    ids: str = "",
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> HTMLResponse:
+    """The player's "Queue" panel.
+
+    Unlike every other fragment here, the thing being rendered isn't
+    server-side state: the queue and its order live in the browser (see
+    static/js/home/queue.js), so the ids come in on the query string and this
+    only turns them into rows. Rendering it here anyway is what makes a queue
+    row look exactly like a playlist row — same template, same artwork, same
+    duration — instead of being a second, hand-built list that has to be kept
+    looking like the first.
+
+    Unparsable ids are dropped rather than rejected. The list is a client's
+    own sessionStorage record, and a stale or half-written one should cost
+    the panel a row, not a 422 that leaves it empty.
+    """
+    parsed = [int(part) for part in ids.split(",") if part.strip().lstrip("-").isdigit()]
+    return templates.TemplateResponse(
+        request, "_fragment_queue.html", queue_panel_context(db, user.id, parsed)
+    )
 
 
 @router.get("/library", response_class=HTMLResponse)

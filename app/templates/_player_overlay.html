@@ -23,6 +23,13 @@
 {% with duration_label = '0:00', favorite_content_id = '', favorite_is_on = False %}
 {% include "_player_controls.html" %}
 {% endwith %}
+
+    <!-- Starts empty and closed. The queue lives in the browser, so there is
+         nothing to render here until the panel is opened and home/overlay.js
+         fetches /partials/queue with the ids it holds. -->
+    <div id="queue-panel" class="queue-panel" hidden>
+      <div id="queue-panel-body"></div>
+    </div>
   </div>
 </div>
 
