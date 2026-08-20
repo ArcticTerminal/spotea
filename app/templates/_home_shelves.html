@@ -29,7 +29,7 @@
           {% if artist.avatar_url %}
           <img class="channel-chip-avatar" src="{{ artist.avatar_url }}" alt="" loading="lazy" />
           {% else %}
-          <span class="channel-chip-avatar"></span>
+          <span class="channel-chip-avatar avatar-initial">{{ (artist.name or artist.channel_id)[:1] | upper }}</span>
           {% endif %}
           <span class="artist-chip-name">{{ artist.name or artist.channel_id }}</span>
         </button>

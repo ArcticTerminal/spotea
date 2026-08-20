@@ -1617,6 +1617,37 @@ button.track-link {
   height: 88px;
 }
 
+/* Stands in when an artist has no picture. The placeholder used to be an
+   empty circle, which among real photographs reads as an image that failed
+   rather than one that was never there.
+
+   The letter is sized per circle rather than as a percentage: a percentage
+   font-size resolves against the *parent's* font-size, not the circle's
+   width, so it would have been the same small letter in all three places. */
+.avatar-initial {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--text-secondary);
+  background: var(--bg-hover-strong);
+  overflow: hidden;
+  user-select: none;
+}
+
+.artist-chip .avatar-initial {
+  font-size: 2.25rem; /* 88px circle */
+}
+
+.channel-card-avatar.avatar-initial {
+  font-size: 1.15rem; /* 44px circle */
+}
+
+.channel-hero-avatar.avatar-initial {
+  font-size: 2.5rem; /* 96px circle */
+}
+
 .pagination {
   display: flex;
   align-items: center;

@@ -71,7 +71,7 @@
         {% if artist.avatar_url %}
         <img class="channel-card-avatar" src="{{ artist.avatar_url }}" alt="" loading="lazy" />
         {% else %}
-        <span class="channel-card-avatar"></span>
+        <span class="channel-card-avatar avatar-initial">{{ (artist.name or artist.channel_id)[:1] | upper }}</span>
         {% endif %}
         <span class="channel-card-info">
           <span class="channel-card-title" title="{{ artist.name or artist.channel_id }}">{{ artist.name or artist.channel_id }}</span>
