@@ -40,5 +40,13 @@
 {% include "_pagination.html" %}
 
 {% else %}
-<p class="muted">{{ empty_message }}</p>
+{# An empty playlist is the one moment the app can explain how that playlist
+   fills up, so it says what belongs here, how to put something in it, and
+   offers the way out. A remote list (services/remote_detail.py) has nothing
+   to explain and passes only the message. #}
+<div class="empty-state">
+  <p class="empty-state-title">{{ empty_message }}</p>
+  {% if empty_help %}<p class="empty-state-help">{{ empty_help }}</p>{% endif %}
+  {% if empty_cta %}<a class="btn-primary empty-state-cta" href="{{ empty_cta_href }}">{{ empty_cta }}</a>{% endif %}
+</div>
 {% endif %}

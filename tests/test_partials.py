@@ -312,16 +312,22 @@ def test_detail_fragments_carry_the_play_all_controls(client, db_session):
     assert 'id="detail-shuffle"' in body
 
 
-def test_empty_playlist_detail_fragments_render_their_empty_message(client):
-    for kind, message in [
-        ("favorites", "No favorites yet."),
-        ("saved", "Nothing saved yet."),
-        ("new-uploads", "Nothing new yet."),
-        ("recently-played", "Nothing played yet."),
+def test_empty_playlist_detail_fragments_render_their_empty_state(client):
+    """Each pinned playlist explains itself when it has nothing in it: what
+    belongs there, how to put something there, and a way to go do that. The
+    strings come from PLAYLIST_KINDS, so this checks all three parts arrive
+    rather than re-spelling every sentence."""
+    for kind, title in [
+        ("favorites", "Songs you like live here"),
+        ("saved", "Nothing saved yet"),
+        ("new-uploads", "No new releases yet"),
+        ("recently-played", "Nothing played yet"),
     ]:
         res = client.get(f"/partials/detail/playlist/{kind}")
         assert res.status_code == 200, kind
-        assert message in res.text, kind
+        assert title in res.text, kind
+        assert 'class="empty-state-help"' in res.text, kind
+        assert 'href="/#explore"' in res.text, kind
         # Nothing to play — a Play button on an empty list is a control that
         # can only ever do nothing.
         assert 'id="detail-play-all"' not in res.text, kind

@@ -1324,7 +1324,42 @@ button.track-link {
 
 .muted {
   color: var(--text-muted);
-  font-size: 0.85rem;
+  font-size: var(--text-md);
+}
+
+/* An empty list used to be one grey sentence in the middle of a black page,
+   which told you the list was empty — something you could already see — and
+   nothing about how it fills up. These three parts say what belongs here,
+   how to put something in it, and where to go. Left-aligned to sit under the
+   hero above it rather than floating on its own axis. */
+.empty-state {
+  padding: var(--space-5) 0 var(--space-7);
+  max-width: 46ch;
+}
+
+.empty-state-title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-xl);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+}
+
+.empty-state-help {
+  margin: 0 0 var(--space-5);
+  color: var(--text-muted);
+  font-size: var(--text-md);
+  line-height: 1.55;
+}
+
+/* .btn-primary is written for <button>; an <a> needs the text treatment and
+   the box model spelled out. */
+.empty-state-cta {
+  display: inline-block;
+  text-decoration: none;
+  line-height: 1;
+  padding: var(--space-3) var(--space-5);
+  border-radius: var(--radius-pill);
 }
 
 .shelf {

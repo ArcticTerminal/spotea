@@ -9,6 +9,7 @@ class of bug this replaced.
 
 import json
 from collections.abc import Iterable
+from typing import NamedTuple
 
 from fastapi import BackgroundTasks
 from sqlalchemy import func
@@ -232,17 +233,60 @@ def storage_summary_context(db: Session, user_id: int) -> dict:
     return {"usage": usage_summary(db, user_id)}
 
 
-# kind -> (filter_value, title, empty_message) for Library's four pinned
-# virtual playlists. filter_value is what _content_query (content_query.py)
-# actually dispatches on — the original fourth tuple element here was a
-# duplicate of that same filter, spelled out a second time as a lambda, and
-# had no reader left once count_content replaced every hand-rolled
-# video_count query.
-PLAYLIST_KINDS: dict[str, tuple] = {
-    "favorites": ("__favorites__", "Favorites", "No favorites yet."),
-    "saved": ("__saved__", "Saved for later", "Nothing saved yet."),
-    "new-uploads": ("__new_uploads__", "New releases", "Nothing new yet."),
-    "recently-played": ("__played__", "Recently Played", "Nothing played yet."),
+class PinnedPlaylist(NamedTuple):
+    """One of Library's four pinned virtual playlists.
+
+    A plain tuple until the empty state grew from a single sentence into a
+    heading, an explanation of how the playlist fills up, and a way out of it
+    — at five positional fields, which one was which stopped being obvious at
+    the call site.
+
+    `filter` is what _content_query (content_query.py) dispatches on. An
+    earlier fourth element repeated that same filter as a lambda and lost its
+    last reader when count_content replaced the hand-rolled count queries; it
+    is deliberately not back.
+    """
+
+    filter: str
+    title: str
+    empty_title: str
+    empty_help: str
+    empty_cta: str
+
+
+# Every empty state sends people to the same place, because Explore is the
+# only place in the app where new music comes from.
+EMPTY_CTA_HREF = "/#explore"
+
+PLAYLIST_KINDS: dict[str, PinnedPlaylist] = {
+    "favorites": PinnedPlaylist(
+        "__favorites__",
+        "Favorites",
+        "Songs you like live here",
+        "Tap the heart on any song and it lands in this list.",
+        "Find something to play",
+    ),
+    "saved": PinnedPlaylist(
+        "__saved__",
+        "Saved for later",
+        "Nothing saved yet",
+        "Tap the bookmark on a song to come back to it later.",
+        "Find something to save",
+    ),
+    "new-uploads": PinnedPlaylist(
+        "__new_uploads__",
+        "New releases",
+        "No new releases yet",
+        "When an artist you follow puts something out, it shows up here.",
+        "Follow more artists",
+    ),
+    "recently-played": PinnedPlaylist(
+        "__played__",
+        "Recently Played",
+        "Nothing played yet",
+        "Songs you play show up here so you can get back to them.",
+        "Find something to play",
+    ),
 }
 
 
@@ -256,7 +300,7 @@ def playlist_filter(kind: str) -> str | None:
     would end up playing a different list than the one on screen.
     """
     config = PLAYLIST_KINDS.get(kind)
-    return config[0] if config else None
+    return config.filter if config else None
 
 
 def playlist_detail_context(db: Session, user_id: int, kind: str, page: int) -> dict | None:
@@ -266,16 +310,17 @@ def playlist_detail_context(db: Session, user_id: int, kind: str, page: int) -> 
     config = PLAYLIST_KINDS.get(kind)
     if config is None:
         return None
-    filter_value, title, empty_message = config
-
-    video_count = count_content(db, user_id, filter=filter_value)
-    items, page, total_pages = query_content_page(db, user_id, page=page, filter=filter_value)
+    video_count = count_content(db, user_id, filter=config.filter)
+    items, page, total_pages = query_content_page(db, user_id, page=page, filter=config.filter)
 
     return {
         "kind": kind,
         "artist": None,
-        "title": title,
-        "empty_message": empty_message,
+        "title": config.title,
+        "empty_message": config.empty_title,
+        "empty_help": config.empty_help,
+        "empty_cta": config.empty_cta,
+        "empty_cta_href": EMPTY_CTA_HREF,
         "video_count": video_count,
         "content": items,
         "page": page,

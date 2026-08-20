@@ -104,5 +104,9 @@
     </div>
     <p id="channel-search-empty" class="muted" hidden>No artists match your search.</p>
     {% else %}
-    <p class="muted">No content yet — add a channel in the Explore tab to get started.</p>
+    <div class="empty-state">
+      <p class="empty-state-title">Your library is empty</p>
+      <p class="empty-state-help">Follow an artist and their releases collect here.</p>
+      <a class="btn-primary empty-state-cta" href="/#explore">Find artists</a>
+    </div>
     {% endif %}
