@@ -1568,16 +1568,53 @@ button.track-link {
   white-space: nowrap;
 }
 
-.channel-chip.has-avatar {
-  padding: 0.35rem 1.1rem 0.35rem 0.35rem;
+/* An artist, wherever they appear, is a round picture with a name under it.
+   Home used to show them as horizontal pills instead — a third presentation
+   alongside Library's row card and Explore's shelf card, and the only one
+   that couldn't cope with a long name: `white-space: nowrap` meant "Bob
+   Marley & The Wailers" grew a pill wider than the phone. This matches
+   .shelf-channel-card, which Explore already used.
+
+   Scoped to .artist-chip rather than .channel-chip because Explore's mood
+   chips share that class and are genuinely pills. */
+.artist-chip {
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 104px;
+  padding: 0;
+  background: none;
+  border: none;
+  white-space: normal;
+  text-align: center;
+}
+
+.artist-chip-name {
+  width: 100%;
+  font-size: var(--text-sm);
+  line-height: 1.3;
+  /* A name is often one unbroken word (norahjonesVEVO); without this it
+     overflows sideways instead of ellipsising. Same fix as
+     .shelf-channel-card .card-title. */
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .channel-chip-avatar {
   width: 28px;
   height: 28px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   object-fit: cover;
   flex: 0 0 auto;
+  background: var(--bg-input);
+  display: block;
+}
+
+.artist-chip .channel-chip-avatar {
+  width: 88px;
+  height: 88px;
 }
 
 .pagination {

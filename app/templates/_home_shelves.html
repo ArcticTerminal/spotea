@@ -21,9 +21,17 @@
       </div>
       <div class="channel-row" id="home-channel-row">
         {% for artist in home_recent_artists %}
-        <button type="button" class="channel-chip{{ ' has-avatar' if artist.avatar_url else '' }}" data-browse-id="{{ artist.browse_id or '' }}">
-          {% if artist.avatar_url %}<img class="channel-chip-avatar" src="{{ artist.avatar_url }}" alt="" loading="lazy" />{% endif %}
-          <span>{{ artist.name or artist.channel_id }}</span>
+        {# Two classes: .channel-chip is what home/library.js's click handler
+           binds to, .artist-chip is what makes it look like an artist rather
+           than a pill. Explore's mood chips are .channel-chip too and stay
+           pills — a mood is a label, an artist is a face. #}
+        <button type="button" class="channel-chip artist-chip" data-browse-id="{{ artist.browse_id or '' }}">
+          {% if artist.avatar_url %}
+          <img class="channel-chip-avatar" src="{{ artist.avatar_url }}" alt="" loading="lazy" />
+          {% else %}
+          <span class="channel-chip-avatar"></span>
+          {% endif %}
+          <span class="artist-chip-name">{{ artist.name or artist.channel_id }}</span>
         </button>
         {% endfor %}
       </div>
