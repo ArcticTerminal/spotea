@@ -451,6 +451,27 @@ export function setupExploreSearch() {
 
   setupSearchClear("explore-search-input", "explore-search-clear");
 
+  // Results are an answer to a question, and the question is over once you've
+  // acted on one of them. Leaving them up meant coming back to Explore later
+  // and finding last week's search where the recommendations should be, with
+  // no obvious way back other than noticing the clear button.
+  //
+  // Hung off the tab switch rather than off each result row: opening a result
+  // activates the "detail" panel, which is a tab activation too, so one
+  // listener covers both leaving Explore and drilling into something from it.
+  function clearSearch() {
+    if (!input.value) return;
+    input.value = "";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    videoResults.innerHTML = "";
+    channelResults.innerHTML = "";
+    showExplorePanel("explore-browse-panel");
+  }
+
+  onTabActivated((tab) => {
+    if (tab !== "explore") clearSearch();
+  });
+
   const runSearch = debounce(async (query) => {
     if (!query) {
       showExplorePanel("explore-browse-panel");

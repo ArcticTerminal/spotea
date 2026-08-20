@@ -20,6 +20,13 @@ import { api } from "../core.js";
 export const QUEUE_CHANGED = "spotea:queuechange";
 
 const QUEUE_KEY = "spotea-queue";
+// Shuffle and repeat are kept apart from the queue, in localStorage rather
+// than sessionStorage, because they aren't part of any one queue: they are
+// how this listener wants their music played, and that doesn't stop being
+// true when the app is closed. Stored with the queue they were reset to off
+// on every fresh launch, and the panel came back offering an order the user
+// had already said they didn't want.
+const PREFS_KEY = "spotea-play-prefs";
 
 // Survives the reload that resume.js forces on every bfcache restore (which
 // on an iOS PWA is every trip to the home screen and back). Without this the
@@ -36,8 +43,9 @@ const REPEAT_MODES = ["off", "all", "one"];
 function persist() {
   try {
     sessionStorage.setItem(QUEUE_KEY, JSON.stringify(state));
+    localStorage.setItem(PREFS_KEY, JSON.stringify({ shuffle: state.shuffle, repeat: state.repeat }));
   } catch (err) {
-    /* sessionStorage unavailable (private browsing) — the queue just won't outlive the page. */
+    /* Storage unavailable (private browsing) — the queue just won't outlive the page. */
   }
 }
 
@@ -65,7 +73,39 @@ function restore() {
   };
 }
 
+/**
+ * The last word on shuffle and repeat, run after restore() so it overrides
+ * the copy that came in with the queue.
+ *
+ * Only when there is a record to read: with localStorage blocked and
+ * sessionStorage working, the queue's own copy is still the best answer
+ * available, and clobbering it with a default would be a downgrade.
+ */
+function restorePrefs() {
+  let saved;
+  try {
+    saved = JSON.parse(localStorage.getItem(PREFS_KEY) || "null");
+  } catch (err) {
+    return;
+  }
+  if (!saved) return;
+  state.shuffle = saved.shuffle === true;
+  state.repeat = REPEAT_MODES.includes(saved.repeat) ? saved.repeat : "off";
+}
+
 restore();
+const queueShuffle = state.shuffle;
+restorePrefs();
+// The two records agree whenever they were written together, which is every
+// time this tab wrote them. They can disagree across tabs: shuffle is shared
+// (localStorage) and the queue is not (sessionStorage), so a second tab can
+// come back holding a sequential order under a preference that has since been
+// switched on elsewhere. Rebuilt only in that case — doing it unconditionally
+// would reshuffle what's up next on every reload, and resume.js forces one
+// each time an iOS PWA comes back from the home screen.
+if (state.ids.length && state.shuffle !== queueShuffle) {
+  reorder(state.order[state.position] ?? null);
+}
 
 function announce() {
   persist();

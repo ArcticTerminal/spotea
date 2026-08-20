@@ -78,9 +78,14 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-menu" /></svg>
         </button>
         <div id="mobile-menu" class="mobile-menu" role="menu" hidden>
-          <button type="button" id="mobile-menu-refresh" class="mobile-menu-item" role="menuitem">
+          {# "Refresh", not "Check for new releases": the sentence wrapped to
+             two lines in a menu whose other item is one word, and this is the
+             same control as the topbar's Refresh button on desktop — calling
+             it two different things in two places is its own small confusion.
+             The full phrasing survives on the title and in Settings. #}
+          <button type="button" id="mobile-menu-refresh" class="mobile-menu-item" role="menuitem" title="Check for new releases">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-refresh" /></svg>
-            <span>Check for new releases</span>
+            <span>Refresh</span>
           </button>
           <form method="post" action="/logout" class="mobile-menu-form">
             <button type="submit" class="mobile-menu-item" role="menuitem">

@@ -1225,17 +1225,17 @@ html[data-active-tab="detail"] .tab-panel[data-tab-panel="detail"] {
 
 .shelf-channel-card .card-title {
   min-height: 0;
-  /* A channel name is often one unbroken word (norahjonesVEVO), which normal
-     word wrapping can't split — so it overflowed the card sideways instead of
-     wrapping, and .card-title's clamp never got the chance to put an
-     ellipsis on it. Breaking anywhere keeps the name inside the card and
-     hands the clamp something to truncate. */
-  overflow-wrap: anywhere;
-  /* One line, not the base .card-title's two — a long name (YoungBoy Never
-     Broke Again) wrapping to a second line made its card taller than every
-     other one in the same row, since min-height:0 above means nothing
-     reserves that second line's space up front. */
-  -webkit-line-clamp: 1;
+  /* The card body centres its children, and centring in a column flex means
+     they size to their content rather than stretching — so a long name
+     (YoungBoy Never Broke Again) made the heading wider than the card it was
+     in, and .card-title's ellipsis never applied: there was no overflow from
+     the heading's own point of view, only from the card's. Capping it at the
+     body's width is what gives the ellipsis something to measure against.
+
+     The line-clamp and overflow-wrap that used to sit here did nothing.
+     .card-title is `white-space: nowrap` now, which leaves nothing to wrap,
+     and a clamp needs a `display: -webkit-box` that was never set. */
+  max-width: 100%;
 }
 
 .shelf-channel-card .card-body {
