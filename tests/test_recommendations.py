@@ -88,7 +88,7 @@ def fake_browse(monkeypatch):
 
 @pytest.fixture
 def fake_search(monkeypatch):
-    """Replaces all three searches with deterministic, query-derived results,
+    """Replaces both searches with deterministic, query-derived results,
     and records every query that was run so tests can assert on the request
     budget rather than only on the output."""
     calls = []
@@ -102,7 +102,6 @@ def fake_search(monkeypatch):
 
     searchers = {
         "videos": make("videos", lambda seed: _video(seed)),
-        "channels": make("channels", _channel),
         "playlists": make("playlists", _playlist),
     }
     monkeypatch.setattr(rec, "_SEARCHERS", searchers)
@@ -124,7 +123,7 @@ def test_no_interests_means_no_interest_searches(client, db_session, fake_search
 
     assert body["interests"] == []
     assert body["interests_used"] == []
-    assert (body["videos"], body["channels"], body["playlists"]) == ([], [], [])
+    assert (body["videos"], body["playlists"]) == ([], [])
     assert fake_search == []
 
 
@@ -160,8 +159,7 @@ def test_mood_categories_lists_every_one_not_just_a_sample(monkeypatch):
 
 
 def test_a_charting_artist_already_followed_is_dropped(client, db_session, fake_browse):
-    """Same rule as the interest-based channels shelf: it's a list of
-    channels to follow, and one already followed isn't."""
+    """It's a list of artists to follow, and one already followed isn't."""
     fake_browse(chart_artists=["UCfollowed", "UCnew"])
     db_session.add(
         Artist(
@@ -274,60 +272,40 @@ def test_a_video_already_in_the_library_is_dropped_from_the_batch(client, db_ses
     assert [v["video_id"] for v in body["videos"]] == ["jazz-0", "jazz-2"]
 
 
-def test_a_followed_channel_is_dropped_from_the_batch(client, db_session, fake_search):
-    """Observed live before this: a profile was recommended a channel it
-    already followed."""
-    _set_interests(db_session, "jazz")
-    db_session.add(
-        Artist(
-            user_id=USER_ID,
-            channel_id="jazz-0",
-            name="Already Followed",
-            followed=True,
-        )
-    )
-    db_session.commit()
-
-    body = client.get("/recommendations").json()
-
-    assert [c["channel_id"] for c in body["channels"]] == ["jazz-1", "jazz-2"]
-
-
-def test_an_unfollowed_placeholder_feed_does_not_hide_a_channel(client, db_session, fake_search):
+def test_an_unfollowed_placeholder_artist_does_not_hide_a_chart_artist(client, db_session, fake_browse):
     """followed=False is an Explore placeholder (see routers/explore.py), not
     a real subscription — it must not suppress the recommendation the way an
-    actually-followed channel does."""
-    _set_interests(db_session, "jazz")
+    actually-followed artist does. Was interest-based-channels-shelf
+    coverage before that shelf was removed; the same filter still guards
+    chart_artists and similar_artists."""
+    fake_browse(chart_artists=["UCchart"])
     db_session.add(
-        Artist(
-            user_id=USER_ID,
-            channel_id="jazz-0",
-            name="Just A Preview",
-            followed=False,
-        )
+        Artist(user_id=USER_ID, channel_id="UCchart", name="Just A Preview", followed=False)
     )
     db_session.commit()
 
     body = client.get("/recommendations").json()
 
-    assert [c["channel_id"] for c in body["channels"]] == ["jazz-0", "jazz-1", "jazz-2"]
+    assert [c["channel_id"] for c in body["chart_artists"]] == ["UCchart"]
 
 
-def test_the_library_filter_is_reapplied_on_every_read_even_from_cache(client, db_session, fake_search):
+def test_the_library_filter_is_reapplied_on_every_read_even_from_cache(
+    client, db_session, fake_search, fake_browse
+):
     """The filter can't be baked into the cached payload — build_batch's
     result is cached and reused across requests, but the library it's
-    filtered against keeps changing (someone follows a recommended channel
+    filtered against keeps changing (someone follows a recommended artist
     right after seeing it). Re-checking on every read is what makes that
-    channel disappear on the very next load instead of waiting for the
+    artist disappear on the very next load instead of waiting for the
     batch to expire and rebuild."""
-    _set_interests(db_session, "jazz")
+    fake_browse(chart_artists=["UCchart"])
     client.get("/recommendations")  # builds and caches the batch
     fake_search.clear()
 
     db_session.add(
         Artist(
             user_id=USER_ID,
-            channel_id="jazz-0",
+            channel_id="UCchart",
             name="Followed After The Batch Was Built",
             followed=True,
         )
@@ -337,7 +315,7 @@ def test_the_library_filter_is_reapplied_on_every_read_even_from_cache(client, d
     body = client.get("/recommendations").json()
 
     assert fake_search == []  # still served from cache, not rebuilt
-    assert "jazz-0" not in [c["channel_id"] for c in body["channels"]]
+    assert "UCchart" not in [c["channel_id"] for c in body["chart_artists"]]
 
 
 def test_a_first_request_builds_a_batch_from_the_interests(client, db_session, fake_search):
@@ -349,9 +327,8 @@ def test_a_first_request_builds_a_batch_from_the_interests(client, db_session, f
     assert body["interests_used"] == ["jazz"]
     assert body["generated_at"] is not None
     assert [v["video_id"] for v in body["videos"]] == ["jazz-0", "jazz-1", "jazz-2"]
-    assert [c["channel_id"] for c in body["channels"]] == ["jazz-0", "jazz-1", "jazz-2"]
     assert [p["playlist_id"] for p in body["playlists"]] == ["jazz-0", "jazz-1", "jazz-2"]
-    assert sorted(fake_search) == [("channels", "jazz"), ("playlists", "jazz"), ("videos", "jazz")]
+    assert sorted(fake_search) == [("playlists", "jazz"), ("videos", "jazz")]
 
 
 def test_a_second_request_is_served_from_the_cache(client, db_session, fake_search):
@@ -374,7 +351,7 @@ def test_editing_the_interests_invalidates_the_cache(client, db_session, fake_se
     body = client.get("/recommendations").json()
 
     assert body["interests_used"] == ["funk"]
-    assert [q for _, q in fake_search] == ["funk", "funk", "funk"]
+    assert [q for _, q in fake_search] == ["funk", "funk"]
 
 
 def test_reordering_the_interests_does_not_invalidate_the_cache(client, db_session, fake_search):
@@ -445,9 +422,9 @@ def test_only_a_sample_of_a_long_interest_list_is_searched(client, db_session, f
 
     assert len(body["interests_used"]) == rec.INTERESTS_PER_RUN
     assert set(body["interests_used"]) <= {f"tag{i}" for i in range(10)}
-    # Three searches per sampled interest, and not one more — this is the
+    # Two searches per sampled interest, and not one more — this is the
     # whole point of sampling.
-    assert len(fake_search) == rec.INTERESTS_PER_RUN * 3
+    assert len(fake_search) == rec.INTERESTS_PER_RUN * 2
     # The full list is still reported, so Explore can say what it's working
     # from even though only a few of them were used.
     assert len(body["interests"]) == 10
@@ -469,7 +446,6 @@ def test_a_result_two_interests_share_is_only_listed_once(client, db_session, mo
         "_SEARCHERS",
         {
             "videos": lambda query: [_video("shared"), _video(f"{query}-own")],
-            "channels": lambda query: [],
             "playlists": lambda query: [],
         },
     )
@@ -487,7 +463,6 @@ def test_each_shelf_is_capped(client, db_session, monkeypatch):
         "_SEARCHERS",
         {
             "videos": lambda query: many,
-            "channels": lambda query: [],
             "playlists": lambda query: [],
         },
     )
@@ -505,8 +480,7 @@ def test_one_failing_search_does_not_sink_the_batch(client, db_session, monkeypa
         "_SEARCHERS",
         {
             "videos": lambda query: [_video("v1")],
-            "channels": lambda query: [],
-            "playlists": lambda query: [_playlist("p1")],
+            "playlists": lambda query: [],
         },
     )
     _set_interests(db_session, "jazz")
@@ -514,8 +488,7 @@ def test_one_failing_search_does_not_sink_the_batch(client, db_session, monkeypa
     body = client.get("/recommendations").json()
 
     assert [v["video_id"] for v in body["videos"]] == ["v1"]
-    assert body["channels"] == []
-    assert [p["playlist_id"] for p in body["playlists"]] == ["p1"]
+    assert body["playlists"] == []
 
 
 def test_a_corrupt_cached_payload_is_treated_as_a_miss(client, db_session, fake_search):

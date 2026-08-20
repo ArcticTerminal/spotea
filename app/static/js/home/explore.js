@@ -281,8 +281,12 @@ function renderRecommendations(data) {
 
   const shelves = [
     // Interest-based first, because they're the ones about this profile.
+    // No artist shelf here any more — an interest is free text and was
+    // routinely a genre or mood rather than an artist's name, which
+    // YouTube Music's artist search answers with beatmaker/compilation
+    // channels, not real artists (see services/recommendations.py's
+    // module docstring). Similar artists, below, replaced it.
     shelfHtml("Songs", data.videos, recVideoCardHtml),
-    shelfHtml("Artists", data.channels, channelCardHtml),
     shelfHtml("Playlists", data.playlists, recPlaylistCardHtml),
     // Also about this profile, but from follows rather than typed
     // interests — empty for a library with nothing followed yet, and

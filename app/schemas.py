@@ -176,7 +176,6 @@ class RecommendationsOut(BaseModel):
     interests_used: list[str]
     generated_at: datetime
     videos: list[VideoSearchResultOut]
-    channels: list[ChannelSearchResultOut]
     playlists: list[PlaylistSearchResultOut]
     # Below here: shelves that don't come from the interest list at all, so
     # they're filled in even for a library that has listed none.

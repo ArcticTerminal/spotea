@@ -1,17 +1,24 @@
-"""Explore's browse shelves: songs, channels and playlists picked from the
-interests listed in Settings, plus the charts and the full list of mood/
-genre categories, which belong to nobody in particular.
+"""Explore's browse shelves: songs and playlists picked from the interests
+listed in Settings, similar artists picked from who's actually followed,
+plus the charts and the full list of mood/genre categories, which belong
+to nobody in particular.
 
-There is no recommender model here and no user-behaviour signal — an interest
-is a free-text phrase, and a recommendation is what YouTube search returns for
-it. That's deliberate: Spotea knows what you follow and play, but it
-has no way to turn that into *new* discovery on its own, whereas "tell me what
-you like" turns straight into a query. The charts and mood shelves are the
-answer to the other case: a library that has said nothing about itself yet,
-which until they existed had an empty Explore tab and a nag.
+The interest-based shelves are plain search, not a recommender model — an
+interest is a free-text phrase, and a result is what YouTube search returns
+for it. That covers "tell me what you like" turning into a query, but it
+used to also carry the artist shelf, keyed on the same free text — which
+went badly for anything that wasn't literally an artist's name: searching
+YouTube Music's artist index for a genre like "Hip Hop" surfaces beatmaker
+and compilation channels, not real artists. similar_artists replaces that
+specifically, built from artists actually followed rather than typed text
+(see _similar_to_followed) — the one shelf here that *is* a real signal
+about this profile, not a search. The charts and mood shelves answer the
+remaining case: a library that has said nothing about itself yet and
+followed nobody, which until charts/moods existed had an empty Explore tab
+and a nag.
 
 The interesting part is therefore not the ranking, it's the request budget.
-One batch is a dozen live searches, each of them seconds long, against a
+One batch is several live searches, each of them seconds long, against a
 service that rate-limits an unauthenticated residential IP. So:
 
   * a batch is cached in the database (models.RecommendationCache), keyed by
@@ -48,7 +55,6 @@ from app.timeutil import utcnow
 from app.youtube.music import (
     fetch_charts,
     fetch_mood_categories,
-    search_artists,
     search_songs,
 )
 from app.youtube.music import search_playlists as search_music_playlists
@@ -62,16 +68,16 @@ logger = logging.getLogger(__name__)
 # rather than two. This is only the fallback for a caller that passes no ttl.
 DEFAULT_TTL = timedelta(minutes=30)
 
-# Interests sampled per run. Each one costs three searches (songs, channels,
-# playlists), so this is the knob that decides a run's request count — nine
-# searches, run in parallel, is a few seconds of wall time and a request burst
-# YouTube tolerates.
+# Interests sampled per run. Each one costs two searches (songs, playlists —
+# see _SEARCHERS), so this is the knob that decides a run's request count —
+# six searches, run in parallel, is a couple seconds of wall time and a
+# request burst YouTube tolerates.
 INTERESTS_PER_RUN = 3
 
-# Wide enough for every sampled interest's three searches at once, plus the
+# Wide enough for every sampled interest's two searches at once, plus the
 # two browse jobs (see _BROWSE_BUILDERS) that don't depend on interests at
 # all. Nothing else here overlaps.
-_POOL_SIZE = INTERESTS_PER_RUN * 3 + 2
+_POOL_SIZE = INTERESTS_PER_RUN * 2 + 2
 
 # Per shelf, after merging every sampled interest's results. Roughly a shelf
 # and a half of horizontal scrolling, which is as far as anyone browses one.
@@ -82,22 +88,25 @@ RESULTS_PER_SHELF = 12
 # own — which is what keeps this module free to add a shelf without a
 # migration, and without a reader having to defend against a payload written
 # by an older version of itself.
-PAYLOAD_VERSION = "v4"
+PAYLOAD_VERSION = "v5"
 
-# Every shelf comes from YouTube Music, which indexes tracks and artists
-# rather than videos and channels. The "channels" key is what the cached
-# payload and the client still call the artist shelf; PAYLOAD_VERSION is what
-# lets that name change later without a migration.
+# No artist search here any more — an interest is free text, and it was
+# routinely a genre or a mood rather than an artist's name ("Hip Hop", not
+# "Drake"); YouTube Music's artist search answers that kind of query with
+# beatmaker/compilation channels, not real artists (measured live: searching
+# "Hip Hop" returned "Hip hop beats", "Oldschool Hip-Hop Instrumentalist" —
+# nothing a person would call an artist). See recommendations.
+# _similar_to_followed for what replaced it: YouTube Music's own "fans also
+# like" data off artists actually followed, which needs no search at all.
 _SEARCHERS = {
     "videos": search_songs,
-    "channels": search_artists,
     "playlists": search_music_playlists,
 }
 
 # Result key -> the field that identifies one result, for cross-interest
 # deduplication. Two interests in the same genre routinely return the same
-# channel; showing it twice in one shelf reads as a bug.
-_IDENTITY_FIELDS = {"videos": "video_id", "channels": "channel_id", "playlists": "playlist_id"}
+# video; showing it twice in one shelf reads as a bug.
+_IDENTITY_FIELDS = {"videos": "video_id", "playlists": "playlist_id"}
 
 # Serializes batch building process-wide. Not about data races (each run
 # writes only its own row) — it's a second, cruder brake on how many
@@ -111,7 +120,6 @@ def empty_batch() -> dict:
     return {
         "interests_used": [],
         "videos": [],
-        "channels": [],
         "playlists": [],
         "charts": [],
         "chart_artists": [],
@@ -213,11 +221,10 @@ def build_batch(interests: list[str]) -> dict:
         batch[kind] = _interleave(per_interest, _IDENTITY_FIELDS[kind])
 
     logger.info(
-        "Built recommendations for %s: %d songs, %d channels, %d playlists, "
+        "Built recommendations for %s: %d songs, %d playlists, "
         "%d charts, %d charting artists, %d moods",
         ", ".join(sampled) or "no interests",
         len(batch["videos"]),
-        len(batch["channels"]),
         len(batch["playlists"]),
         len(batch["charts"]),
         len(batch["chart_artists"]),
@@ -298,15 +305,10 @@ def _drop_already_in_library(db: Session, user: User, batch: dict) -> dict:
     Playlists aren't filtered — YouTube's search results don't expose enough
     to match one against the library reliably.
 
-    Observed live before this: an interest list including "devops"
-    was recommended a channel it already followed.
-
-    The charting-artists shelf is filtered on the same rule as the channels
-    one: it is a list of channels to follow, and one already followed isn't.
-
-    Also where similar_artists gets added (see _similar_to_followed) —
-    piggybacking on the followed_ids query below rather than a second one,
-    since exclude-already-followed is exactly what that shelf needs too.
+    The charting-artists and similar-artists shelves both get the same
+    rule: each is a list of channels to follow, and one already followed
+    isn't. similar_artists is computed here too (see _similar_to_followed),
+    piggybacking on the followed_ids query below rather than a second one.
     """
     owned_video_ids = {
         video_id for (video_id,) in db.query(Content.video_id).filter(Content.user_id == user.id)
@@ -327,7 +329,6 @@ def _drop_already_in_library(db: Session, user: User, batch: dict) -> dict:
     return {
         **batch,
         "videos": [v for v in batch["videos"] if v["video_id"] not in owned_video_ids],
-        "channels": [c for c in batch["channels"] if c["channel_id"] not in followed_ids],
         "chart_artists": [
             c for c in batch["chart_artists"] if c["channel_id"] not in followed_ids
         ],
