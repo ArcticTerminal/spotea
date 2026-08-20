@@ -169,6 +169,35 @@ def test_report_playback_only_sends_the_unexpected_events() -> None:
     )
 
 
+def test_the_volume_slider_is_gated_on_ios_as_well_as_on_the_write_taking() -> None:
+    """iOS routes playback volume to the hardware buttons, so the slider does
+    nothing there and is hidden. That used to be decided by feature detection
+    alone — write a volume, read it back — on the reasoning that the
+    restriction is per-browser rather than per-OS.
+
+    It was measured wrong on a real iPhone twice: the slider stayed on screen
+    and stayed useless, which means the read-back returns *true* there. iOS
+    keeps the value it was assigned and reflects it back; the property simply
+    isn't what controls how loud anything is, so no amount of reading it can
+    tell the two cases apart. Hence the second, user-agent gate — and hence
+    this test, because "just feature-detect it" is exactly the tidy-looking
+    change that would silently put the dead control back on every iPhone."""
+    source = (JS_DIR / "player.js").read_text()
+
+    assert "function isIOSWebKit()" in source, (
+        "the iOS gate is gone — a volume slider that does nothing is back on every iPhone"
+    )
+    assert "volumeIsSettable(activeAudio()) && !isIOSWebKit()" in source, (
+        "the volume slider is no longer gated on both the write taking *and* not being "
+        "iOS; feature detection alone returns true on iOS and shows a dead control"
+    )
+    # iPadOS 13+ claims to be a Mac, so the sniff has to look past the name.
+    assert "maxTouchPoints" in source, (
+        "isIOSWebKit no longer distinguishes an iPad from a Mac, and iPadOS reports "
+        "itself as Macintosh"
+    )
+
+
 def test_wire_scrollers_does_not_leak_a_listener_or_observer_per_row() -> None:
     """wireScrollers() runs again after every fragment swap (Home/Library
     rows get replaced wholesale), and it used to create a brand new

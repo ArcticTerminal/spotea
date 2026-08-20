@@ -275,6 +275,27 @@ export function paintRange(input) {
  * has moved before. Safe to run at startup because nothing is loaded yet —
  * the value is restored either way.
  */
+/**
+ * Whether this is an iOS browser — every browser on iOS is WebKit, since
+ * Apple requires it.
+ *
+ * Sniffed from the user agent, which volumeIsSettable below deliberately
+ * avoids, and it is here because that feature detection was measured to be
+ * wrong on a real iPhone: the slider stayed on screen and did nothing, which
+ * means the write-then-read-back test came back *true* there. iOS evidently
+ * stores the assigned value on the property and reflects it back while
+ * routing playback volume to the hardware buttons regardless — so no amount
+ * of reading the property can tell the two apart. Detection can't be done
+ * from behaviour when the behaviour is a lie, so this asks who it's talking
+ * to instead.
+ */
+function isIOSWebKit() {
+  const ua = navigator.userAgent || "";
+  if (/iPad|iPhone|iPod/.test(ua)) return true;
+  // iPadOS 13+ identifies itself as a Mac; the touch points give it away.
+  return /Macintosh/.test(ua) && navigator.maxTouchPoints > 1;
+}
+
 function volumeIsSettable(audio) {
   const original = audio.volume;
   try {
@@ -379,33 +400,39 @@ export function setupPlayer() {
     scrubbing = false;
   });
 
-  // iOS hands volume to the hardware buttons and makes the property
-  // read-only: the assignment below is accepted and then quietly ignored, so
-  // the slider moves and nothing gets louder. A control that responds to you
-  // but doesn't do its job is worse than one that isn't there, so it's
-  // removed where the write doesn't take. Mute is a separate property and
-  // does work, so that button stays either way.
+  // iOS hands playback volume to the hardware buttons: the assignment below
+  // is accepted and then has no effect on how loud anything is, so the slider
+  // moves and nothing changes. A control that responds to you without doing
+  // its job is worse than one that isn't there, so it's removed there. Mute
+  // is a separate property and genuinely works, so that button stays.
   //
-  // **Web Audio was tried here and did not work (2026-08-20, reverted).** The
-  // standard answer to a read-only volume is to route the element through a
-  // GainNode, and that shipped: built lazily, on the first slider move asking
-  // for less than full volume, so that a session which never touched the
-  // slider kept the untouched playback path. It passed end to end against a
-  // browser patched to ignore volume writes the way iOS does — one
-  // AudioContext, gain tracking the slider exactly, playback continuing
-  // across the reroute — and then changed nothing at all on a real iPhone.
+  // Two gates, because neither is enough alone. The feature detection catches
+  // any browser that refuses the write outright. It does *not* catch iOS,
+  // which was the whole reason it existed: measured on a real iPhone, the
+  // slider was still on screen and still useless, so the read-back had
+  // returned true — the property keeps the value it was given and simply
+  // isn't what controls the output. Hence the second, sniffed gate.
   //
-  // The likely reason is the lazy construction that made it safe:
-  // createMediaElementSource has to claim the element's output, and WebKit
-  // appears not to hand it over for an element that is already playing. The
-  // version that might work is therefore the one that builds the graph up
-  // front, before the first play — which puts *every* iOS session on the Web
-  // Audio path permanently, on the platform where an AudioContext suspended
-  // in the background is silence rather than quiet audio, and where
-  // background playback took four rounds to get right (see the Playback
-  // element note above). That trade was declined: on iOS the hardware buttons
-  // are the volume control, and this stays a mute button.
-  if (volumeIsSettable(activeAudio())) {
+  // **A GainNode was built for this and reverted (2026-08-20), untested.**
+  // Routing the element through Web Audio is the standard answer to a volume
+  // property that won't take, and it shipped briefly: constructed lazily, on
+  // the first slider move below full volume, so a session that never touched
+  // the slider kept the untouched playback path. It worked end to end against
+  // a browser patched to refuse volume writes the way iOS was assumed to.
+  //
+  // On the phone it changed nothing — but not because Web Audio failed there.
+  // It never ran: selecting it depended on volumeIsSettable coming back
+  // false, and on that device it comes back true, which is the same wrong
+  // assumption this whole block is now built around avoiding. Whether a
+  // GainNode would actually work on iOS is therefore still unknown.
+  //
+  // Not worth finding out, at least not for this. Making it selectable means
+  // routing iOS playback through Web Audio, where an AudioContext suspended
+  // in the background is silence rather than quiet audio — betting the
+  // background-playback behaviour that took four rounds to get right (see the
+  // Playback element note above) on a volume slider. On iOS the hardware
+  // buttons are the volume control, and this stays a mute button.
+  if (volumeIsSettable(activeAudio()) && !isIOSWebKit()) {
     volume.addEventListener("input", () => {
       const audio = activeAudio();
       audio.volume = Number(volume.value) / 100;
