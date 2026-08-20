@@ -1045,6 +1045,13 @@ html[data-active-tab="detail"] .tab-panel[data-tab-panel="detail"] {
    and shouldn't reserve the space for them. */
 .rec-card .card-title {
   min-height: 0;
+  /* One line, not the base .card-title's two — same reasoning as
+     .shelf-channel-card .card-title below: min-height:0 means nothing
+     reserves a second line's space up front, so a longer title (a mood
+     playlist's "End of the Road: Classic R&B Breakup") wrapped to two
+     lines and made its card taller than every shorter-titled one in the
+     same row. */
+  -webkit-line-clamp: 1;
 }
 
 /* Channel cards aren't 16:9 — an avatar reads as a channel, a letterboxed
