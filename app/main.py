@@ -228,12 +228,23 @@ def get_avatar(filename: str) -> FileResponse:
 # outright by this app's own img-src CSP (app/middleware.py), which never
 # allowed googleusercontent.com at all.
 #
+# i.ytimg.com is a third CDN entirely — YouTube's ordinary video-thumbnail
+# host, not YouTube Music's cover art one. A mood/mix playlist's tracks
+# (see youtube/music.py's fetch_mood_playlists, fetch_playlist) report their
+# thumbnails there instead of on yt3/lh3, measured live on a mood shelf's
+# "Fall Hits" playlist — every one of its 200 tracks. cover_url_at_size
+# already knows this host can't be resized the way the other two can (its
+# `sqp` query is signed), and passes it through untouched; this is the
+# other half of supporting it, so those thumbnails get proxied rather than
+# rejected before ever being fetched.
+#
 # Exact hostname match only: no endswith/substring check, which a URL like
 # https://evil.example/yt3.ggpht.com could otherwise slip past.
 _IMAGE_PROXY_ALLOWED_HOSTS = {
     "yt3.ggpht.com",
     "yt3.googleusercontent.com",
     "lh3.googleusercontent.com",
+    "i.ytimg.com",
 }
 _IMAGE_PROXY_CACHE_HEADERS = {"Cache-Control": "private, max-age=86400"}
 

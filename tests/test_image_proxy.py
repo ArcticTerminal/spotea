@@ -39,6 +39,23 @@ def test_an_lh3_portrait_is_proxied_too(client, monkeypatch):
     assert res.status_code == 200
 
 
+def test_a_mood_playlist_track_thumbnail_is_proxied_too(client, monkeypatch):
+    """A mood/mix playlist's tracks report their thumbnails on
+    i.ytimg.com — YouTube's ordinary video-thumbnail host, not YouTube
+    Music's cover CDN — measured live on every one of a "Fall Hits"
+    playlist's 200 tracks. Missing this host rejected every one of them
+    before ever fetching, which is what every row on that page looked
+    like until this was added."""
+    monkeypatch.setattr(main, "fetch_image_bytes", lambda url: (b"\xff\xd8\xff", "image/jpeg"))
+
+    res = client.get(
+        "/image-proxy",
+        params={"u": "https://i.ytimg.com/vi/1lrFsXkT_rM/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQ"},
+    )
+
+    assert res.status_code == 200
+
+
 def test_a_non_allowlisted_host_is_rejected_without_being_fetched(client, monkeypatch):
     """The host check is what stops a tampered `u` from turning this into an
     open fetch of arbitrary hosts on the server's own behalf."""
