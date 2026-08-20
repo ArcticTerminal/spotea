@@ -391,12 +391,18 @@ function setupQueuePanel() {
 
   const load = () => refreshQueuePanel(queueFromCurrent());
 
-  toggle.addEventListener("click", () => {
+  toggle.addEventListener("click", async () => {
     const opening = panel.hidden;
     panel.hidden = !opening;
     toggle.setAttribute("aria-expanded", String(opening));
     toggle.classList.toggle("is-on", opening);
-    if (opening) load();
+    if (!opening) return;
+    // The panel opens below the transport, which on a phone is already at the
+    // bottom of the screen — so without this, tapping Queue looks like it did
+    // nothing at all. Awaited first: scrolling to an empty container just
+    // scrolls to the bottom of the card and lands nowhere near the rows.
+    await load();
+    panel.scrollIntoView({ behavior: "smooth", block: "start" });
   });
 
   // Skipping a track, shuffling, or a track ending all change what "next" is

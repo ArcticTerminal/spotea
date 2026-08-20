@@ -2692,6 +2692,8 @@ button.track-link {
 .player-card {
   width: 100%;
   max-width: 380px;
+  /* Centres vertically without the overflow trap — see .player-overlay. */
+  margin: auto;
 }
 
 .back-link {
@@ -3026,12 +3028,21 @@ audio {
    screen and reachable while you look at what's next, which is the whole
    reason to open a queue mid-track. Scrolls on its own so a long queue can't
    push the controls off the bottom. */
+/* No scroll area of its own, deliberately.
+
+   It used to cap itself at 45vh and scroll internally, which put a scroll
+   container inside the overlay's scroll container. On a touch screen that
+   means the gesture gets handed from one to the other the moment the inner
+   one hits an end: a flick stops dead partway, and the last row often can't
+   be brought up at all because the hand-off eats the rest of the swipe.
+
+   Letting the panel take its full height leaves the overlay as the only
+   thing that scrolls, so a swipe means one thing wherever it starts. A long
+   queue makes a long page, which is what a queue is. */
 .queue-panel {
   margin-top: var(--space-5);
   border-top: 1px solid var(--border-subtle);
   padding-top: var(--space-4);
-  max-height: 45vh;
-  overflow-y: auto;
   text-align: left;
 }
 
@@ -3145,10 +3156,20 @@ audio {
   inset: 0;
   z-index: 1000;
   display: flex;
-  align-items: center;
+  /* flex-start plus `margin: auto` on the card, not `align-items: center`.
+     A centred flex item taller than its scroll container overflows in both
+     directions and the top half becomes unreachable — there is no scroll
+     position that reveals it. Auto margins centre the card while it's short
+     and give way once it isn't, which is what an open queue makes it. */
+  align-items: flex-start;
   justify-content: center;
-  padding: 1.5rem;
+  /* The bottom inset matters now that a queue can run past the fold: without
+     it the last row ends under the home indicator. */
+  padding: 1.5rem 1.5rem calc(1.5rem + env(safe-area-inset-bottom, 0px));
   overflow-y: auto;
+  /* The overlay is the only scroller here (see .queue-panel); this keeps a
+     flick that runs off its end from scrolling the page underneath. */
+  overscroll-behavior: contain;
   background: radial-gradient(circle at 50% 0%, var(--bg-page-glow) 0%, var(--bg-page) 60%);
 }
 
