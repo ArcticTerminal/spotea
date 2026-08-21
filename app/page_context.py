@@ -23,7 +23,7 @@ from app.content_query import (
     query_content_page,
 )
 from app.images import needs_thumbnail_caching
-from app.interests import interest_chips, parse_interests
+from app.interests import ONBOARDING_MIN_INTERESTS, interest_chips, parse_interests
 from app.models import Artist, Content, User
 from app.services.artist_sync import cache_thumbnail, snapshot_releases
 from app.services.initial_sync import syncing_artist_ids
@@ -157,13 +157,20 @@ def home_context(db: Session, user_id: int) -> dict:
         # columns), and this answers the same question from data that is
         # already there. It also means it comes back if someone empties their
         # library, which is the moment it is useful again.
+        #
+        # Read by index.html, not by _home_shelves.html: what it decides now
+        # is whether the interests overlay starts open and locked, and that
+        # overlay is part of the page rather than of the refreshable Home
+        # fragment. Which is the point — a fragment refresh mid-onboarding
+        # can't yank the thing the user is currently filling in.
         "show_onboarding": not recent_artists and not interests,
-        # Feeds both mounts of _interest_picker.html — the first-run panel on
-        # this page and Settings' "Your interests" overlay, which are the same
-        # picker rather than two editors of one field. One value serves both:
-        # when the panel shows, the list is empty by definition above, so
-        # every chip is off there anyway.
+        # The chips for that overlay, which is the only picker there is —
+        # Settings' "Manage interests" and the first run open the same one.
         "interest_chips": interest_chips(interests),
+        # Handed to the client rather than hard-coded there, so the floor the
+        # Continue button enforces and the reason for that floor stay in the
+        # same place (see interests.ONBOARDING_MIN_INTERESTS).
+        "onboarding_min_interests": ONBOARDING_MIN_INTERESTS,
         # Drives the "nothing here yet" branch — a cheap existence check
         # rather than counting anything.
         "has_content": db.query(Content.id).filter(Content.user_id == user_id).first() is not None,

@@ -872,25 +872,6 @@ html[data-active-tab="detail"] .tab-panel[data-tab-panel="detail"] {
   border-color: var(--border-strong);
 }
 
-/* The interests picker lives in its own modal rather than inline in a
-   settings row: a wrapping grid of chips doesn't fit the
-   label-left/control-right shape every other row has. */
-.modal-interests {
-  max-width: 440px;
-  max-height: 80vh;
-  display: flex;
-  flex-direction: column;
-  overflow-y: auto;
-}
-
-/* The picker is the same partial Home's first-run panel renders (see
-   _interest_picker.html), and .onboarding-genres already gives it its
-   layout. All this adds is the gap under the sentence above it, which on
-   Home comes from the panel's own spacing. */
-.modal-interests #interests-picker {
-  margin-top: 1rem;
-}
-
 /* A description sentence next to a dropdown is tight on a phone screen —
    stack them instead of forcing a side-by-side row. */
 @media (max-width: 480px) {
@@ -2403,6 +2384,95 @@ button.track-link {
   gap: 0.5rem;
 }
 
+/* The interests picker lives in its own modal rather than inline in a
+   settings row: a wrapping grid of chips doesn't fit the
+   label-left/control-right shape every other row has.
+
+   Wider than .modal's 360px because there are ~28 chips to wrap, which a
+   narrow box turns into a long scrolling column. Still a centred card
+   though — the fullscreen treatment below is only for a first run.
+
+   Below .modal rather than up with the Settings rules where it used to sit,
+   and that move is a fix, not tidying: .modal-interests and .modal are both
+   one class, so neither out-specifies the other and the later one simply
+   wins. From up there its max-width lost to .modal's 360px silently — the
+   declaration was right there in the file, doing nothing. Anything added
+   here that .modal also sets has to stay below it. */
+.modal-interests {
+  max-width: 640px;
+  display: flex;
+  flex-direction: column;
+  /* The overlay bounds the height (100% of a fixed-position parent, so this
+     resolves — unlike a percentage against an auto-height one) and the chip
+     list inside is what scrolls, so the heading and the Continue row stay
+     put rather than scrolling away with it. */
+  max-height: 100%;
+  overflow: hidden;
+}
+
+/* All this adds to .interest-chips is the gap under the sentence above it. */
+.modal-interests #interests-picker {
+  margin-top: 1rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* Without this a flex child refuses to shrink below its content, so the
+     modal grows past the max-height above instead of this scrolling. */
+  min-height: 0;
+}
+
+/* First run vs. every other time, on one element (see index.html). The
+   attribute is set by the server and removed by home/settings.js the moment
+   onboarding is done, so this is not a permanent property of the overlay —
+   which is why both controls are always in the markup and only their
+   visibility moves.
+
+   A first run is fullscreen: edge to edge, no corners, nothing of the app
+   showing round the side. It is not a dialog over the app, it is what the
+   app is showing. Applying that in both modes was tried first and looked
+   wrong in the other one — Settings' picker has no Continue row and about
+   half a screen of chips, so a full-height panel was mostly empty space
+   below them. */
+#interests-overlay[data-required] {
+  padding: 0;
+}
+
+#interests-overlay[data-required] .modal-interests {
+  max-width: none;
+  height: 100%;
+  border-radius: 0;
+  /* Otherwise the heading, chips and Continue row sit against the top of a
+     full-height panel with half a screen of nothing under them.
+     `safe`, not a bare `center`: a centred flex item taller than its
+     container overflows in *both* directions, and the part that goes off the
+     top cannot be scrolled back to. safe center lays out from the start
+     instead the moment that would happen — which is a short window on a
+     phone, since the chip list is what has to fit. */
+  justify-content: safe center;
+  /* Centres the content without centring the panel: the chips would
+     otherwise run the full width of a desktop monitor, which reads as a
+     page that stretched rather than one laid out that way. */
+  padding-inline: max(var(--space-5), calc((100% - 720px) / 2));
+}
+
+#interests-overlay[data-required] .modal-close {
+  display: none;
+}
+
+#interests-overlay:not([data-required]) #interests-actions {
+  display: none;
+}
+
+/* Left, not right like other modals' actions: this row is a prompt to finish
+   ("Pick 2 more") sitting next to the button that finishes, and reading it
+   right-aligned puts the explanation after the thing it explains. */
+#interests-actions {
+  justify-content: flex-start;
+  align-items: center;
+  gap: var(--space-3);
+  flex-shrink: 0;
+  padding-top: var(--space-4);
+}
+
 .modal-downloads {
   max-width: 480px;
   max-height: 80vh;
@@ -2456,32 +2526,7 @@ button.track-link {
   color: var(--text-primary);
 }
 
-/* First run — see _home_shelves.html. Sized like a page rather than a card:
-   on an empty library this is the only thing on Home, so a boxed panel
-   floating in the middle would read as a dialog over nothing. */
-.onboarding {
-  max-width: 640px;
-  padding: var(--space-6) 0;
-}
-
-.onboarding[hidden] {
-  display: none;
-}
-
-.onboarding-title {
-  margin: 0 0 var(--space-2);
-  font-size: var(--text-2xl);
-  font-weight: 700;
-}
-
-.onboarding-help {
-  margin: 0 0 var(--space-5);
-  color: var(--text-secondary);
-  font-size: var(--text-md);
-  line-height: 1.55;
-}
-
-.onboarding-genres {
+.interest-chips {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
@@ -2515,17 +2560,6 @@ button.track-link {
   background: var(--accent);
   border-color: var(--accent);
   color: var(--black);
-}
-
-.onboarding-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-}
-
-.onboarding-actions .btn-primary:disabled {
-  opacity: 0.45;
-  cursor: default;
 }
 
 .btn-quiet {

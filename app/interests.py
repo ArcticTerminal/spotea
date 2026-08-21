@@ -14,10 +14,24 @@ from collections.abc import Iterable
 
 # Both caps exist to bound what a single recommendation run can be asked to
 # do (see services/recommendations.py, which samples from this list) and to
-# keep one profile's row from growing without limit. Neither is a value a
-# real user is likely to hit.
-MAX_INTERESTS = 20
+# keep one profile's row from growing without limit.
+#
+# MAX_INTERESTS has to stay clear of how many chips the picker draws, or the
+# cap stops being a safety bound and becomes a rule the UI silently enforces:
+# normalize_interests truncates, so a user who turned on more chips than this
+# would have the extras dropped on save with nothing to say so. There are
+# len(SUGGESTED_GENRES) chips plus whatever a profile already had, so this
+# sits above the former with room for the latter.
+MAX_INTERESTS = 30
 MAX_INTEREST_LENGTH = 60
+
+# How many have to be on before first-run onboarding will let go (see
+# templates/_interest_picker.html, which hands this to the client). One would
+# do to make Explore non-empty, but a run samples a few of the list
+# (recommendations.INTERESTS_PER_RUN) and one interest makes every run the
+# same run — the shelves would never change. Three is the smallest number
+# that gives the sampler anything to choose between.
+ONBOARDING_MIN_INTERESTS = 3
 
 
 def normalize_interests(values: Iterable[str]) -> list[str]:
@@ -67,7 +81,7 @@ def interests_signature(values: Iterable[str]) -> str:
     return hashlib.sha256(joined.encode()).hexdigest()[:32]
 
 
-# What first-run onboarding offers (see templates/_home_shelves.html). A
+# What the interests picker offers (see templates/_interest_picker.html). A
 # static list because there is no live one to use: YouTube Music publishes a
 # "Genres" browse section, but ytmusicapi fails to parse 25 of its 40
 # categories and those 25 are every single genre in it (see
@@ -80,27 +94,55 @@ def interests_signature(values: Iterable[str]) -> str:
 # so that a brand new library has something to click instead of a text box
 # and no idea what belongs in it.
 #
-# Under MAX_INTERESTS deliberately: someone who picks every one of these
-# should still have room to add their own afterwards.
+# Because they go to search verbatim, the *spelling* is part of the choice,
+# not a label. Every entry below was run through search_playlists against the
+# live API and kept only if what came back was actually that genre. Two did
+# not survive their obvious spelling:
+#
+#   - "Funk" returns phonk. Not as a near-miss further down the list — the
+#     top three results are "phonk", "phonk 2026" and "PHONK TRENDING", and
+#     the rest are Brazilian funk, which is a different genre again. Nothing
+#     resembling the classic-funk shelf the chip promises. "Classic Funk"
+#     returns Funk & Soul Power, Old-School Funk and Motown. This one had
+#     been shipped and quietly pointing at the wrong genre.
+#   - "Punk" leads with "phonk 2026" for the same reason. "Punk Rock" leads
+#     with pop-punk and alternative, which is the shelf that was meant.
+#
+# Ordered by family rather than alphabetically: the picker draws these as a
+# wrapping grid, and someone scanning for what they like reads neighbours.
+#
+# Under MAX_INTERESTS deliberately, and the gap is checked by a test:
+# someone who picks every one of these must still have room for their own,
+# because normalize_interests truncates silently rather than complaining.
 SUGGESTED_GENRES = (
     "Pop",
     "Rock",
+    "Alternative",
+    "Indie",
+    "Punk Rock",
+    "Metal",
     "Hip-Hop",
+    "Trap",
     "R&B",
+    "Soul",
+    "Classic Funk",
+    "Gospel",
+    "Blues",
+    "Jazz",
+    "Classical",
     "Electronic",
     "House",
-    "Jazz",
-    "Soul",
-    "Funk",
-    "Blues",
-    "Metal",
-    "Indie",
-    "Classical",
+    "Techno",
+    "Drum & Bass",
+    "Disco",
+    "Ambient",
+    "Lo-fi",
     "Country",
+    "Folk",
     "Reggae",
     "Latin",
-    "Folk",
     "Afrobeats",
+    "K-Pop",
 )
 
 
