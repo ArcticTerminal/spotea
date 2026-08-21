@@ -107,6 +107,34 @@ export async function refreshFragments() {
   }
 }
 
+/** Fetches the player's Queue panel for the ids it is handed.
+ *
+ *  The odd one out here: every other fragment is server-side state the
+ *  endpoint can look up for itself, but the queue and its order live in the
+ *  browser (see home/queue.js), so the ids have to go up with the request.
+ *  Rendering it server-side anyway is what makes a queue row identical to
+ *  the playlist row it came from — same template — rather than a second list
+ *  built by hand in JS.
+ *
+ *  Only ever called with the panel open, so unlike refreshFragments() this
+ *  isn't paying for markup nobody is looking at. */
+export async function refreshQueuePanel(ids) {
+  if (!document.getElementById("queue-panel-body")) return false;
+  let html;
+  try {
+    const res = await fetch(`/partials/queue?ids=${ids.join(",")}`);
+    if (!res.ok) return false;
+    html = await res.text();
+  } catch (err) {
+    return false;
+  }
+  const swapped = swapFragmentHtml(html);
+  if (swapped) {
+    for (const callback of afterSwapCallbacks) callback();
+  }
+  return swapped;
+}
+
 /** Fetches the Downloads modal's own full list — see the module-level
     comment above for why this isn't part of refreshFragments()'s default
     sweep. Called when the modal is opened and after an action taken inside

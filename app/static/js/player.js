@@ -267,6 +267,52 @@ export function paintRange(input) {
   input.style.setProperty("--fill", `${pct}%`);
 }
 
+/**
+ * Whether this browser lets a page set the playback volume at all.
+ *
+ * Feature-detected by writing and reading back rather than sniffed from the
+ * user agent: the restriction is per-browser behaviour, not per-OS, and it
+ * has moved before. Safe to run at startup because nothing is loaded yet —
+ * the value is restored either way.
+ */
+/**
+ * Whether this is an iOS browser — every browser on iOS is WebKit, since
+ * Apple requires it.
+ *
+ * Sniffed from the user agent, which volumeIsSettable below deliberately
+ * avoids — and it is here because that feature detection is measurably wrong
+ * on a modern iPhone. Confirmed from the device itself (iOS 18.7, Safari
+ * 26.6, via a temporary beacon since removed): writing 0.5 and reading it
+ * back returns **0.5**, so the detection says "settable" and the slider then
+ * does nothing, because the property is not what the output level follows.
+ *
+ * Apple's own documentation still says the opposite — "the volume property
+ * is not settable in JavaScript. Reading the volume property always returns
+ * 1" — and that is what this code was originally written against. It has
+ * simply stopped being true: the property now keeps what it is given while
+ * playback volume stays with the hardware buttons. Nothing readable
+ * distinguishes the two cases any more, so this asks who it is talking to
+ * instead.
+ */
+function isIOSWebKit() {
+  const ua = navigator.userAgent || "";
+  if (/iPad|iPhone|iPod/.test(ua)) return true;
+  // iPadOS 13+ identifies itself as a Mac; the touch points give it away.
+  return /Macintosh/.test(ua) && navigator.maxTouchPoints > 1;
+}
+
+function volumeIsSettable(audio) {
+  const original = audio.volume;
+  try {
+    audio.volume = original === 0.5 ? 0.4 : 0.5;
+    const settable = audio.volume !== original;
+    audio.volume = original;
+    return settable;
+  } catch {
+    return false;
+  }
+}
+
 export function setupPlayer() {
   if (!activeAudio()) return;
 
@@ -320,14 +366,9 @@ export function setupPlayer() {
   onPlayerEvent("pause", syncPlayIcon);
   onPlayerEvent("ended", syncPlayIcon);
 
-  document.getElementById("back15").addEventListener("click", () => {
-    const audio = activeAudio();
-    audio.currentTime = Math.max(0, audio.currentTime - SKIP_SECONDS);
-  });
-  document.getElementById("fwd15").addEventListener("click", () => {
-    const audio = activeAudio();
-    audio.currentTime = Math.min(audio.duration || 0, audio.currentTime + SKIP_SECONDS);
-  });
+  // The ±15s buttons are gone from the transport (shuffle and repeat hold
+  // those slots now — see _player_controls.html), but skipping itself is
+  // still here on the arrow keys and on the Media Session handlers below.
 
   onPlayerEvent("loadedmetadata", () => {
     const audio = activeAudio();
@@ -364,13 +405,51 @@ export function setupPlayer() {
     scrubbing = false;
   });
 
-  volume.addEventListener("input", () => {
-    const audio = activeAudio();
-    audio.volume = Number(volume.value) / 100;
-    audio.muted = false;
-    paintRange(volume);
-    syncMuteIcon();
-  });
+  // iOS hands playback volume to the hardware buttons: the assignment below
+  // is accepted and then has no effect on how loud anything is, so the slider
+  // moves and nothing changes. A control that responds to you without doing
+  // its job is worse than one that isn't there, so it's removed there. Mute
+  // is a separate property and genuinely works, so that button stays.
+  //
+  // Two gates, because neither is enough alone. The feature detection catches
+  // any browser that refuses the write outright. It does *not* catch a modern
+  // iPhone, which is the case it was written for: iOS 18.7 returns the value
+  // it was handed, so the detection says "settable" over a slider that does
+  // nothing. Hence the second, sniffed gate — see isIOSWebKit.
+  //
+  // **A GainNode was built for this and reverted (2026-08-20).** Routing the
+  // element through Web Audio is the usual answer to a volume property that
+  // won't take, and it shipped briefly: constructed lazily, on the first
+  // slider move below full volume, so a session that never touched the slider
+  // kept the untouched playback path.
+  //
+  // It never actually ran on the phone — selecting it required
+  // volumeIsSettable to come back false, and it comes back true — so it
+  // proved nothing on device. What settles it is that Apple's own developer
+  // forum has the same pair tried together: "I tried the 'volume' property of
+  // the <audio> and also the Web Audio API 'GainNode'. Neither approach
+  // worked. The player's output stays/reported as 1.0." Both are ignored on
+  // iOS; MPVolumeView, which a web page cannot reach, is the only native way.
+  //
+  // So there is nothing to go back for, and a reason not to: making the gain
+  // path selectable means routing iOS playback through Web Audio, where an
+  // AudioContext suspended in the background is silence rather than quiet
+  // audio — betting the background-playback behaviour that took four rounds
+  // to get right (see the Playback element note above) on a volume slider. On
+  // iOS the hardware buttons are the volume control, and this stays a mute
+  // button.
+  const volumeIsNative = volumeIsSettable(activeAudio());
+  if (volumeIsNative && !isIOSWebKit()) {
+    volume.addEventListener("input", () => {
+      const audio = activeAudio();
+      audio.volume = Number(volume.value) / 100;
+      audio.muted = false;
+      paintRange(volume);
+      syncMuteIcon();
+    });
+  } else {
+    volume.hidden = true;
+  }
 
   muteBtn.addEventListener("click", () => {
     activeAudio().muted = !activeAudio().muted;

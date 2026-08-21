@@ -17,11 +17,15 @@ import { wireScrollers } from "./scrollers.js";
 import { followArtist, playRemoteVideo } from "./remote.js";
 import { onTabActivated } from "./tabs.js";
 
-function formatSubscribers(count) {
+// "monthly listeners", not "subscribers": the number comes from YouTube's
+// subscriber_count field, but Library already labels the same figure the way a
+// music app does (see _library_grid.html), and one number can't have two names
+// in one app.
+function formatListeners(count) {
   if (count == null) return "";
-  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M subscribers`;
-  if (count >= 1_000) return `${(count / 1_000).toFixed(1)}K subscribers`;
-  return `${count} subscribers`;
+  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M monthly listeners`;
+  if (count >= 1_000) return `${(count / 1_000).toFixed(1)}K monthly listeners`;
+  return `${count} monthly listeners`;
 }
 
 export function renderChannelResults(results, containerId = "channel-search-results") {
@@ -29,7 +33,7 @@ export function renderChannelResults(results, containerId = "channel-search-resu
   if (!list) return;
 
   if (!results.length) {
-    list.innerHTML = `<li class="search-empty">No channels found</li>`;
+    list.innerHTML = `<li class="search-empty">No artists found</li>`;
     return;
   }
 
@@ -40,7 +44,7 @@ export function renderChannelResults(results, containerId = "channel-search-resu
         : `<span class="search-result-thumb"></span>`;
       const subs =
         r.subscriber_count != null
-          ? `<span class="search-result-subs">${formatSubscribers(r.subscriber_count)}</span>`
+          ? `<span class="search-result-subs">${formatListeners(r.subscriber_count)}</span>`
           : "";
       // Two targets on one row: the row itself previews what the channel
       // has (an artist's tracks where there are any, its latest uploads
@@ -57,7 +61,7 @@ export function renderChannelResults(results, containerId = "channel-search-resu
             <span class="search-result-title">${escapeHtml(r.title)}</span>
             ${subs}
           </div>
-          <button type="button" class="btn-add-channel" data-channel-url="${escapeHtml(r.channel_url)}">Add</button>
+          <button type="button" class="btn-add-channel" data-channel-url="${escapeHtml(r.channel_url)}">Follow</button>
         </li>
       `;
     })
@@ -125,10 +129,9 @@ function recVideoCardHtml(video) {
   const thumb = video.thumbnail_url
     ? `<img src="${escapeHtml(video.thumbnail_url)}" alt="" loading="lazy" />`
     : "";
-  const duration =
-    video.duration_seconds != null
-      ? `<span class="duration-badge">${formatDuration(video.duration_seconds)}</span>`
-      : "";
+  // No duration over the artwork — that's a video-thumbnail convention, and
+  // _content_card.html dropped it for the same reason. Duration belongs in a
+  // track list, on the right.
   return `
     <article
       class="card rec-card"
@@ -140,50 +143,11 @@ function recVideoCardHtml(video) {
       data-channel-id="${escapeHtml(video.channel_id || "")}"
     >
       <button type="button" class="thumb rec-play" aria-label="Play ${escapeHtml(video.title)}">
-        ${thumb}${duration}
+        ${thumb}
       </button>
       <div class="card-body">
         <h3 class="card-title" title="${escapeHtml(video.title)}">${escapeHtml(video.title)}</h3>
         <p class="card-channel">${artistNameHtml(video)}</p>
-      </div>
-    </article>
-  `;
-}
-
-/**
- * One channel as a shelf card — avatar, name, Add. Exported because the
- * onboarding wizard's per-genre shelves are the same component (see
- * home/onboarding.js): same markup, same shelf geometry, same Add button, so
- * a channel reads identically wherever the app offers one.
- *
- * The subscriber line is dropped entirely when there is no count rather than
- * left empty — onboarding's suggestions never carry one (see
- * services/genre_artists._as_channel_dict), and an empty <p> there would
- * reserve a line of space for nothing.
- */
-export function channelCardHtml(channel) {
-  const avatar = channel.thumbnail_url
-    ? `<img class="shelf-channel-avatar" src="${escapeHtml(channel.thumbnail_url)}" alt="" loading="lazy" />`
-    : `<span class="shelf-channel-avatar"></span>`;
-  const subs =
-    channel.subscriber_count != null
-      ? `<p class="card-date">${escapeHtml(formatSubscribers(channel.subscriber_count))}</p>`
-      : "";
-  // Same two targets as a channel search result: the card previews, the
-  // button follows without looking first. (Explore wires both; the wizard
-  // wires only the button — a full-panel preview out from under that modal
-  // would strand it half-finished.)
-  return `
-    <article
-      class="card shelf-channel-card"
-      data-channel-id="${escapeHtml(channel.channel_id)}"
-      data-thumbnail-url="${escapeHtml(channel.thumbnail_url || "")}"
-    >
-      ${avatar}
-      <div class="card-body">
-        <h3 class="card-title" title="${escapeHtml(channel.title)}">${escapeHtml(channel.title)}</h3>
-        ${subs}
-        <button type="button" class="btn-add-channel" data-channel-url="${escapeHtml(channel.channel_url)}">Add</button>
       </div>
     </article>
   `;
@@ -206,7 +170,7 @@ function artistCardHtml(artist) {
       ${avatar}
       <div class="card-body">
         <h3 class="card-title" title="${escapeHtml(artist.title)}">${escapeHtml(artist.title)}</h3>
-        <p class="card-date">${escapeHtml(formatSubscribers(artist.subscriber_count))}</p>
+        <p class="card-date">${escapeHtml(formatListeners(artist.subscriber_count))}</p>
       </div>
     </article>
   `;
@@ -486,6 +450,27 @@ export function setupExploreSearch() {
   if (!input || !resultsPanel || !browsePanel) return;
 
   setupSearchClear("explore-search-input", "explore-search-clear");
+
+  // Results are an answer to a question, and the question is over once you've
+  // acted on one of them. Leaving them up meant coming back to Explore later
+  // and finding last week's search where the recommendations should be, with
+  // no obvious way back other than noticing the clear button.
+  //
+  // Hung off the tab switch rather than off each result row: opening a result
+  // activates the "detail" panel, which is a tab activation too, so one
+  // listener covers both leaving Explore and drilling into something from it.
+  function clearSearch() {
+    if (!input.value) return;
+    input.value = "";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    videoResults.innerHTML = "";
+    channelResults.innerHTML = "";
+    showExplorePanel("explore-browse-panel");
+  }
+
+  onTabActivated((tab) => {
+    if (tab !== "explore") clearSearch();
+  });
 
   const runSearch = debounce(async (query) => {
     if (!query) {

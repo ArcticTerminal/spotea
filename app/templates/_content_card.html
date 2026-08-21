@@ -8,12 +8,12 @@
     {% if item.thumbnail_url %}
     <img src="{{ item.thumbnail_url }}" alt="" loading="lazy" />
     {% endif %}
-    {% if item.duration_seconds %}
-    <span class="duration-badge">{{ item.duration_seconds | duration }}</span>
-    {% endif %}
+    {# No duration badge over the artwork: that's a video-thumbnail
+       convention, and the duration is already in the track list, on the
+       right, where a music app puts it. #}
     {% if item.status == "ready" %}
     <span class="downloaded-badge" title="Downloaded — plays instantly">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-check" /></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-download" /></svg>
     </span>
     {% endif %}
   </a>
@@ -23,12 +23,13 @@
     </h3>
     <div class="card-meta-row">
       <div class="card-meta-text">
-        <p class="card-channel">
+        {# Artist only. published_at is when *we* first saw the track, not
+           when it was released — every Bob Marley song in the library reads
+           "20 Aug 2026" — so printing it on each card cost a line of height
+           to repeat the same meaningless date. #}
+        <p class="card-channel" title="{{ item.artist.name }}">
           <a class="card-link" href="/#player/{{ item.id }}">{{ item.artist.name }}</a>
         </p>
-        {% if item.published_at %}
-        <p class="card-date">{{ item.published_at.strftime('%d %b %Y') }}</p>
-        {% endif %}
       </div>
       <button
         type="button"

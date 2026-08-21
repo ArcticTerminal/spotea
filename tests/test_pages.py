@@ -109,16 +109,22 @@ def test_channel_avatars_are_lazy_loaded(client, db_session):
     assert '<img class="channel-card-avatar" src="/avatars/UCavatarlazy00000000000.jpg" alt="" loading="lazy" />' in body
 
 
-def test_home_applies_the_duration_and_filesize_template_filters(client, db_session):
-    """Both filters are registered on pages.py's own Jinja2Templates
-    instance — a second instance (routers/auth.py has one) doesn't have
-    them, so rendering a page through the wrong one raises."""
+def test_the_duration_and_filesize_template_filters_are_registered(client, db_session):
+    """Both filters live on the one shared Jinja2Templates instance (see
+    app/templating.py). A template rendered through an environment missing
+    one raises at render time, and nothing else would catch it.
+
+    They're checked on two surfaces because that's where each one actually
+    renders: filesize in Home's storage summary, duration in a track row.
+    Cards used to stamp the duration over the artwork, which put both on
+    Home — that badge is gone (a video convention on a music cover), so the
+    duration is now asserted where track durations live."""
     _seed(db_session)
 
-    body = client.get("/").text
+    assert "MB" in client.get("/").text  # filesize, from the storage summary
 
-    assert "5:05" in body  # duration filter, from duration_seconds=305
-    assert "MB" in body  # filesize filter, from the storage summary
+    rows = client.get("/partials/detail/playlist/new-uploads").text
+    assert "5:05" in rows  # duration, from duration_seconds=305
 
 
 def test_channel_and_playlist_pages_redirect_to_their_hash_route(client):

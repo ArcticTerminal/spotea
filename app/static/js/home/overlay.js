@@ -11,7 +11,7 @@
 // several tracks in one page load instead of once per load.
 
 import { api, formatDuration, showToast } from "../core.js";
-import { refreshFragments } from "../fragments.js";
+import { refreshFragments, refreshQueuePanel } from "../fragments.js";
 import {
   activeAudio,
   applyNowPlayingMetadata,
@@ -25,18 +25,27 @@ import { clearResumeState, readResumeState } from "../resume.js";
 import {
   QUEUE_CHANGED,
   clearQueue,
+  currentId,
+  cycleRepeat,
   isShuffled,
+  loadQueue,
   nextId,
   noteCurrent,
   peekNextId,
   peekPreviousId,
   previousId,
+  queueOrder,
+  repeatMode,
   toggleShuffle,
 } from "./queue.js";
 
 // How much of the current track has to have actually played before the next
 // one is pulled down in the background (see setupPlayerOverlay's timeupdate
 // handler for why it isn't immediate).
+// Arrow-key step on the mini bar's progress slider. Matches player.js's
+// SKIP_SECONDS so scrubbing feels the same wherever the focus happens to be.
+const SEEK_STEP_SECONDS = 15;
+
 const PREFETCH_AFTER_SECONDS = 8;
 
 // How the prefetch follows its own download to completion, so the handoff
@@ -89,6 +98,10 @@ function expandPlayer() {
 }
 
 function collapsePlayer() {
+  // Shut behind us: the overlay is the full-size player, and coming back to
+  // it half-collapsed under a queue nobody asked to reopen is a state the
+  // user never chose.
+  setQueueOpen(false);
   document.getElementById("player-overlay").hidden = true;
 }
 
@@ -368,17 +381,153 @@ function playFromQueue(contentId) {
  * QUEUE_CHANGED event rather than called from each mutation site, so a new
  * way of changing the queue can't forget to update the UI.
  */
+/**
+ * The "Queue" panel inside the player overlay: open/close, and keep it
+ * current while it's open.
+ *
+ * Only fetched while open. A queue is up to a thousand ids, and the panel is
+ * closed the vast majority of the time — the same reasoning that keeps the
+ * Downloads list out of refreshFragments()'s default sweep.
+ */
+/** Moves the "playing" marker without touching a single row's markup. */
+function markCurrentQueueRow() {
+  const playing = currentId();
+  for (const row of document.querySelectorAll("#queue-panel-body .track-row")) {
+    row.classList.toggle("is-current", Number(row.dataset.contentId) === playing);
+  }
+}
+
+/**
+ * Opens or closes the queue.
+ *
+ * Nothing scrolls and nothing is measured: the panel's height is the space
+ * the card has spare, and the artwork gives that space up over the same
+ * transition (see style.css's .queue-panel). The class on the overlay is
+ * what stops the overlay scrolling while it's open, so the player can't be
+ * pushed off the top of the screen by a flick through the list.
+ *
+ * Module-level rather than part of setupQueuePanel's closure because
+ * collapsing or closing the player has to be able to shut the panel too.
+ */
+function setQueueOpen(open) {
+  const panel = document.getElementById("queue-panel");
+  const toggle = document.getElementById("queue-toggle");
+  const overlay = document.getElementById("player-overlay");
+  if (!panel || !toggle || !overlay) return;
+  panel.classList.toggle("is-open", open);
+  overlay.classList.toggle("is-queue-open", open);
+  toggle.classList.toggle("is-on", open);
+  toggle.setAttribute("aria-expanded", String(open));
+}
+
+// How far down the player has to be dragged before the queue closes: past
+// the wobble in a tap, well short of a deliberate pull.
+const QUEUE_DRAG_CLOSE_PX = 48;
+
+function setupQueuePanel() {
+  const toggle = document.getElementById("queue-toggle");
+  const panel = document.getElementById("queue-panel");
+  if (!toggle || !panel) return;
+
+  // The order the rows on screen were drawn from, so a QUEUE_CHANGED can tell
+  // "the pointer moved" from "the list is different".
+  let rendered = [];
+
+  // The full order, not just what's ahead: the panel is a fixed list and the
+  // marker moves down it (see queue.js's queueOrder).
+  const load = async () => {
+    const order = queueOrder();
+    const ok = await refreshQueuePanel(order);
+    if (ok) rendered = order;
+    markCurrentQueueRow();
+    return ok;
+  };
+
+  toggle.addEventListener("click", () => {
+    const opening = !panel.classList.contains("is-open");
+    // The class goes on first and the rows land whenever they land. The panel
+    // opens to a share of the card's height rather than to the height of its
+    // contents, so the animation has nothing to wait for — and waiting is
+    // what used to make the button read as doing nothing for a moment and
+    // then jumping.
+    setQueueOpen(opening);
+    if (opening) load();
+  });
+
+  // Grab the player, pull down, the queue closes — the gesture that dismisses
+  // a sheet everywhere else. Bound to the card so it can skip the queue
+  // itself (which scrolls) and the controls, whose own drags already mean
+  // something: pulling down on the seek slider must not close anything.
+  const card = document.getElementById("player-root");
+  let dragFrom = null;
+  card.addEventListener("pointerdown", (event) => {
+    if (!panel.classList.contains("is-open")) return;
+    if (event.target.closest("#queue-panel, input, button, a")) return;
+    dragFrom = event.clientY;
+  });
+  card.addEventListener("pointermove", (event) => {
+    if (dragFrom === null || event.clientY - dragFrom < QUEUE_DRAG_CLOSE_PX) return;
+    dragFrom = null;
+    setQueueOpen(false);
+  });
+  const endDrag = () => {
+    dragFrom = null;
+  };
+  card.addEventListener("pointerup", endDrag);
+  card.addEventListener("pointercancel", endDrag);
+
+  // Everything that changes the queue lands here. Two different jobs: when
+  // only the pointer moved — a track ended, or one of these very rows was
+  // picked — the list on screen is still correct and re-fetching it would
+  // rebuild it under the user, so only the marker moves. A different order
+  // (shuffle toggled, a new queue loaded) genuinely needs new rows.
+  document.addEventListener(QUEUE_CHANGED, () => {
+    if (!panel.classList.contains("is-open")) return;
+    const order = queueOrder();
+    if (order.length === rendered.length && order.every((id, i) => id === rendered[i])) {
+      markCurrentQueueRow();
+      return;
+    }
+    load();
+  });
+}
+
 function syncQueueControls() {
   const hasNext = peekNextId() !== null;
   const hasPrevious = peekPreviousId() !== null;
 
   document.getElementById("next-track").disabled = !hasNext;
   document.getElementById("prev-track").disabled = !hasPrevious;
+  // Hidden rather than disabled on the bar: the overlay's row keeps its shape
+  // so the play button stays put, but the bar has no shape to keep and a dead
+  // control there is just clutter.
   document.getElementById("mini-player-next").hidden = !hasNext;
+  document.getElementById("mini-player-prev").hidden = !hasPrevious;
 
   const shuffleBtn = document.getElementById("player-shuffle");
   shuffleBtn.classList.toggle("is-on", isShuffled());
   shuffleBtn.setAttribute("aria-pressed", String(isShuffled()));
+
+  // One button, three states. The label has to say which one is on: "Repeat"
+  // on its own leaves a screen reader with no way to tell them apart, and
+  // the difference between the two icons is a single numeral.
+  const repeat = repeatMode();
+  const repeatBtn = document.getElementById("player-repeat");
+  repeatBtn.dataset.repeat = repeat;
+  repeatBtn.classList.toggle("is-on", repeat !== "off");
+  repeatBtn.setAttribute(
+    "aria-label",
+    { off: "Repeat off", all: "Repeat queue", one: "Repeat this song" }[repeat]
+  );
+  // toggleAttribute, not `.hidden =`. These are <svg> elements, and
+  // SVGElement has no `hidden` IDL property — the assignment quietly created
+  // a plain JS property and never touched the attribute, so CSS's
+  // `svg[hidden]` never matched and the icon never changed. Both repeat
+  // states therefore drew the same icon: pressing twice looked like the
+  // button had stuck on. (player.js's showIcon carries the same note; this
+  // is the one place that forgot it.)
+  document.getElementById("icon-repeat").toggleAttribute("hidden", repeat === "one");
+  document.getElementById("icon-repeat-one").toggleAttribute("hidden", repeat !== "one");
 
   if (!("mediaSession" in navigator)) return;
   // Nulled rather than left registered when there's nowhere to skip to: the
@@ -410,6 +559,7 @@ export function closePlayer() {
   root.dataset.stream = "";
   upcomingTrack = null;
 
+  setQueueOpen(false);
   document.getElementById("player-overlay").hidden = true;
   document.getElementById("mini-player").hidden = true;
   document.body.classList.remove("has-mini-player");
@@ -440,15 +590,45 @@ export function setupPlayerOverlay() {
     miniPlayBtn.setAttribute("aria-label", paused ? "Play" : "Pause");
   };
 
-  // Thin passive progress line along the mini-bar's top edge — not
-  // interactive, just a glance-able sense of how far into the track you are
-  // without expanding the overlay.
+  // The progress line along the mini-bar's top edge. It used to be a passive
+  // strip; on desktop this bar is the player for most of a listening session,
+  // so it seeks — by click anywhere along it, and by arrow key, since it is
+  // exposed as a slider.
+  const miniProgress = document.getElementById("mini-player-progress");
   const miniProgressFill = document.getElementById("mini-player-progress-fill");
+  const miniTime = document.getElementById("mini-player-time");
+
   const syncMiniProgress = () => {
     const audio = activeAudio();
     const pct = audio.duration ? (audio.currentTime / audio.duration) * 100 : 0;
     miniProgressFill.style.width = `${pct}%`;
+    miniProgress.setAttribute("aria-valuenow", String(Math.round(pct)));
+    miniTime.textContent = audio.duration
+      ? `${formatDuration(audio.currentTime)} / ${formatDuration(audio.duration)}`
+      : "";
   };
+
+  const seekToEventX = (event) => {
+    const audio = activeAudio();
+    if (!audio.duration) return;
+    const box = miniProgress.getBoundingClientRect();
+    const ratio = Math.min(1, Math.max(0, (event.clientX - box.left) / box.width));
+    audio.currentTime = ratio * audio.duration;
+    syncMiniProgress();
+  };
+
+  miniProgress.addEventListener("click", seekToEventX);
+  miniProgress.addEventListener("keydown", (event) => {
+    const step = event.key === "ArrowLeft" ? -SEEK_STEP_SECONDS : event.key === "ArrowRight" ? SEEK_STEP_SECONDS : 0;
+    if (!step) return;
+    // Otherwise the document-level arrow handler in player.js scrubs a second
+    // time and the track jumps twice as far.
+    event.preventDefault();
+    event.stopPropagation();
+    const audio = activeAudio();
+    audio.currentTime = Math.min(audio.duration || 0, Math.max(0, audio.currentTime + step));
+    syncMiniProgress();
+  });
 
   miniPlayBtn.addEventListener("click", () => {
     const audio = activeAudio();
@@ -473,6 +653,17 @@ export function setupPlayerOverlay() {
     // straight over the track that's on its way in.
     if (root.dataset.stream && !activeAudio().currentSrc.endsWith(root.dataset.stream)) {
       reportPlayback("outgoing-ended", { contentId: finished });
+      return;
+    }
+    // Repeat "one" only means anything here — pressing Next still means the
+    // next track. Rewinding and replaying rather than reopening the track
+    // keeps the already-loaded resource, so there's no "Preparing audio…"
+    // between loops.
+    if (repeatMode() === "one") {
+      const audio = activeAudio();
+      audio.currentTime = 0;
+      reportPlayback("track-ended", { contentId: finished, next: finished, repeat: "one" });
+      audio.play().catch(() => {});
       return;
     }
     const next = nextId();
@@ -509,7 +700,13 @@ export function setupPlayerOverlay() {
   document.getElementById("prev-track").addEventListener("click", () => playFromQueue(previousId()));
   document.getElementById("next-track").addEventListener("click", () => playFromQueue(nextId()));
   document.getElementById("mini-player-next").addEventListener("click", () => playFromQueue(nextId()));
+  document.getElementById("mini-player-prev").addEventListener("click", () => playFromQueue(previousId()));
   document.getElementById("player-shuffle").addEventListener("click", () => toggleShuffle());
+  // Both announce a QUEUE_CHANGED, which is what repaints the buttons — no
+  // handler here touches its own control's appearance.
+  document.getElementById("player-repeat").addEventListener("click", () => cycleRepeat());
+
+  setupQueuePanel();
 
   document.addEventListener(QUEUE_CHANGED, syncQueueControls);
   syncQueueControls();
@@ -554,7 +751,22 @@ export function setupPlayerOverlay() {
     if (!card) return;
 
     event.preventDefault();
-    openPlayer(card.dataset.contentId);
+    const contentId = card.dataset.contentId;
+    openPlayer(contentId);
+
+    // Playing one card queues up the rest of its shelf, so "next track" means
+    // something from Home too. Every content shelf is one of the pinned
+    // playlists (see _home_shelves.html's data-queue-kind), which is what
+    // makes this a queue the server can already produce.
+    //
+    // Deliberately not awaited, and deliberately after openPlayer: the queue
+    // costs a round trip, and holding playback for it would put a network
+    // call between the tap and play(), which is exactly what iOS refuses to
+    // treat as a user gesture. The queue arriving late is invisible — it only
+    // enables previous/next, and setQueue puts the pointer on the track that
+    // is by then already playing.
+    const kind = card.closest("[data-queue-kind]")?.dataset.queueKind;
+    if (kind) loadQueue({ kind }, { startId: contentId });
   });
 }
 

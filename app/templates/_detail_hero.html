@@ -19,7 +19,7 @@
   {% if artist.avatar_url %}
   <img class="channel-hero-avatar" src="{{ artist.avatar_url }}" alt="" />
   {% else %}
-  <span class="channel-hero-avatar"></span>
+  <span class="channel-hero-avatar avatar-initial">{{ (artist.name or artist.channel_id)[:1] | upper }}</span>
   {% endif %}
   {% else %}
   <span class="channel-hero-avatar channel-card-icon is-{{ kind }}">
@@ -40,7 +40,7 @@
       {%- if count_label -%}
       {{ count_label }}
       {%- else -%}
-      {{ video_count }} video{{ '' if video_count == 1 else 's' }}
+      {{ video_count }} song{{ '' if video_count == 1 else 's' }}
       {%- endif -%}
     </p>
     {% if artist %}

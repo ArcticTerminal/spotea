@@ -21,9 +21,17 @@
       </div>
       <div class="channel-row" id="home-channel-row">
         {% for artist in home_recent_artists %}
-        <button type="button" class="channel-chip{{ ' has-avatar' if artist.avatar_url else '' }}" data-browse-id="{{ artist.browse_id or '' }}">
-          {% if artist.avatar_url %}<img class="channel-chip-avatar" src="{{ artist.avatar_url }}" alt="" loading="lazy" />{% endif %}
-          <span>{{ artist.name or artist.channel_id }}</span>
+        {# Two classes: .channel-chip is what home/library.js's click handler
+           binds to, .artist-chip is what makes it look like an artist rather
+           than a pill. Explore's mood chips are .channel-chip too and stay
+           pills — a mood is a label, an artist is a face. #}
+        <button type="button" class="channel-chip artist-chip" data-browse-id="{{ artist.browse_id or '' }}">
+          {% if artist.avatar_url %}
+          <img class="channel-chip-avatar" src="{{ artist.avatar_url }}" alt="" loading="lazy" />
+          {% else %}
+          <span class="channel-chip-avatar avatar-initial">{{ (artist.name or artist.channel_id)[:1] | upper }}</span>
+          {% endif %}
+          <span class="artist-chip-name">{{ artist.name or artist.channel_id }}</span>
         </button>
         {% endfor %}
       </div>
@@ -40,7 +48,7 @@
         <a class="shelf-see-more" href="/#new-uploads" data-detail-kind="new-uploads" hidden>See more ›</a>
       </div>
       {% if home_new_uploads %}
-      <div class="shelf-row" id="home-new-uploads-row">
+      <div class="shelf-row" id="home-new-uploads-row" data-queue-kind="new-uploads">
         {% for item in home_new_uploads %}
         {% include "_content_card.html" %}
         {% endfor %}
@@ -55,7 +63,7 @@
         <h2 class="shelf-title">Recently played</h2>
         <a class="shelf-see-more" href="/#recently-played" data-detail-kind="recently-played" hidden>See more ›</a>
       </div>
-      <div class="shelf-row" id="home-recently-played-row">
+      <div class="shelf-row" id="home-recently-played-row" data-queue-kind="recently-played">
         {% for item in home_recently_played %}
         {% include "_content_card.html" %}
         {% endfor %}
@@ -67,7 +75,7 @@
         <h2 class="shelf-title">Favorites</h2>
         <a class="shelf-see-more" href="/#favorites" data-detail-kind="favorites" hidden>See more ›</a>
       </div>
-      <div class="shelf-row" id="home-favorites-row">
+      <div class="shelf-row" id="home-favorites-row" data-queue-kind="favorites">
         {% for item in home_favorites %}
         {% include "_content_card.html" %}
         {% endfor %}
@@ -79,7 +87,7 @@
         <h2 class="shelf-title">Saved for later</h2>
         <a class="shelf-see-more" href="/#saved" data-detail-kind="saved" hidden>See more ›</a>
       </div>
-      <div class="shelf-row" id="home-saved-row">
+      <div class="shelf-row" id="home-saved-row" data-queue-kind="saved">
         {% for item in home_saved %}
         {% include "_content_card.html" %}
         {% endfor %}

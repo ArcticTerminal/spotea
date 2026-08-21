@@ -150,12 +150,12 @@ def test_library_fragment_counts_follow_the_data(client, db_session):
     content = db_session.query(Content).filter(Content.video_id == "partnew0001").first()
 
     before = _fragment_body(client.get("/partials/library").text, "library-grid")
-    assert "1 video</span>" in before  # one saved item
+    assert "1 song</span>" in before  # one saved item
 
     client.post(f"/content/{content.id}/save")
 
     after = _fragment_body(client.get("/partials/library").text, "library-grid")
-    assert "2 videos</span>" in after
+    assert "2 songs</span>" in after
 
 
 def test_an_artists_library_card_opens_their_profile(client, db_session):
@@ -190,7 +190,7 @@ def test_an_artists_card_prefers_its_own_synced_track_count(client, db_session):
 def test_a_followed_artists_card_falls_back_to_its_release_count(client, db_session):
     """The common case: following only starts recording releases from here
     on (see services/artist_sync.py), so most cards have no synced track of
-    their own to show — nothing here reads as "0 videos" any more, since
+    their own to show — nothing here reads as "0 songs" any more, since
     the release snapshot every followed artist already carries is worth
     more than a count that's almost always zero."""
     artist = Artist(
@@ -207,10 +207,10 @@ def test_a_followed_artists_card_falls_back_to_its_release_count(client, db_sess
 
     assert "2 releases</span>" in body
     # Scoped to the artist's own card, not the four pinned playlist tiles
-    # above it (Favorites/Saved/New releases/Recently played), which still
-    # say "N videos" and are unrelated to this artist.
+    # above it (Favorites/Saved/New releases/Recently played), which say
+    # "N songs" and are unrelated to this artist.
     card = body[body.index('data-detail-id="UCreleasefallback0000000"') :]
-    assert "0 video" not in card[: card.index("</a>")]
+    assert "0 song" not in card[: card.index("</a>")]
 
 
 def test_a_followed_artist_with_neither_count_just_says_following(client, db_session):
@@ -312,19 +312,90 @@ def test_detail_fragments_carry_the_play_all_controls(client, db_session):
     assert 'id="detail-shuffle"' in body
 
 
-def test_empty_playlist_detail_fragments_render_their_empty_message(client):
-    for kind, message in [
-        ("favorites", "No favorites yet."),
-        ("saved", "Nothing saved yet."),
-        ("new-uploads", "Nothing new yet."),
-        ("recently-played", "Nothing played yet."),
+def test_empty_playlist_detail_fragments_render_their_empty_state(client):
+    """Each pinned playlist explains itself when it has nothing in it: what
+    belongs there, how to put something there, and a way to go do that. The
+    strings come from PLAYLIST_KINDS, so this checks all three parts arrive
+    rather than re-spelling every sentence."""
+    for kind, title in [
+        ("favorites", "Songs you like live here"),
+        ("saved", "Nothing saved yet"),
+        ("new-uploads", "No new releases yet"),
+        ("recently-played", "Nothing played yet"),
     ]:
         res = client.get(f"/partials/detail/playlist/{kind}")
         assert res.status_code == 200, kind
-        assert message in res.text, kind
+        assert title in res.text, kind
+        assert 'class="empty-state-help"' in res.text, kind
+        assert 'href="/#explore"' in res.text, kind
         # Nothing to play — a Play button on an empty list is a control that
         # can only ever do nothing.
         assert 'id="detail-play-all"' not in res.text, kind
+
+
+def test_queue_fragment_renders_the_ids_in_the_order_it_was_given(client, db_session):
+    """The queue's order is the client's, not the database's — a shuffled
+    queue is a permutation the server never computed — so the rows come back
+    in exactly the order asked for rather than in any query order."""
+    _seed(db_session)
+    rows = {c.video_id: c.id for c in db_session.query(Content).all()}
+    wanted = [rows["partsave001"], rows["partnew0001"], rows["partfav0001"]]
+
+    body = _fragment_body(
+        client.get(f"/partials/queue?ids={','.join(str(i) for i in wanted)}").text,
+        "queue-panel-body",
+    )
+
+    positions = [body.index(f'data-content-id="{content_id}"') for content_id in wanted]
+    assert positions == sorted(positions)
+    # Every id asked for, including the one being played. The panel used to be
+    # handed only the tracks ahead of the pointer, which meant picking a row
+    # rebuilt the list without the ones above it; which row is current is
+    # marked in the browser now, so nothing here says so.
+    assert body.count('class="track-row"') == len(wanted)
+    assert "is-current" not in body
+    # A queue row is for playing, and nothing else: bookmarking a track out of
+    # the list you are already listening to saves it to listen to later. The
+    # same template still renders the button everywhere else, which is what
+    # makes this worth pinning.
+    assert "btn-save" not in body
+
+
+def test_queue_fragment_ignores_ids_that_arent_the_users(client, db_session):
+    _seed(db_session)
+    mine = db_session.query(Content).first()
+    theirs = Content(
+        artist_id=_other_user_feed(db_session).id,
+        user_id=db_session.query(User).filter(User.email == "other3@example.com").first().id,
+        video_id="notyours001",
+        title="Not Yours",
+    )
+    db_session.add(theirs)
+    db_session.commit()
+    db_session.refresh(theirs)
+
+    body = _fragment_body(
+        client.get(f"/partials/queue?ids={mine.id},{theirs.id}").text, "queue-panel-body"
+    )
+
+    assert "Not Yours" not in body
+    assert f'data-content-id="{mine.id}"' in body
+
+
+def test_queue_fragment_survives_a_junk_id_list(client, db_session):
+    """The ids come from the client's own sessionStorage. A stale or
+    half-written record should cost the panel a row, not fail the request and
+    leave it blank."""
+    _seed(db_session)
+    real = db_session.query(Content).first().id
+
+    for ids in ("", "abc", f"{real},abc,,999999"):
+        res = client.get(f"/partials/queue?ids={ids}")
+        assert res.status_code == 200, ids
+        assert 'data-target="queue-panel-body"' in res.text, ids
+
+    empty = _fragment_body(client.get("/partials/queue?ids=").text, "queue-panel-body")
+    assert "Nothing queued" in empty
 
 
 def test_playlist_detail_fragment_404s_for_an_unknown_kind(client):

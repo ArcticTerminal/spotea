@@ -38,10 +38,13 @@
        home/overlay.js's syncQueueControls) — nothing is loaded yet on the
        overlay, and opening a single track from a Home shelf never builds
        one. #}
+    {# The outer two slots used to hold ±15s skips, which are podcast
+       controls: a music app spends them on shuffle and repeat, the two
+       things that decide what plays next. Scrubbing didn't go away with the
+       buttons — the arrow keys still jump by SKIP_SECONDS (see player.js). #}
     <div class="transport">
-      <button type="button" id="back15" class="btn-transport" aria-label="Back 15 seconds">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-rewind" /></svg>
-        <span class="transport-num">15</span>
+      <button type="button" id="player-shuffle" class="btn-transport btn-shuffle" aria-pressed="false" aria-label="Shuffle" title="Shuffle">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-shuffle" /></svg>
       </button>
 
       <button type="button" id="prev-track" class="btn-transport" aria-label="Previous track" disabled>
@@ -57,17 +60,21 @@
         <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><use href="#i-skip-next" /></svg>
       </button>
 
-      <button type="button" id="fwd15" class="btn-transport" aria-label="Forward 15 seconds">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-forward" /></svg>
-        <span class="transport-num">15</span>
+      {# Three states on one button, like every other music player: off, repeat
+         the queue, repeat this track. aria-label is rewritten per state by
+         player.js, since "Repeat" alone wouldn't say which one is on. #}
+      <button type="button" id="player-repeat" class="btn-transport btn-repeat" data-repeat="off" aria-label="Repeat off" title="Repeat">
+        <svg id="icon-repeat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-repeat" /></svg>
+        <svg id="icon-repeat-one" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden><use href="#i-repeat-one" /></svg>
       </button>
     </div>
 
     <div class="player-footer">
-      {# Shuffle is a standing preference, not an action: it survives with no
-         queue loaded and decides the order the next "Play all" builds. #}
-      <button type="button" id="player-shuffle" class="btn-quiet-icon btn-shuffle" aria-pressed="false" aria-label="Shuffle" title="Shuffle">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-shuffle" /></svg>
+      {# Shuffle moved up into the transport row (it decides what plays next,
+         which is what that row is for). Its slot here holds the way into the
+         queue instead. #}
+      <button type="button" id="queue-toggle" class="btn-quiet-icon" aria-expanded="false" aria-controls="queue-panel" aria-label="Queue" title="Queue">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-queue" /></svg>
       </button>
 
       <div class="volume-group">

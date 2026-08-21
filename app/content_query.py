@@ -215,3 +215,28 @@ def query_content_ids(
     """
     query = _content_query(db, user_id, filter=filter, artist_id=artist_id)
     return [row[0] for row in query.with_entities(Content.id).limit(QUEUE_MAX_ITEMS).all()]
+
+
+def query_content_by_ids(db: Session, user_id: int, ids: list[int]) -> list[Content]:
+    """The given tracks, as rows, in exactly the order asked for.
+
+    The counterpart to query_content_ids above, for the one caller that has a
+    list of ids and needs to show them: the queue panel. The order comes from
+    the client, not from the database — a shuffled queue is a permutation the
+    server never computed and can't reproduce — so the rows are re-sorted
+    here rather than left in whatever order the IN clause returns.
+
+    Scoped to the user like every other query in this module, so an id
+    belonging to somebody else is simply absent from the result rather than
+    an error; the panel just shows one row fewer.
+    """
+    if not ids:
+        return []
+    rows = (
+        db.query(Content)
+        .options(joinedload(Content.artist))
+        .filter(Content.user_id == user_id, Content.id.in_(ids[:QUEUE_MAX_ITEMS]))
+        .all()
+    )
+    by_id = {row.id: row for row in rows}
+    return [by_id[content_id] for content_id in ids[:QUEUE_MAX_ITEMS] if content_id in by_id]

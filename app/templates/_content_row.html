@@ -13,11 +13,14 @@
     </span>
     <span class="track-info">
       <span class="track-title" title="{{ item.title }}">{{ item.title }}</span>
-      {% if show_channel or item.published_at %}
-      <span class="track-date">
-        {%- if show_channel -%}{{ item.artist.name }}{% if item.published_at %} · {% endif %}{%- endif -%}
-        {%- if item.published_at -%}{{ item.published_at.strftime('%d %b %Y') }}{%- endif -%}
-      </span>
+      {# Artist only. published_at used to follow it, but it records when this
+         app first saw the track rather than when it came out — every row of a
+         freshly synced artist reads as today — so it was a second line of the
+         same date all the way down the list. Left out of a single-artist page
+         (show_channel is false there) where every row would name the artist
+         you are already looking at. #}
+      {% if show_channel %}
+      <span class="track-artist">{{ item.artist.name }}</span>
       {% endif %}
     </span>
   </a>
@@ -27,6 +30,12 @@
     {% endif %}
     {{ item.duration_seconds | duration if item.duration_seconds else '' }}
   </span>
+  {# Left out where the row is already inside a list the user assembled on
+     purpose — the queue. Bookmarking something out of the queue you are
+     listening to right now saves it into a second list to listen to later,
+     which is a distinction without a difference, and it put a second tap
+     target on every row of a panel whose rows exist to be tapped. #}
+  {% if show_save | default(true) %}
   <button
     type="button"
     class="btn-save{{ ' is-on' if item.is_saved else '' }}"
@@ -37,4 +46,5 @@
   >
     <svg viewBox="0 0 24 24" fill="{{ 'currentColor' if item.is_saved else 'none' }}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-bookmark" /></svg>
   </button>
+  {% endif %}
 </div>

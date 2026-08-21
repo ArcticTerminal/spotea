@@ -78,9 +78,14 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-menu" /></svg>
         </button>
         <div id="mobile-menu" class="mobile-menu" role="menu" hidden>
-          <button type="button" id="mobile-menu-refresh" class="mobile-menu-item" role="menuitem">
+          {# "Refresh", not "Check for new releases": the sentence wrapped to
+             two lines in a menu whose other item is one word, and this is the
+             same control as the topbar's Refresh button on desktop — calling
+             it two different things in two places is its own small confusion.
+             The full phrasing survives on the title and in Settings. #}
+          <button type="button" id="mobile-menu-refresh" class="mobile-menu-item" role="menuitem" title="Check for new releases">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-refresh" /></svg>
-            <span>Check for new releases</span>
+            <span>Refresh</span>
           </button>
           <form method="post" action="/logout" class="mobile-menu-form">
             <button type="submit" class="mobile-menu-item" role="menuitem">
@@ -93,12 +98,28 @@
     </div>
   </header>
 
+  {# Icons render alongside the labels but only show on the mobile bottom bar
+     (see style.css's .tab-icon) — on a phone this is the app's primary
+     navigation and a bare word is both a small target and a slow read. The
+     desktop tab strip stays text-only. #}
   <nav class="tabs" role="tablist">
     <div class="tabs-inner">
-    <button type="button" class="tab-btn" data-tab="home" role="tab" aria-selected="false">Home</button>
-    <button type="button" class="tab-btn" data-tab="library" role="tab" aria-selected="false">Library</button>
-    <button type="button" class="tab-btn" data-tab="explore" role="tab" aria-selected="false">Explore</button>
-    <button type="button" class="tab-btn" data-tab="settings" role="tab" aria-selected="false">Settings</button>
+    <button type="button" class="tab-btn" data-tab="home" role="tab" aria-selected="false">
+      <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-home" /></svg>
+      <span class="tab-label">Home</span>
+    </button>
+    <button type="button" class="tab-btn" data-tab="library" role="tab" aria-selected="false">
+      <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-library" /></svg>
+      <span class="tab-label">Library</span>
+    </button>
+    <button type="button" class="tab-btn" data-tab="explore" role="tab" aria-selected="false">
+      <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-search" /></svg>
+      <span class="tab-label">Explore</span>
+    </button>
+    <button type="button" class="tab-btn" data-tab="settings" role="tab" aria-selected="false">
+      <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-settings" /></svg>
+      <span class="tab-label">Settings</span>
+    </button>
     </div>
   </nav>
   </div>
@@ -112,18 +133,18 @@
 
     <section id="tab-library" class="tab-panel" data-tab-panel="library">
       <div class="content-header">
-        <h2>Your channels</h2>
+        <h2>Your artists</h2>
         {% if artists %}
         <div class="search-input-wrap">
           <input
             type="text"
             id="library-search-input"
             class="library-search-input"
-            placeholder="Search channels…"
+            placeholder="Search artists"
             autocomplete="off"
             autocapitalize="off"
             autocorrect="off"
-            aria-label="Search channels"
+            aria-label="Search artists"
           />
           <button type="button" id="library-search-clear" class="search-clear-btn" aria-label="Clear search" hidden>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-close" /></svg>

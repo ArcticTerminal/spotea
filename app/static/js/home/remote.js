@@ -150,7 +150,10 @@ export async function followArtist(channelUrl, button, { announce = true } = {})
       window.location.reload();
       return { added: false, status };
     }
-    if (button) button.textContent = "Added";
+    // "Following" — the same word the artist page's own button uses once you
+    // follow (see _detail_hero.html), so the state reads the same wherever
+    // you happen to have followed from.
+    if (button) button.textContent = "Following";
     // The grid needs re-rendering to pick up the new card and its
     // "still fetching" state.
     refreshFragments();

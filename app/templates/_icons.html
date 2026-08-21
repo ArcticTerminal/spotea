@@ -25,6 +25,14 @@
    currentColor, which every icon here depends on.
 #}
 <svg xmlns="http://www.w3.org/2000/svg" style="position: absolute; width: 0; height: 0; overflow: hidden" aria-hidden="true">
+  {# The four navigation icons. Only drawn on the mobile bottom bar, where a
+     label alone is too small a target to aim at and too slow to read; the
+     desktop tab strip stays text-only. #}
+  <symbol id="i-home"><path d="M3 10.5L12 3l9 7.5"></path><path d="M5 9.4V21h14V9.4"></path></symbol>
+  {# A 2x2 grid, because that is literally what the Library tab shows. #}
+  <symbol id="i-library"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></symbol>
+  <symbol id="i-search"><circle cx="11" cy="11" r="7"></circle><line x1="20.5" y1="20.5" x2="16" y2="16"></line></symbol>
+  <symbol id="i-settings"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></symbol>
   <symbol id="i-check"><polyline points="20 6 9 17 4 12"></polyline></symbol>
   <symbol id="i-bookmark"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></symbol>
   <symbol id="i-arrow-left"><path d="M19 12H5"></path><path d="M12 19l-7-7 7-7"></path></symbol>
@@ -33,6 +41,13 @@
   <symbol id="i-skip-previous"><path d="M18 5v14L8 12z"></path><path d="M4 5h2.5v14H4z"></path></symbol>
   <symbol id="i-skip-next"><path d="M6 5v14l10-7z"></path><path d="M17.5 5H20v14h-2.5z"></path></symbol>
   <symbol id="i-shuffle"><polyline points="16 3 21 3 21 8"></polyline><line x1="4" y1="20" x2="21" y2="3"></line><polyline points="21 16 21 21 16 21"></polyline><line x1="15" y1="15" x2="21" y2="21"></line><line x1="4" y1="4" x2="9" y2="9"></line></symbol>
+  {# i-rewind and i-forward went with the ±15s transport buttons — a music
+     player skips tracks, not seconds. The arrow keys still scrub. #}
+  <symbol id="i-queue"><line x1="3" y1="6" x2="15" y2="6"></line><line x1="3" y1="12" x2="15" y2="12"></line><line x1="3" y1="18" x2="11" y2="18"></line><polyline points="16 15 21 18 16 21"></polyline></symbol>
+  <symbol id="i-repeat"><polyline points="17 1 21 5 17 9"></polyline><path d="M3 11V9a4 4 0 0 1 4-4h14"></path><polyline points="7 23 3 19 7 15"></polyline><path d="M21 13v2a4 4 0 0 1-4 4H3"></path></symbol>
+  {# Repeat-one is the same loop with a numeral in it, so the two states read
+     as one control changing rather than two different icons. #}
+  <symbol id="i-repeat-one"><polyline points="17 1 21 5 17 9"></polyline><path d="M3 11V9a4 4 0 0 1 4-4h14"></path><polyline points="7 23 3 19 7 15"></polyline><path d="M21 13v2a4 4 0 0 1-4 4H3"></path><path d="M11 10h1v4"></path></symbol>
   <symbol id="i-heart"><path d="M12 21s-7.5-4.7-9.4-9A5.3 5.3 0 0 1 12 6.6 5.3 5.3 0 0 1 21.4 12c-1.9 4.3-9.4 9-9.4 9z"></path></symbol>
   <symbol id="i-user"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></symbol>
   <symbol id="i-trash"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></symbol>
@@ -44,8 +59,6 @@
   <symbol id="i-download"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></symbol>
   <symbol id="i-clock"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></symbol>
   <symbol id="i-refresh"><polyline points="23 4 23 10 17 10"></polyline> <polyline points="1 20 1 14 7 14"></polyline> <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></symbol>
-  <symbol id="i-rewind"><path d="M11 4a8 8 0 1 1-7.5 5.2"></path><path d="M3 3v5h5"></path></symbol>
-  <symbol id="i-forward"><path d="M13 4a8 8 0 1 0 7.5 5.2"></path><path d="M21 3v5h-5"></path></symbol>
   <symbol id="i-volume"><path d="M11 5L6 9H3v6h3l5 4V5z" fill="currentColor" stroke="none"></path><path d="M15.5 8.5a5 5 0 0 1 0 7"></path><path d="M18.5 6a9 9 0 0 1 0 12"></path></symbol>
   <symbol id="i-volume-muted"><path d="M11 5L6 9H3v6h3l5 4V5z" fill="currentColor" stroke="none"></path><path d="M16 9.5l5 5"></path><path d="M21 9.5l-5 5"></path></symbol>
   <symbol id="i-close"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></symbol>

@@ -148,7 +148,7 @@ def test_report_playback_only_sends_the_unexpected_events() -> None:
     not a silent one in player.js."""
     source = (JS_DIR / "player.js").read_text()
 
-    match = re.search(r'const REPORTED_EVENTS = new Set\(\[(.*?)\]\);', source)
+    match = re.search(r"const REPORTED_EVENTS = new Set\(\[(.*?)\]\);", source, re.S)
     assert match, "REPORTED_EVENTS allowlist not found in player.js"
     kept = {name.strip().strip('"') for name in match.group(1).split(",") if name.strip()}
 
@@ -166,6 +166,37 @@ def test_report_playback_only_sends_the_unexpected_events() -> None:
     ) in source, (
         "REPORTED_EVENTS is defined but reportPlayback no longer checks "
         "against it — every event is being sent again"
+    )
+
+
+def test_the_volume_slider_is_gated_on_ios_as_well_as_on_the_write_taking() -> None:
+    """iOS routes playback volume to the hardware buttons, so the slider does
+    nothing there and is hidden. That used to be decided by feature detection
+    alone — write a volume, read it back — on the reasoning that the
+    restriction is per-browser rather than per-OS.
+
+    That is measurably wrong on a modern iPhone, confirmed from the device
+    (iOS 18.7, Safari 26.6): writing 0.5 and reading it back returns 0.5, so
+    the detection reports "settable" over a slider that does nothing. Apple's
+    documentation still claims reading always returns 1; it has stopped being
+    true. Nothing readable separates the two cases any more, hence the second,
+    user-agent gate — and hence this test, because "just feature-detect it" is
+    exactly the tidy-looking change that would put the dead control back on
+    every iPhone."""
+    source = (JS_DIR / "player.js").read_text()
+
+    assert "function isIOSWebKit()" in source, (
+        "the iOS gate is gone — a volume slider that does nothing is back on every iPhone"
+    )
+    assert "volumeIsSettable(activeAudio())" in source, "the feature-detection gate is gone"
+    assert "&& !isIOSWebKit()" in source, (
+        "the volume slider is no longer gated on both the write taking *and* not being "
+        "iOS; feature detection alone can show a dead control on an iPhone"
+    )
+    # iPadOS 13+ claims to be a Mac, so the sniff has to look past the name.
+    assert "maxTouchPoints" in source, (
+        "isIOSWebKit no longer distinguishes an iPad from a Mac, and iPadOS reports "
+        "itself as Macintosh"
     )
 
 
