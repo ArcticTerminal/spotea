@@ -116,8 +116,44 @@ def test_omitting_interests_leaves_them_alone(client):
     }
 
 
-def test_interest_chips_are_rendered_into_the_settings_panel(client):
+def test_an_interest_that_is_not_a_suggested_genre_still_gets_a_chip(client):
+    """The picker replaced a free-text editor, so a real library can hold
+    tags the fixed genre list has never heard of — the live one holds "rap".
+    Drawing only the fixed list would make those invisible and, worse,
+    unremovable: the picker saves exactly the chips it shows, so an interest
+    with no chip would be silently dropped the first time anything was
+    toggled."""
     client.put("/settings", json={"interests": ["türk rock"]})
-    # Handed to home/settings.js as JSON on the element, not as markup — see
-    # index.html.
-    assert "t\\u00fcrk rock" in client.get("/").text
+
+    body = client.get("/").text
+
+    assert 'data-genre="türk rock"' in body
+    # On, not merely present — it is something the user already chose.
+    assert '<button\n    type="button"\n    class="genre-chip is-on"\n    data-genre="türk rock"' in body
+
+
+def test_a_saved_genre_lights_up_its_suggested_chip_rather_than_repeating_it(client):
+    """Matched case-insensitively and the suggested spelling wins, so a
+    stored "hip-hop" is the "Hip-Hop" chip rather than a second chip beside
+    it saying the same thing."""
+    client.put("/settings", json={"interests": ["hip-hop"]})
+
+    body = client.get("/").text
+
+    assert body.count('data-genre="Hip-Hop"') == 1
+    assert 'data-genre="hip-hop"' not in body
+    hip_hop = body.index('data-genre="Hip-Hop"')
+    assert 'class="genre-chip is-on"' in body[hip_hop - 120 : hip_hop]
+
+
+def test_the_picker_is_the_same_partial_in_both_places(client, db_session):
+    """One picker, not two editors of one field. Settings' overlay and Home's
+    first-run panel render the same partial — this is what keeps them from
+    drifting back apart."""
+    body = client.get("/").text
+
+    assert body.count('id="interests-picker"') == 1
+    assert body.count('id="onboarding-genres"') == 1
+    # The free-text editor that used to be the other half of this.
+    for gone in ("interests-input", "interests-form", "interest-chip-remove"):
+        assert gone not in body, gone

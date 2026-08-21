@@ -527,6 +527,36 @@ def test_the_pinned_panel_breakpoint_matches_the_stylesheet() -> None:
     assert "@media (min-width: 900px)" in css
 
 
+def test_a_remote_track_row_says_it_is_clickable() -> None:
+    """.track-link is an <a href> in _content_row.html but a <button> in
+    _remote_track_row.html, and a button's default cursor is an arrow. Every
+    row on a chart, album, mood or artist-release page is the remote one, so
+    without this they were the only tracks in the app that gave no sign of
+    being clickable, beside local rows that looked identical and did.
+
+    Asserted on button.track-link specifically: that block exists to strip
+    button chrome so the row reads as a link, and the cursor is the piece of
+    chrome it originally missed. A plain .track-link rule would also pass
+    here while leaving the button's own default in place."""
+    css = (JS_DIR.parent / "css" / "style.css").read_text()
+
+    start = css.index("button.track-link {")
+    assert "cursor: pointer" in css[start : css.index("}", start)]
+
+
+def test_the_desktop_panel_is_not_centred_against_the_card() -> None:
+    """The tab strip is the panel's first element, so a panel sized to its
+    own contents drifts up and down as the queue fills and empties, taking
+    Queue and Lyrics with it. Stretching pins them where a full panel would
+    have put them, which is the only place a tab strip may be."""
+    css = (JS_DIR.parent / "css" / "style.css").read_text()
+
+    desktop = css[css.index("@media (min-width: 900px) {") :]
+    panel = desktop[desktop.index(".queue-panel {") : desktop.index("}", desktop.index(".queue-panel {"))]
+    assert "align-self: stretch" in panel
+    assert "align-self: center" not in panel
+
+
 def test_moods_is_the_first_shelf_in_explore() -> None:
     """It is the only shelf that needs nothing followed and nothing typed,
     so on a library that has just been created it is the difference between
@@ -548,6 +578,34 @@ def test_the_moods_shelf_does_not_promise_genres() -> None:
 
     assert "Moods &amp; genres" not in source
     assert '<h3 class="shelf-title">Moods</h3>' in source
+
+
+def test_onboarding_only_counts_its_own_chips() -> None:
+    """The picker partial is mounted twice now — Home's first-run panel and
+    Settings' "Your interests" overlay — so an unscoped .genre-chip query
+    reads both. It happens to be harmless today, because the panel only shows
+    when the interest list is empty and every chip in the overlay is
+    therefore off, but that is a coincidence of two unrelated conditions."""
+    source = (JS_DIR / "home" / "onboarding.js").read_text()
+
+    for match in re.finditer(r"querySelectorAll\(\s*[\"'`]([^\"'`]+)", source):
+        selector = match.group(1)
+        if ".genre-chip" in selector:
+            assert "#onboarding-genres" in selector, f"unscoped chip query: {selector}"
+
+
+def test_settings_reads_the_picker_rather_than_a_second_copy_of_it() -> None:
+    """Which chips are on is server-rendered into aria-pressed (see
+    interests.interest_chips). Shipping the same fact a second time — as JSON
+    on the element, which is how the free-text editor did it — would only be
+    something to keep in step."""
+    source = (JS_DIR / "home" / "settings.js").read_text()
+
+    assert 'getAttribute("aria-pressed")' in source
+    assert "dataset.interests" not in source
+    # The free-text editor's own machinery, gone rather than left unreachable.
+    for gone in ("interests-input", "interests-form", "interest-chip-remove", "renderInterests"):
+        assert gone not in source, gone
 
 
 def test_onboarding_binds_once_to_a_region_that_survives_a_swap() -> None:

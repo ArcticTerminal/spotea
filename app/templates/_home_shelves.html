@@ -57,10 +57,12 @@
         Pick a few and Explore fills up with playlists to browse. You can
         change these any time under Interests in Settings.
       </p>
-      <div class="onboarding-genres" id="onboarding-genres">
-        {% for genre in suggested_genres %}
-        <button type="button" class="genre-chip" data-genre="{{ genre }}" aria-pressed="false">{{ genre }}</button>
-        {% endfor %}
+      {# The same partial Settings' "Your interests" overlay renders, so there
+         is one picker rather than two editors of one field. Here every chip
+         starts off: show_onboarding is only true when the interest list is
+         empty (see page_context.home_context). #}
+      <div id="onboarding-genres">
+        {% with chips = interest_chips %}{% include "_interest_picker.html" %}{% endwith %}
       </div>
       <div class="onboarding-actions">
         <button type="button" class="btn-primary" id="onboarding-save" disabled>Continue</button>

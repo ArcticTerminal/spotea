@@ -268,37 +268,20 @@
       </div>
 
       <p class="muted">
-        Genres, artists, moods — one per entry. Explore's <strong>For you</strong> shelves are
-        searched from these, and update on the same schedule as your library.
+        Explore's <strong>For you</strong> shelves are searched from these, and
+        update on the same schedule as your library.
       </p>
 
-      {# The chips are rendered by home/settings.js from the data-interests
-         JSON below rather than by a Jinja loop here. That renderer has to run
-         again after every add and remove anyway, and one renderer reading its
-         initial state off the page beats a Jinja copy and a JS copy that have
-         to be kept looking identical. Handing it the data inline (rather than
-         having it fetch /settings when the modal opens) is what keeps the
-         chips there the instant it does.
+      {# The same picker a brand new library gets on Home (see
+         _home_shelves.html) rather than a second editor of the same field.
+         There used to be a free-text chip list and an add form here, which
+         did exactly what the genre picker does and looked nothing like it.
 
-         Single-quoted attribute deliberately: Jinja's tojson escapes <, >, &
-         and ' but not ", so a double-quoted one would break on any interest
-         containing a quote. #}
-      <ul id="interests-list" class="interests-list" data-interests='{{ interests | tojson }}'></ul>
-      <p id="interests-empty" class="muted" hidden>Nothing yet — try a genre, an artist, or a mood.</p>
-
-      <form id="interests-form" class="interests-add-form">
-        <input
-          type="text"
-          id="interests-input"
-          placeholder="Add an interest…"
-          maxlength="60"
-          autocomplete="off"
-          autocapitalize="off"
-          autocorrect="off"
-          aria-label="Add an interest"
-        />
-        <button type="submit" class="btn-primary">Add</button>
-      </form>
+         Toggling a chip saves on its own — no Add button, no Save button.
+         home/settings.js owns that; see setupInterests. #}
+      <div id="interests-picker">
+        {% with chips = interest_chips %}{% include "_interest_picker.html" %}{% endwith %}
+      </div>
     </div>
   </div>
 

@@ -23,7 +23,7 @@ from app.content_query import (
     query_content_page,
 )
 from app.images import needs_thumbnail_caching
-from app.interests import SUGGESTED_GENRES
+from app.interests import interest_chips, parse_interests
 from app.models import Artist, Content, User
 from app.services.artist_sync import cache_thumbnail, snapshot_releases
 from app.services.initial_sync import syncing_artist_ids
@@ -146,6 +146,7 @@ def home_context(db: Session, user_id: int) -> dict:
     # few (with 100+ channels followed, the full list made that row an
     # endless horizontal scroll).
     recent_artists = followed_artists(db, user_id).limit(HOME_CHANNEL_LIMIT).all()
+    interests = parse_interests(db.query(User.interests).filter(User.id == user_id).scalar())
 
     return {
         "home_recent_artists": recent_artists,
@@ -156,11 +157,13 @@ def home_context(db: Session, user_id: int) -> dict:
         # columns), and this answers the same question from data that is
         # already there. It also means it comes back if someone empties their
         # library, which is the moment it is useful again.
-        "show_onboarding": (
-            not recent_artists
-            and not (db.query(User.interests).filter(User.id == user_id).scalar() or "").strip()
-        ),
-        "suggested_genres": SUGGESTED_GENRES,
+        "show_onboarding": not recent_artists and not interests,
+        # Feeds both mounts of _interest_picker.html — the first-run panel on
+        # this page and Settings' "Your interests" overlay, which are the same
+        # picker rather than two editors of one field. One value serves both:
+        # when the panel shows, the list is empty by definition above, so
+        # every chip is off there anyway.
+        "interest_chips": interest_chips(interests),
         # Drives the "nothing here yet" branch — a cheap existence check
         # rather than counting anything.
         "has_content": db.query(Content.id).filter(Content.user_id == user_id).first() is not None,

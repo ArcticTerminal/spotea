@@ -872,8 +872,8 @@ html[data-active-tab="detail"] .tab-panel[data-tab-panel="detail"] {
   border-color: var(--border-strong);
 }
 
-/* The interests editor lives in its own modal rather than inline in a
-   settings row: a wrapping chip list plus its own add form doesn't fit the
+/* The interests picker lives in its own modal rather than inline in a
+   settings row: a wrapping grid of chips doesn't fit the
    label-left/control-right shape every other row has. */
 .modal-interests {
   max-width: 440px;
@@ -883,67 +883,12 @@ html[data-active-tab="detail"] .tab-panel[data-tab-panel="detail"] {
   overflow-y: auto;
 }
 
-/* :not(:empty) so an interests list with nothing in it doesn't leave a gap
-   above the "nothing yet" line that replaces it. */
-.modal-interests .interests-list:not(:empty) {
-  margin-bottom: 1rem;
-}
-
-.interests-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-}
-
-/* Deliberately not .channel-chip: that one is a button (a whole chip you
-   click to filter by), whereas this is a label with its own small remove
-   control, so only the pill shape is shared. */
-.interest-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  padding: 0.3rem 0.35rem 0.3rem 0.7rem;
-  background: var(--bg-base);
-  border: 1px solid var(--border-default);
-  border-radius: 999px;
-  font-size: 0.85rem;
-}
-
-.interest-chip-remove {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  padding: 0;
-  border: none;
-  border-radius: 50%;
-  background: none;
-  color: var(--text-muted);
-  cursor: pointer;
-}
-
-.interest-chip-remove:hover {
-  background: var(--bg-hover-strong);
-  color: var(--text-primary);
-}
-
-.interest-chip-remove svg {
-  width: 12px;
-  height: 12px;
-}
-
-.interests-add-form {
-  display: flex;
-  gap: 0.5rem;
-}
-
-.interests-add-form input {
-  flex: 1;
-  min-width: 0;
+/* The picker is the same partial Home's first-run panel renders (see
+   _interest_picker.html), and .onboarding-genres already gives it its
+   layout. All this adds is the gap under the sentence above it, which on
+   Home comes from the panel's own spacing. */
+.modal-interests #interests-picker {
+  margin-top: 1rem;
 }
 
 /* A description sentence next to a dropdown is tight on a phone screen —
@@ -986,7 +931,6 @@ html[data-active-tab="detail"] .tab-panel[data-tab-panel="detail"] {
    Each selector below only adds what's actually different about it (width
    behavior, margin, flex). */
 .channel-search input,
-.interests-add-form input,
 .library-search-input {
   padding: 0.5rem 0.6rem;
   border-radius: 6px;
@@ -1000,7 +944,6 @@ html[data-active-tab="detail"] .tab-panel[data-tab-panel="detail"] {
 }
 
 .channel-search input::placeholder,
-.interests-add-form input::placeholder,
 .library-search-input::placeholder,
 .login-card input::placeholder {
   color: var(--text-muted);
@@ -1009,7 +952,6 @@ html[data-active-tab="detail"] .tab-panel[data-tab-panel="detail"] {
 /* Accent border instead of the browser's default focus ring, on every
    input above — no exceptions, so focus always reads the same way. */
 .channel-search input:focus,
-.interests-add-form input:focus,
 .library-search-input:focus {
   outline: none;
   border-color: var(--accent);
@@ -1028,8 +970,7 @@ html[data-active-tab="detail"] .tab-panel[data-tab-panel="detail"] {
 }
 
 /* Wraps a search input to position its clear button inside the field
-   rather than after it — the same "×" affordance interest-chip-remove
-   uses, just anchored to a text input instead of a chip. */
+   rather than after it. */
 .search-input-wrap {
   position: relative;
 }
@@ -1295,6 +1236,12 @@ button.track-link {
   color: inherit;
   text-align: inherit;
   padding: 0;
+  /* The last piece of button chrome, and the one that was missed: a
+     button's default cursor is an arrow, a link's is a hand. Every track on
+     a chart, album, mood or artist-release page is one of these rows, so
+     they were the only tracks in the app that gave no sign of being
+     clickable — beside local rows that looked identical and did. */
+  cursor: pointer;
 }
 
 /* Storage tab */
@@ -3174,7 +3121,15 @@ audio {
     flex: 1 1 auto;
     min-width: 0;
     max-width: 460px;
-    align-self: center;
+    /* Full height of the card, not centred against it. The tab strip is the
+       panel's first element, so a panel sized to its own contents put Queue
+       and Lyrics halfway down the screen whenever the queue was empty or
+       the track had no lyrics — the two tabs drifted up and down as their
+       contents changed, which is exactly what a tab strip must not do.
+       Stretched, they stay where the full panel would have put them.
+       (Clamped by the max-height below, a stretched item aligns to the
+       start of the cross axis, which is what pins them to the top.) */
+    align-self: stretch;
     /* The list is the tall thing on this screen; cap it against the viewport
        so a long queue scrolls inside the panel instead of stretching the
        card past the fold. */
