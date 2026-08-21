@@ -17,9 +17,18 @@ ProgressCallback = Callable[[str, int | None], None]
 
 # Both tiers stick to the mp4a/AAC family so FFmpegExtractAudio can always
 # remux into the m4a target instead of re-encoding — no local transcoding
-# either way. "low" adds a <=64kbps cap, which YouTube already serves as a
-# separate, much smaller pre-encoded stream (~48kbps) on virtually every
-# video.
+# either way. "low" adds a <=64kbps cap, matching YouTube's separately
+# pre-encoded itag 139 (~49kbps m4a) instead of the itag 140 (~130kbps) the
+# high tier gets. Measured end to end: 3.78 MB against 1.43 MB.
+#
+# Whether that cap can be met is a property of the client, not of the video.
+# Only some clients list itag 139 at all, and while the ladder was pinned to
+# tv_simply — which doesn't — the first selector matched nothing on every
+# video tried, "low" silently fell through to the same itag 140 as "high",
+# and the setting did nothing. The formats under 64kbps that tv_simply does
+# offer are all Opus, which `acodec^=mp4a` correctly excludes: taking one
+# would mean transcoding to AAC on every download. So this setting only
+# works as long as _ATTEMPTS leads with a client that carries itag 139.
 FORMAT_BY_QUALITY = {
     "high": "bestaudio[acodec^=mp4a]/bestaudio/best",
     "low": "bestaudio[acodec^=mp4a][abr<=64]/bestaudio[acodec^=mp4a]/bestaudio/best",
@@ -98,6 +107,14 @@ class _YtdlpLogger:
     DownloadError this raises, and the loop below logs it at WARNING with
     the video id and which rung it was. This is that message a second time,
     without the context, which is exactly what made it misleading.
+
+    Warnings go to DEBUG rather than nowhere, which is not a detail. yt-dlp
+    explains *why* it dropped formats only in a warning — "android_vr client
+    https formats require a GVS PO Token which was not provided", "YouTube is
+    forcing SABR streaming for this client" — and dropping those on the floor
+    turned a one-line diagnosis into days of guessing at the ladder from 403s
+    alone. Nothing routine is logged at DEBUG here, so turning it on when a
+    client starts failing costs nothing the rest of the time.
     """
 
     def debug(self, msg: str) -> None:
@@ -107,7 +124,7 @@ class _YtdlpLogger:
         pass
 
     def warning(self, msg: str) -> None:
-        pass
+        logger.debug("yt-dlp: %s", msg)
 
     def error(self, msg: str) -> None:
         logger.debug("yt-dlp: %s", msg)
@@ -127,54 +144,62 @@ class Attempt:
 # changes, not waits.
 #
 # Measured per client against the live instance, one extraction each plus a
-# 2-byte range GET on the URL it produced:
+# 1KB range GET on the mp4a URL it produced:
 #
-#   client        extract   usable mp4a URL             range GET
-#   tv_simply     ~3.1s     yes, PO-token-bound         206
-#   android_vr    ~1.5s     NONE — no audio-only formats -
-#   web_safari    ~1.5s     NONE — SABR-forced, no URLs  -
-#   mweb          ~3.7s     yes, PO-token-bound         403
-#   web_embedded  ~3.3s     yes, no PO token            403
-#   ios           ~1.3s     NONE — needs a GVS token     -
+#   client        extract   audio-only mp4a       range GET   PO token
+#   visionos      ~1.6s     itag 139 + 140        206         not needed
+#   tv_simply     ~3.3s     itag 140              206         required
+#   web_embedded  ~3.6s     itag 140              206         not needed
+#   mweb          ~3.7s     itag 140 + 599        403 (2/3)   required
+#   android_vr    ~1.5s     none offered          -           required
+#   web/web_safari/ios/tv   nothing usable        -           -
 #
-# Three things that had been assumed here turned out to be false:
+# What this ladder got wrong before was not the measurement but the pinning.
+# android_vr was pinned here on 14 Aug for being the fastest. YouTube began
+# refusing it on 17 Aug — first everything but itag 18 (yt-dlp#17348), then
+# itag 18 too — and yt-dlp dropped it from its own defaults the next day
+# (yt-dlp#17461), shipping visionos in its place in 2026.08.19. The Dockerfile
+# installs yt-dlp unpinned, so that fix was already in the image while this
+# pin was still overriding it. The pin, not the client, is what cost three
+# days of 403s. Hence test_downloader's assertion that visionos is still in
+# yt-dlp's own _DEFAULT_CLIENTS: when upstream moves on again, the next image
+# rebuild fails a test instead of quietly serving refusals.
 #
-#   - web_safari was carried as android_vr's fallback. It has none to give:
-#     YouTube forces SABR on it (yt-dlp#12482), so every https format comes
-#     back without a URL and yt-dlp drops all of them. With `no_warnings`
-#     on, it said so silently.
-#   - mweb was the "genuinely different client family" last rung. Its URL is
-#     PO-token-bound and still 403s, so it was costing 3.7s and a JS solver
-#     fetch to fail.
-#   - android_vr led this ladder for being "twice as fast when it works".
-#     It no longer works at all. Measured over ten tracks from the live
-#     library, it returned five formats each time and *zero* of them
-#     audio-only — so `bestaudio[...]` matched nothing and FORMAT_BY_QUALITY
-#     fell through to its `/best` rung, which is a muxed video stream.
-#     YouTube then refused to serve that, which is why the symptom read as
-#     `unable to download video data: HTTP Error 403` rather than as a
-#     missing format: the fallback turned "this client has no audio" into
-#     "this URL was rejected". Ten of ten, and the same ten all served 206
-#     on tv_simply.
+# Two corrections to what was written here on 21 Aug, both from reading the
+# warnings this module had been discarding:
 #
-# So the ladder is tv_simply alone. It is the only client measured whose
-# media URL carries a GVS PO token *and* gets served — which is the
-# mechanism, not a coincidence: the token is what YouTube checks. It needs a
-# JS runtime for nsig, but the image already has Deno, so no
-# `remote_components` fetch.
+#   - android_vr does return audio formats. yt-dlp *skips* them, on purpose,
+#     because YouTube now demands a GVS PO token for them and bgutil can't
+#     mint one for an Android client. Only the legacy muxed itag 18 survived
+#     the cull, `bestaudio[...]` skipped it for having video, and the `/best`
+#     tail matched it anyway — which is why a missing-format problem reached
+#     the log as `unable to download video data: HTTP Error 403`.
+#   - mweb offers the *most* audio formats of any client here, itag 599
+#     included. Excluding it is still right, but for the other reason: its
+#     URLs 403 even with a valid token, which is upstream's bug, not ours
+#     (yt-dlp#17389).
 #
-# Three rungs of one client rather than two, keeping the retry budget the
-# ladder had while android_vr was burning the first one. That is not a
-# pointless repeat: the refusals this exists for are per-URL, and a fresh
-# extraction produces a fresh URL.
+# So the ladder leads with visionos, twice. It is the fastest measured, it is
+# the only client offering itag 139 (which is what makes the "low" quality
+# tier mean anything — see FORMAT_BY_QUALITY), and it needs no PO token —
+# which is what let the token provider this used to depend on be deleted
+# outright. Verified 9/9 across the live library: five audio-only formats
+# every time, 206 every time.
 #
-# There are no sleeps between rungs, for the same reason — waiting does not
-# make an already-rejected URL any more acceptable. The old 0s/2s/5s ladder
+# web_embedded is the last rung because it fails differently: a separate
+# client family, also PO-token-free, and the fallback yt-dlp's own maintainers
+# recommend (`player_client=default,web_embedded`). Asking yt-dlp for
+# `default` instead would drag in `web`, which SABR has made useless, for
+# 3x the extraction time.
+#
+# There are no sleeps between rungs — waiting does not make an
+# already-rejected URL any more acceptable, and the refusals this exists for
+# are per-URL, so a fresh extraction is the retry. The old 0s/2s/5s ladder
 # spent its time proving that.
 _ATTEMPTS = (
-    Attempt(player_clients=("tv_simply",)),
-    Attempt(player_clients=("tv_simply",)),
-    Attempt(player_clients=("tv_simply",)),
+    Attempt(player_clients=("visionos",)),
+    Attempt(player_clients=("visionos",)),
+    Attempt(player_clients=("web_embedded",)),
 )
 
 
@@ -212,19 +237,23 @@ def download_audio(video_id: str, quality: str = "high", on_progress: ProgressCa
             "logger": _YtdlpLogger(),
             "socket_timeout": SOCKET_TIMEOUT_SECONDS,
             "postprocessors": [postprocessor],
-            # YouTube requires a PO (Proof-of-Origin) token for several
-            # clients' formats — pot-provider (see docker-compose.yml)
-            # generates these on request. yt-dlp drops the formats that
-            # needed a token it couldn't get rather than failing outright,
-            # so an unreachable pot-provider (e.g. running outside compose)
-            # doesn't raise here — it just leaves tv_simply with nothing to
-            # download. This used to have android_vr, which needs no token,
-            # as the thing that still worked without the container; android_vr
-            # no longer serves audio at all (see _ATTEMPTS), so pot-provider
-            # is now a hard requirement rather than an optimisation.
+            # A second entry used to sit here pointing yt-dlp at a
+            # PO-token provider running as a compose service. Neither client
+            # in _ATTEMPTS needs one — both were measured serving audio with
+            # that provider pointed at a dead port — so it and its container
+            # are gone; docker-compose.yml records how to restore the pair if
+            # YouTube extends the requirement to them.
+            #
+            # Should that happen, the symptom to expect is not an exception.
+            # yt-dlp drops the formats it couldn't get a token for and carries
+            # on, so a client that suddenly needs one goes quiet rather than
+            # loud: `bestaudio[...]` matches nothing, FORMAT_BY_QUALITY's
+            # `/best` tail picks whatever muxed stream is left, and YouTube
+            # refuses *that* — surfacing as a 403 on download rather than as
+            # the missing format it actually is. The reason is in a yt-dlp
+            # warning, which _YtdlpLogger keeps at DEBUG.
             "extractor_args": {
                 "youtube": {"player_client": list(attempt.player_clients)},
-                "youtubepot-bgutilhttp": {"base_url": ["http://pot-provider:4416"]},
             },
         }
 

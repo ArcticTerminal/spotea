@@ -16,10 +16,14 @@ jobs:
         with:
           python-version: "3.12"
 
+      # Mirrors the Dockerfile: yt-dlp and ytmusicapi float, so a run here is
+      # against the same extractor the image will build with — which is what
+      # lets test_the_pinned_client_is_one_upstream_still_defends catch a
+      # client change before it reaches production.
       - name: Install dependencies
         run: |
           pip install --no-cache-dir -r requirements-dev.txt
-          pip install --no-cache-dir yt-dlp bgutil-ytdlp-pot-provider ytmusicapi
+          pip install --no-cache-dir yt-dlp ytmusicapi
 
       - name: Run tests
         run: python -m pytest

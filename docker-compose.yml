@@ -35,46 +35,20 @@ services:
       timeout: 5s
       retries: 3
       start_period: 40s
-    depends_on:
-      # Not `condition: service_healthy`: pot-provider is a third-party image
-      # (see its own block below) we can't give a reliable `test:` command
-      # without guessing at what's on its PATH or what its HTTP surface
-      # looks like. `service_started` just makes explicit what an unqualified
-      # depends_on already gave us implicitly — pot-provider's container is
-      # running, not that port 4416 is accepting requests yet.
-      # This used to be a startup-ordering nicety rather than a correctness
-      # dependency, because app/downloader.py could fall back to a
-      # PO-token-free client. There is no longer one that works (see its
-      # _ATTEMPTS), so pot-provider being up is now what makes downloads
-      # possible at all. Nothing crashes without it — yt-dlp just drops
-      # every format it couldn't get a token for and every download fails.
-      pot-provider:
-        condition: service_started
 
-  # Generates YouTube PO (Proof-of-Origin) tokens for yt-dlp — see
-  # app/downloader.py's ydl_opts. Without this, YouTube's SABR rollout 403s
-  # clients unless a valid token is attached to the request; android_vr held
-  # out longest as a token-free client and has since stopped returning any
-  # audio-only format at all, so nothing plays without this. Internal-only, no host
-  # port published; app reaches it at http://pot-provider:4416 over the
-  # compose network.
-  pot-provider:
-    image: brainicism/bgutil-ytdlp-pot-provider
-    restart: unless-stopped
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-    # No healthcheck here (and so no condition: service_healthy on app's
-    # depends_on above): this image is third-party and unbuilt by us, and
-    # neither this repo nor the image's own docs record what's on its PATH
-    # (curl/wget/node/...) or whether it exposes anything pollable over HTTP
-    # beyond the actual PO-token endpoint yt-dlp calls, which needs a real
-    # request body to exercise — not something to just GET. A guessed `test:`
-    # command that turns out wrong leaves the container permanently
-    # "unhealthy", which is worse than having no healthcheck at all (and
-    # would wedge app's startup if service_healthy were used above). Revisit
-    # both this block and app's depends_on condition together if this image's
-    # healthcheck story ever becomes knowable (e.g. by inspecting a running
-    # container's filesystem).
+# There was a second service here: bgutil-ytdlp-pot-provider, minting the PO
+# (Proof-of-Origin) tokens YouTube demands from many clients before it will
+# serve their media URLs. It is gone because no client this app asks for needs
+# one — visionos and web_embedded, the whole of app/downloader.py's _ATTEMPTS,
+# were both measured serving audio with the provider pointed at a dead port,
+# and its log recorded zero requests across a rebuild and two downloads while
+# it sat on 108 MB.
+#
+# Bringing it back, if YouTube extends the token requirement to those clients
+# too: `image: brainicism/bgutil-ytdlp-pot-provider`, pinned to the same
+# version as a `bgutil-ytdlp-pot-provider` install added to the Dockerfile —
+# they are two halves of one pair and yt-dlp warns when they disagree, which
+# is how they drifted apart last time. Then hand yt-dlp its address again with
+# `"youtubepot-bgutilhttp": {"base_url": [...]}` in build_ydl_opts. Note that
+# it cannot help an Android-family client (bgutil can't do DroidGuard), which
+# is why it could not save android_vr.
