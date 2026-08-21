@@ -22,9 +22,16 @@
 >
   <button type="button" class="track-link" aria-label="Play {{ item.title }}">
     <span class="track-index">{{ index }}</span>
+    {# Same fallback as the local row (see _content_row.html). Deliberately
+       only in the <img>, not in data-thumbnail-url above: that attribute is
+       what POST /explore/tracks/batch stores, and a derived still is not
+       something worth writing into the database — it can always be derived
+       again, and storing it would make a stand-in indistinguishable from a
+       real cover. #}
     <span class="track-thumb">
-      {% if item.thumbnail_url %}
-      <img src="{{ item.thumbnail_url }}" alt="" loading="lazy" />
+      {% set cover = item | cover %}
+      {% if cover %}
+      <img src="{{ cover }}" alt="" loading="lazy" />
       {% endif %}
     </span>
     <span class="track-info">

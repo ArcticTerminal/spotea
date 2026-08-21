@@ -115,8 +115,19 @@ def needs_thumbnail_caching(thumbnail_url: str | None) -> bool:
     thumbnail silently stayed an uncached, ORB-flaky hotlink forever. Keying
     off "already local" instead of "old CDN" can't go stale the same way if
     the CDN changes again.
+
+    Absolute http(s) only, which is the honest form of the question: "is
+    this something we could actually go and download?". "Not already local"
+    was too loose — a cover stored as `/image-proxy?u=…` (which is how
+    nearly every track arrives, see music._proxied_cover_url) passed the
+    check, and download_thumbnail then handed that relative path to
+    urllib.request.Request, which raises ValueError("unknown url type").
+    That is not one of the exceptions _download_image catches, so the
+    background task died on it every time — measured live, two tracebacks in
+    a 400-line log window, and no thumbnail ever cached for any of the 906
+    rows in that shape.
     """
-    return bool(thumbnail_url) and not thumbnail_url.startswith("/thumbnails/")
+    return bool(thumbnail_url) and thumbnail_url.startswith(("http://", "https://"))
 
 
 def cached_avatar_path(channel_id: str) -> str | None:
