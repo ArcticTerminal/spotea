@@ -9,15 +9,11 @@
 #}
 {% if artists %}
     <div class="channel-grid">
-      <a class="channel-card" href="/#favorites" data-detail-kind="favorites">
-        <span class="channel-card-avatar channel-card-icon is-favorites">
-          <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-heart" /></svg>
-        </span>
-        <span class="channel-card-info">
-          <span class="channel-card-title">Favorites</span>
-          <span class="channel-card-count">{{ favorites_count }} song{{ '' if favorites_count == 1 else 's' }}</span>
-        </span>
-      </a>
+      {# First of the three, because it is the only one that changes on its
+         own: Favorites and Recently Played are both consequences of
+         something you just did, so you already know what is in them. This
+         is the tile that answers "has anything happened since I last
+         looked", which is the question the Library is opened with. #}
       <a class="channel-card" href="/#new-uploads" data-detail-kind="new-uploads">
         <span class="channel-card-avatar channel-card-icon is-new-uploads">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-upload" /></svg>
@@ -25,6 +21,15 @@
         <span class="channel-card-info">
           <span class="channel-card-title">New releases</span>
           <span class="channel-card-count">{{ new_uploads_count }} release{{ '' if new_uploads_count == 1 else 's' }}</span>
+        </span>
+      </a>
+      <a class="channel-card" href="/#favorites" data-detail-kind="favorites">
+        <span class="channel-card-avatar channel-card-icon is-favorites">
+          <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-heart" /></svg>
+        </span>
+        <span class="channel-card-info">
+          <span class="channel-card-title">Favorites</span>
+          <span class="channel-card-count">{{ favorites_count }} song{{ '' if favorites_count == 1 else 's' }}</span>
         </span>
       </a>
       <a class="channel-card" href="/#recently-played" data-detail-kind="recently-played">

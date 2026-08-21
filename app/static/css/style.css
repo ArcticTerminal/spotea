@@ -1295,6 +1295,12 @@ button.track-link {
   color: inherit;
   text-align: inherit;
   padding: 0;
+  /* The last piece of button chrome, and the one that was missed: a
+     button's default cursor is an arrow, a link's is a hand. Every track on
+     a chart, album, mood or artist-release page is one of these rows, so
+     they were the only tracks in the app that gave no sign of being
+     clickable — beside local rows that looked identical and did. */
+  cursor: pointer;
 }
 
 /* Storage tab */
@@ -3174,7 +3180,15 @@ audio {
     flex: 1 1 auto;
     min-width: 0;
     max-width: 460px;
-    align-self: center;
+    /* Full height of the card, not centred against it. The tab strip is the
+       panel's first element, so a panel sized to its own contents put Queue
+       and Lyrics halfway down the screen whenever the queue was empty or
+       the track had no lyrics — the two tabs drifted up and down as their
+       contents changed, which is exactly what a tab strip must not do.
+       Stretched, they stay where the full panel would have put them.
+       (Clamped by the max-height below, a stretched item aligns to the
+       start of the cross axis, which is what pins them to the top.) */
+    align-self: stretch;
     /* The list is the tall thing on this screen; cap it against the viewport
        so a long queue scrolls inside the panel instead of stretching the
        card past the fold. */
