@@ -16,9 +16,14 @@ import { refreshRecommendations } from "./explore.js";
 import { activate } from "./tabs.js";
 
 function selectedGenres() {
-  return [...document.querySelectorAll('.genre-chip[aria-pressed="true"]')].map(
-    (chip) => chip.dataset.genre
-  );
+  // Scoped to this panel. The same picker partial is also mounted inside
+  // Settings' "Your interests" overlay, so an unscoped .genre-chip query
+  // reads both — harmless today, because this panel only shows when the
+  // interest list is empty and every chip over there is therefore off, but
+  // that is a coincidence of two unrelated conditions rather than a reason.
+  return [
+    ...document.querySelectorAll('#onboarding-genres .genre-chip[aria-pressed="true"]'),
+  ].map((chip) => chip.dataset.genre);
 }
 
 export function setupOnboarding() {

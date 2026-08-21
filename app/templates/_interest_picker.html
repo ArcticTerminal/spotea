@@ -1,0 +1,24 @@
+{# The one place interests are chosen. Rendered twice — inside Settings'
+   "Your interests" overlay and, on a brand new library, inline on Home —
+   which is the whole point of it being a partial: those were two different
+   editors of the same field, and the free-text one has been removed.
+
+   `chips` is (label, selected) pairs from interests.interest_chips. It is
+   not just SUGGESTED_GENRES: anything already saved that isn't a suggested
+   genre comes along at the end, already on. The picker saves exactly the
+   chips it shows, so a tag with no chip here would be dropped the first time
+   anything was toggled.
+
+   `aria-pressed` is what home/settings.js and home/onboarding.js both read
+   to decide what is selected — the .is-on class beside it is presentation
+   only, so nothing depends on the two agreeing beyond this template. #}
+<div class="onboarding-genres">
+  {% for label, selected in chips %}
+  <button
+    type="button"
+    class="genre-chip{{ ' is-on' if selected }}"
+    data-genre="{{ label }}"
+    aria-pressed="{{ 'true' if selected else 'false' }}"
+  >{{ label }}</button>
+  {% endfor %}
+</div>

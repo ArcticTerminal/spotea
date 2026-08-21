@@ -102,3 +102,27 @@ SUGGESTED_GENRES = (
     "Folk",
     "Afrobeats",
 )
+
+
+def interest_chips(interests: Iterable[str]) -> list[tuple[str, bool]]:
+    """The chips the picker draws: (label, is selected).
+
+    The fixed list above, followed by anything already saved that isn't in
+    it. That tail is the reason this function exists rather than the template
+    looping over SUGGESTED_GENRES directly. Settings used to edit interests
+    as free text, so a real library can hold tags the list has never heard of
+    — the live one holds "rap", which is not a suggested genre — and drawing
+    only the fixed list would have made those invisible and, worse,
+    unremovable: the picker saves exactly the chips it shows, so an interest
+    with no chip would be silently dropped the first time anything was
+    toggled.
+
+    Matched case-insensitively, and the suggested spelling wins where both
+    exist: a stored "hip-hop" lights up the "Hip-Hop" chip rather than
+    appearing again beside it.
+    """
+    saved = {tag.casefold(): tag for tag in normalize_interests(interests)}
+    chips = [(genre, genre.casefold() in saved) for genre in SUGGESTED_GENRES]
+    suggested = {genre.casefold() for genre in SUGGESTED_GENRES}
+    chips.extend((tag, True) for key, tag in saved.items() if key not in suggested)
+    return chips
