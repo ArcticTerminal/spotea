@@ -49,45 +49,70 @@ def _clients_of(opts):
     return opts["extractor_args"]["youtube"]["player_client"]
 
 
-def test_the_fast_client_goes_first(fake_ydl, tmp_path):
-    """android_vr resolves in ~1.4s against tv_simply's ~2.9s and works most
-    of the time, so it's what a play pays for in the common case."""
+def test_the_client_that_gets_served_goes_first(fake_ydl, tmp_path):
+    """tv_simply is the only client measured whose media URL carries a GVS PO
+    token and gets served, so it's what a play pays for from the first
+    attempt rather than after one that was always going to fail."""
     fake_ydl.outcomes = [None]
     (tmp_path / "vid00000001.m4a").write_bytes(b"audio")
 
     downloader.download_audio("vid00000001")
 
     assert len(fake_ydl.calls) == 1
-    assert _clients_of(fake_ydl.calls[0]) == ["android_vr"]
+    assert _clients_of(fake_ydl.calls[0]) == ["tv_simply"]
 
 
-def test_web_safari_is_not_asked_for_anywhere(fake_ydl):
-    """It was carried as android_vr's fallback and never was one: YouTube
-    forces SABR on it, so every https format comes back without a URL and
-    yt-dlp drops all of them (silently, under no_warnings). Keeping it looked
-    like redundancy while providing none."""
+def test_the_clients_that_never_deliver_audio_are_not_asked_for(fake_ydl):
+    """Each of these was on the ladder at some point and each was measured to
+    give nothing back. android_vr is the newest: it led the ladder for being
+    the fast path, and now returns no audio-only format at all — ten of ten
+    tracks — so `bestaudio[...]` misses and FORMAT_BY_QUALITY's `/best` rung
+    picks a muxed video stream YouTube then refuses. That refusal is what
+    made this look like a random 403 rather than a client with no audio."""
     fake_ydl.outcomes = ["403", "403", "403"]
 
     with pytest.raises(downloader.DownloadError):
         downloader.download_audio("vid00000001")
 
     for call in fake_ydl.calls:
-        assert "web_safari" not in _clients_of(call)
-        assert "mweb" not in _clients_of(call)  # measured: PO-bound URL, still 403s
+        clients = _clients_of(call)
+        assert "android_vr" not in clients  # measured: zero audio-only formats
+        assert "web_safari" not in clients  # measured: SABR-forced, no URLs at all
+        assert "mweb" not in clients  # measured: PO-bound URL, still 403s
 
 
-def test_a_refused_url_falls_back_to_the_po_token_client(fake_ydl, tmp_path):
-    """The whole point of the ladder: android_vr's media URL carries no PO
-    token and gets refused at random, tv_simply's is token-bound and gets
-    served."""
-    fake_ydl.outcomes = ["ERROR: unable to download video data: HTTP Error 403: Forbidden", None]
+def test_ytdlp_does_not_write_its_own_errors_to_stderr(fake_ydl):
+    """`quiet` and `no_warnings` don't cover errors — yt-dlp prints those
+    regardless. A rung that failed and was recovered from on the next one
+    still left a bare `ERROR: ...` in the log with no video id beside it,
+    which read as a failed download when nothing had failed. Handing yt-dlp
+    a logger is the only way to stop that; the loop's own WARNING, which has
+    the id and the attempt number, is where that message belongs."""
+    fake_ydl.outcomes = ["403", "403", "403"]
+
+    with pytest.raises(downloader.DownloadError):
+        downloader.download_audio("vid00000001")
+
+    for call in fake_ydl.calls:
+        assert isinstance(call["logger"], downloader._YtdlpLogger)
+
+
+def test_a_refused_url_gets_a_second_and_third_extraction(fake_ydl, tmp_path):
+    """The whole point of the ladder, and the reason repeating one client is
+    not a pointless repeat: the refusal is per-URL, so a fresh extraction of
+    the same video by the same client produces a URL that can be served even
+    though the last one wasn't."""
+    fake_ydl.outcomes = [
+        "ERROR: unable to download video data: HTTP Error 403: Forbidden",
+        "ERROR: unable to download video data: HTTP Error 403: Forbidden",
+        None,
+    ]
     (tmp_path / "vid00000001.m4a").write_bytes(b"audio")
 
     path = downloader.download_audio("vid00000001")
 
     assert path.name == "vid00000001.m4a"
-    assert len(fake_ydl.calls) == 2
-    assert _clients_of(fake_ydl.calls[1]) == ["tv_simply"]
+    assert len(fake_ydl.calls) == 3
 
 
 def test_no_attempt_waits_before_taking_its_shot(fake_ydl, monkeypatch):
