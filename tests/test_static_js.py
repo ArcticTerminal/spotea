@@ -397,6 +397,33 @@ def test_a_release_card_opens_by_browse_id() -> None:
     assert 'openDetail("yt-release", releaseCard.dataset.releaseId)' in source
 
 
+def test_a_single_is_resolved_before_any_history_is_pushed() -> None:
+    """A one-track release plays instead of opening a panel (see
+    routers/partials.py's remote_release_fragment), so it must not leave a
+    history entry pointing at a panel that was never shown. The only way to
+    guarantee that is to ask what the release is before pushing."""
+    source = (JS_DIR / "home" / "detail.js").read_text()
+
+    resolve = source.index("await resolveRelease(id)")
+    push = source.index("history.pushState")
+    assert resolve < push, "resolveRelease must run before openDetail pushes history"
+
+
+def test_playing_a_standalone_track_sets_a_one_track_queue() -> None:
+    """Nothing playRemoteVideo opens came out of a list, so there is no rest
+    of it to queue. Left to itself, queue.js's noteCurrent would clear the
+    queue instead and the queue panel would go blank — which on desktop is a
+    permanently open panel showing nothing while a track plays."""
+    source = (JS_DIR / "home" / "remote.js").read_text()
+
+    play = source.index("export async function playRemoteVideo")
+    set_queue = source.index('setQueue({ kind: "single" }, [data.content_id])', play)
+    open_player = source.index("openPlayer(data.content_id)", play)
+    # Order matters: noteCurrent runs off openPlayer and drops any queue the
+    # new track isn't in, so the queue has to exist first.
+    assert set_queue < open_player
+
+
 def test_a_new_follow_lands_on_the_artists_profile() -> None:
     """The landing page has to match the one the library card opens for the
     very same artist — following someone and clicking them a minute later

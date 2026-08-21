@@ -101,8 +101,8 @@ def add_single_video(
     """Explore's "listen" action — adds exactly one video without following
     its channel. Always created as a preview (Content.is_preview=True): it
     plays through the normal player like any other content, but stays out of
-    Library/New releases until the user favorites or saves it (see
-    routers/content.py's add_favorite/add_saved).
+    Library/New releases until the user favorites it (see
+    routers/content.py's add_favorite).
 
     If this video already has a Content row for this user — a previous
     Explore preview, or a real upload from a followed channel — this isn't a

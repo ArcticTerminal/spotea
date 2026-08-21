@@ -38,7 +38,18 @@ export async function playRemoteVideo(dataset, button) {
       },
       errorMessage: "Could not add this song",
     });
-    if (ok) openPlayer(data.content_id);
+    if (!ok) return;
+    // A queue of exactly this one track, rather than none.
+    //
+    // Nothing here came out of a list — a single, an Explore result, one of
+    // an artist's videos — so there is no "rest of it" to line up, and
+    // pressing play on one of these deliberately does not inherit whatever
+    // queue happened to be loaded before. Setting it explicitly rather than
+    // letting noteCurrent clear it keeps the queue panel showing the track
+    // that is actually playing instead of going blank, which matters most
+    // on desktop where that panel is always open.
+    setQueue({ kind: "single" }, [data.content_id]);
+    openPlayer(data.content_id);
   } finally {
     if (button) button.disabled = false;
   }

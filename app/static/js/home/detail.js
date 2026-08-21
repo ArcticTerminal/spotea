@@ -89,6 +89,57 @@ function showLoading() {
   }
 }
 
+/** Oldest-out, so a long browse doesn't grow this without bound. */
+function cacheRemoteFragment(url, html) {
+  remoteFragmentCache.set(url, html);
+  if (remoteFragmentCache.size > REMOTE_CACHE_LIMIT) {
+    remoteFragmentCache.delete(remoteFragmentCache.keys().next().value);
+  }
+}
+
+/** resolveRelease's "the request failed and it already said so" answer,
+ *  distinct from null ("this is a normal multi-track release"). */
+const FAILED = Symbol("release-failed");
+
+/** Remembers which releases turned out to be one track, so a second click on
+ *  the same single doesn't re-ask YouTube. The multi-track answer is cached
+ *  too, as HTML, in remoteFragmentCache below — same request, either way. */
+const singleReleaseCache = new Map();
+
+/**
+ * Asks what a release is, once.
+ *
+ * Returns the track to play for a one-track release, null for anything
+ * longer (having primed remoteFragmentCache with its panel, so the
+ * openDetail call right after this costs no second request), or FAILED if
+ * the fetch didn't work and the user has already been told.
+ */
+async function resolveRelease(browseId) {
+  const url = detailUrl("yt-release", browseId, 1);
+  if (singleReleaseCache.has(url)) return singleReleaseCache.get(url);
+  if (remoteFragmentCache.has(url)) return null;
+
+  let res;
+  try {
+    res = await fetch(url);
+  } catch (err) {
+    showToast("Could not load this page");
+    return FAILED;
+  }
+  if (!res.ok) {
+    showToast(res.status === 404 ? "That's gone." : "Could not load this page");
+    return FAILED;
+  }
+
+  if (res.headers.get("content-type")?.includes("application/json")) {
+    const track = await res.json();
+    singleReleaseCache.set(url, track);
+    return track;
+  }
+  cacheRemoteFragment(url, await res.text());
+  return null;
+}
+
 /**
  * Opens one of the four sources listed at the top of this file. `id` is a
  * a YouTube id for the remote kinds, and null for
@@ -101,6 +152,21 @@ function showLoading() {
  *
  */
 export async function openDetail(kind, id, { page = 1, replace = false, title } = {}) {
+  // A one-track release plays instead of opening (see routers/partials.py's
+  // remote_release_fragment). Resolved here rather than at the click site so
+  // that every way into a release goes through it — the card, a reload on a
+  // #yt-release/... hash left over from before this changed, the back button
+  // — and resolved before the history push below, because a single must not
+  // leave a panel entry behind to go "back" to.
+  if (kind === "yt-release") {
+    const single = await resolveRelease(id);
+    if (single === FAILED) return;
+    if (single) {
+      await playRemoteVideo(single);
+      return;
+    }
+  }
+
   // A pagination click within the view that's already open keeps whatever
   // "is there a Library entry behind this" answer the original open
   // established — pagination itself always replaces, so it must not flip a
@@ -136,12 +202,7 @@ export async function openDetail(kind, id, { page = 1, replace = false, title } 
     return;
   }
   const html = await res.text();
-  if (isRemoteKind(kind)) {
-    remoteFragmentCache.set(url, html);
-    if (remoteFragmentCache.size > REMOTE_CACHE_LIMIT) {
-      remoteFragmentCache.delete(remoteFragmentCache.keys().next().value);
-    }
-  }
+  if (isRemoteKind(kind)) cacheRemoteFragment(url, html);
   swapFragmentHtml(html);
   afterPanelSwap();
 }
@@ -296,7 +357,14 @@ export function setupDetailPanel() {
 
     const releaseCard = event.target.closest(".release-card");
     if (releaseCard) {
-      openDetail("yt-release", releaseCard.dataset.releaseId);
+      // Marked busy for the duration, because what this click does isn't
+      // decided until the answer arrives: a multi-track release swaps the
+      // panel in (visible straight away), but a single stays on this page
+      // until the player opens, and without this the tap would look ignored.
+      releaseCard.classList.add("is-loading");
+      openDetail("yt-release", releaseCard.dataset.releaseId).finally(() => {
+        releaseCard.classList.remove("is-loading");
+      });
       return;
     }
 

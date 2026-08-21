@@ -274,7 +274,11 @@ def test_the_full_song_list_keeps_the_artists_follow_button(client, fake_artist)
 
 def test_a_release_opens_as_a_track_list(client, monkeypatch):
     """An album and a single are the same thing once opened, so they share
-    a route — see music.fetch_release."""
+    a route — see music.fetch_release.
+
+    Two tracks rather than one, because one is now the case that doesn't
+    open at all (see test_explore_remote.py): it plays instead.
+    """
     monkeypatch.setattr(
         remote_detail,
         "fetch_release",
@@ -284,14 +288,14 @@ def test_a_release_opens_as_a_track_list(client, monkeypatch):
             kind="Album",
             cover_url="https://lh3.googleusercontent.com/c=w544-h544-l90-rj",
             artist_names="Shirin David",
-            tracks=[_track()],
+            tracks=[_track(), _track(video_id="bbbbbbbbbbb")],
         ),
     )
 
     res = client.get("/partials/detail/yt-release/MPREb_HIQTwIoDtEM")
 
     assert res.status_code == 200
-    assert "Album · 2025 · Shirin David · 1 track" in res.text
+    assert "Album · 2025 · Shirin David · 2 tracks" in res.text
     assert "Biliyorsun" in res.text
 
 

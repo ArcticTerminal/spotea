@@ -267,3 +267,90 @@ def test_batch_requires_login():
             follow_redirects=False,
         )
         assert res.status_code == 303
+
+
+# --- A release: one track plays, more than one opens -----------------------
+
+RELEASE_ID = "MPREb_aaaaaaaaaaa"
+
+
+@pytest.fixture
+def fake_release(monkeypatch):
+    """Installs a release for the fragment route to find. `tracks` decides
+    which of the route's two answers comes back, which is the whole point of
+    these tests."""
+    from app.youtube.music import ReleaseDetail
+
+    holder = {"tracks": [_track("aaaaaaaaaaa")]}
+    calls = []
+
+    def fetch(browse_id):
+        calls.append(browse_id)
+        return ReleaseDetail(
+            title="Miss Jamaica",
+            year="2026",
+            kind="Single",
+            cover_url="https://lh3.googleusercontent.com/cover",
+            artist_names="Jimmy Cliff",
+            tracks=holder["tracks"],
+        )
+
+    monkeypatch.setattr("app.services.remote_detail.fetch_release", fetch)
+    return holder, calls
+
+
+def test_a_one_track_release_answers_with_the_track_instead_of_a_panel(client, fake_release):
+    """The point of the whole change: a release with one track in it has no
+    panel worth showing, so the route hands back what to play."""
+    holder, _ = fake_release
+    holder["tracks"] = [_track("aaaaaaaaaaa")]
+
+    res = client.get(f"/partials/detail/yt-release/{RELEASE_ID}")
+
+    assert res.status_code == 200
+    assert res.headers["content-type"].startswith("application/json")
+    # Keyed the way _remote_track_row.html writes its dataset, so
+    # home/remote.js's playRemoteVideo takes it unchanged.
+    assert res.json() == {
+        "videoId": "aaaaaaaaaaa",
+        "title": "Track",
+        "channelId": CHANNEL_ID,
+        "thumbnailUrl": "https://i.ytimg.com/vi/x/hq720.jpg",
+        "durationSeconds": "241",
+        "channelTitle": "Some Channel",
+    }
+
+
+def test_a_two_track_release_still_opens_the_panel(client, fake_release):
+    """"Single" is YouTube Music's label, not a track count — it puts the
+    word on plenty of two- and three-track releases. Going by the count
+    keeps the other tracks reachable."""
+    holder, _ = fake_release
+    holder["tracks"] = [_track("aaaaaaaaaaa"), _track("bbbbbbbbbbb")]
+
+    res = client.get(f"/partials/detail/yt-release/{RELEASE_ID}")
+
+    assert res.status_code == 200
+    assert res.headers["content-type"].startswith("text/html")
+    assert "track-list" in res.text
+    assert "Miss Jamaica" in res.text
+
+
+def test_deciding_costs_exactly_one_fetch(client, fake_release):
+    """Either answer comes out of the same single request — the track count
+    and the video id arrive together, so there is no probe-then-open."""
+    holder, calls = fake_release
+    holder["tracks"] = [_track("aaaaaaaaaaa")]
+
+    client.get(f"/partials/detail/yt-release/{RELEASE_ID}")
+
+    assert calls == [RELEASE_ID]
+
+
+def test_a_release_id_is_validated_before_anything_is_fetched(client, fake_release):
+    _, calls = fake_release
+
+    res = client.get("/partials/detail/yt-release/not-a-release-id")
+
+    assert res.status_code == 404
+    assert calls == []
