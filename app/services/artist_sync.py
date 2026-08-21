@@ -38,9 +38,57 @@ from app.images import download_avatar, download_thumbnail
 from app.models import Artist, Content
 from app.timeutil import utcnow
 from app.youtube.models import ChannelSearchResult, VideoSearchResult
-from app.youtube.music import fetch_artist, fetch_release
+from app.youtube.music import ArtistRelease, fetch_artist, fetch_release
 
 logger = logging.getLogger(__name__)
+
+
+def snapshot_releases(snapshot: str | None) -> list[dict]:
+    """`Artist.release_snapshot`, as the releases it describes.
+
+    The snapshot holds a full release per entry — browse id, title, year,
+    kind, cover — rather than the bare browse id it used to. The extra
+    fields cost nothing to keep: the artist page hands all of them over in
+    the same response the sync already makes, and they were being thrown
+    away. What they buy is Home's "New releases" shelf, which renders from
+    this and so never touches the network (see page_context.home_context).
+
+    Tolerant of the old bare-id shape, because there is no migration
+    framework here and there did not need to be one for this: an entry
+    written before the change is a string, has no title to render, and is
+    simply skipped — the artist's next sync overwrites the whole snapshot
+    with the full shape, so it corrects itself within one refresh.
+    """
+    if not snapshot:
+        return []
+    try:
+        entries = json.loads(snapshot)
+    except (TypeError, ValueError):
+        return []
+    return [entry for entry in entries if isinstance(entry, dict) and entry.get("browse_id")]
+
+
+def snapshot_release_ids(snapshot: str | None) -> set[str]:
+    """Just the browse ids — the set-diff that is the whole change detection.
+
+    Reads both shapes, and unlike snapshot_releases it must: an entry with
+    no title still means "we have seen this release", and treating it as
+    unseen would re-import an artist's entire back catalogue on the first
+    refresh after the upgrade.
+    """
+    if not snapshot:
+        return set()
+    try:
+        entries = json.loads(snapshot)
+    except (TypeError, ValueError):
+        return set()
+    ids = set()
+    for entry in entries:
+        if isinstance(entry, str):
+            ids.add(entry)
+        elif isinstance(entry, dict) and entry.get("browse_id"):
+            ids.add(entry["browse_id"])
+    return ids
 
 # Refresh is network-bound, so refresh_feeds fans out across threads rather
 # than doing one artist at a time. Kept modest to stay polite: this is
@@ -54,7 +102,7 @@ class ArtistFetchResult:
     """What one artist's network round trip found, ready to be applied on the
     caller's own session.
 
-    `release_ids` is every release the page currently lists — the snapshot to
+    `releases` is every release the page currently lists — the snapshot to
     store, not just the new ones. `tracks` are the tracks of the releases
     that turned out to be new; empty on a first sync, which deliberately
     records the snapshot without importing anything (see fetch_artist_data).
@@ -71,7 +119,7 @@ class ArtistFetchResult:
     # from `tracks` below, which is new releases' tracks to insert into
     # Content, not this artist's popular songs.
     top_tracks: list[VideoSearchResult] | None = None
-    release_ids: list[str] = field(default_factory=list)
+    releases: list[ArtistRelease] = field(default_factory=list)
     tracks: list[VideoSearchResult] = field(default_factory=list)
 
 
@@ -94,7 +142,6 @@ def fetch_artist_data(browse_id: str, snapshot: str | None, avatar_url: str | No
         return ArtistFetchResult(ok=False)
 
     releases = [*artist.albums, *artist.singles]
-    release_ids = [release.browse_id for release in releases]
 
     fetched_avatar_url = None
     if not avatar_url and artist.avatar_url:
@@ -110,10 +157,11 @@ def fetch_artist_data(browse_id: str, snapshot: str | None, avatar_url: str | No
             monthly_listeners=artist.monthly_listeners,
             related=artist.related,
             top_tracks=artist.tracks,
-            release_ids=release_ids,
+            releases=releases,
         )
 
-    known = set(json.loads(snapshot))
+    known = snapshot_release_ids(snapshot)
+    kept = list(releases)
     tracks: list[VideoSearchResult] = []
     for release in releases:
         if release.browse_id in known:
@@ -122,7 +170,7 @@ def fetch_artist_data(browse_id: str, snapshot: str | None, avatar_url: str | No
         if detail is None:
             # Leave it out of the snapshot too, so the next refresh tries
             # again rather than writing it off on one bad response.
-            release_ids.remove(release.browse_id)
+            kept = [item for item in kept if item.browse_id != release.browse_id]
             continue
         tracks.extend(detail.tracks)
 
@@ -133,7 +181,7 @@ def fetch_artist_data(browse_id: str, snapshot: str | None, avatar_url: str | No
         monthly_listeners=artist.monthly_listeners,
         related=artist.related,
         top_tracks=artist.tracks,
-        release_ids=release_ids,
+        releases=kept,
         tracks=tracks,
     )
 
@@ -203,7 +251,7 @@ def apply_artist_data(db: Session, artist: Artist, result: ArtistFetchResult) ->
             )
             new_count += 1
 
-    artist.release_snapshot = json.dumps(result.release_ids)
+    artist.release_snapshot = json.dumps([asdict(release) for release in result.releases])
     db.commit()
     return new_count
 

@@ -65,3 +65,40 @@ def interests_signature(values: Iterable[str]) -> str:
     """
     joined = "\n".join(sorted(tag.casefold() for tag in normalize_interests(values)))
     return hashlib.sha256(joined.encode()).hexdigest()[:32]
+
+
+# What first-run onboarding offers (see templates/_home_shelves.html). A
+# static list because there is no live one to use: YouTube Music publishes a
+# "Genres" browse section, but ytmusicapi fails to parse 25 of its 40
+# categories and those 25 are every single genre in it (see
+# youtube/music.MOOD_SECTION, where the same limitation already forces the
+# moods-only shelf).
+#
+# Suggestions, not a vocabulary. These land in exactly the same free-text
+# field Settings writes, get handed to YouTube search verbatim like anything
+# typed there, and nothing anywhere validates against this list — it exists
+# so that a brand new library has something to click instead of a text box
+# and no idea what belongs in it.
+#
+# Under MAX_INTERESTS deliberately: someone who picks every one of these
+# should still have room to add their own afterwards.
+SUGGESTED_GENRES = (
+    "Pop",
+    "Rock",
+    "Hip-Hop",
+    "R&B",
+    "Electronic",
+    "House",
+    "Jazz",
+    "Soul",
+    "Funk",
+    "Blues",
+    "Metal",
+    "Indie",
+    "Classical",
+    "Country",
+    "Reggae",
+    "Latin",
+    "Folk",
+    "Afrobeats",
+)

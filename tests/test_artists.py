@@ -235,7 +235,14 @@ def test_a_first_sync_records_the_catalogue_without_importing_it(db_session, mon
 
     assert new_count == 0
     assert db_session.query(Content).count() == 0
-    assert artist.release_snapshot == '["MPREb_aaaaaaaaaaa", "MPREb_bbbbbbbbbbb"]'
+    # The snapshot keeps the whole release, not just its id: the artist page
+    # hands over the title, year, kind and cover in the same response, and
+    # Home's "New releases" shelf renders from exactly this (see
+    # page_context._new_releases) so it never has to fetch anything.
+    stored = json.loads(artist.release_snapshot)
+    assert [entry["browse_id"] for entry in stored] == ["MPREb_aaaaaaaaaaa", "MPREb_bbbbbbbbbbb"]
+    assert stored[0]["title"] == "A Single"
+    assert stored[0]["year"] == "2026"
 
 
 def test_a_first_sync_still_records_monthly_listeners(db_session, monkeypatch):
@@ -467,7 +474,7 @@ def test_refresh_isolates_one_failing_artist(db_session, monkeypatch):
     monkeypatch.setattr(
         artist_sync,
         "fetch_artist_data",
-        lambda browse_id, snapshot, avatar_url: ArtistFetchResult(ok=True, release_ids=[]),
+        lambda browse_id, snapshot, avatar_url: ArtistFetchResult(ok=True, releases=[]),
     )
 
     real_apply = artist_sync.apply_artist_data
@@ -574,7 +581,7 @@ def _stub_initial_fetch(monkeypatch, spy=None):
     def fake(browse_id, snapshot, avatar_url):
         if spy:
             spy()
-        return ArtistFetchResult(ok=True, release_ids=[])
+        return ArtistFetchResult(ok=True, releases=[])
 
     monkeypatch.setattr(initial_sync_module, "fetch_artist_data", fake)
 
@@ -695,3 +702,104 @@ def test_library_marks_a_feed_that_is_still_being_fetched(client, db_session):
 
     body = client.get("/partials/library").text
     assert "data-preparing" not in body, "the card kept saying it was fetching after the sync ended"
+
+
+# --------------------------------------------------------------------------
+# The release snapshot: change detection *and* what Home's shelf renders.
+# --------------------------------------------------------------------------
+
+
+def test_an_old_bare_id_snapshot_is_not_treated_as_unseen(db_session, monkeypatch):
+    """The snapshot used to be a list of browse ids and is now a list of
+    releases. Reading only the new shape would make every release on every
+    followed artist look new on the first refresh after the upgrade — which
+    is a live fetch per release and the artist's entire back catalogue
+    imported into Content. Hence snapshot_release_ids reads both.
+    """
+    monkeypatch.setattr(
+        artist_sync,
+        "fetch_artist",
+        lambda browse_id, all_songs=True: _artist(singles=[_release(), _release("MPREb_bbbbbbbbbbb")]),
+    )
+
+    def explode(browse_id):
+        raise AssertionError("a release already in the snapshot must not be opened")
+
+    monkeypatch.setattr(artist_sync, "fetch_release", explode)
+
+    artist = _followed(db_session)
+    artist.release_snapshot = '["MPREb_aaaaaaaaaaa", "MPREb_bbbbbbbbbbb"]'
+    db_session.commit()
+
+    result = artist_sync.fetch_artist_data(artist.browse_id, artist.release_snapshot, None)
+    new_count = apply_artist_data(db_session, artist, result)
+
+    assert new_count == 0
+    assert db_session.query(Content).count() == 0
+
+
+def test_an_old_snapshot_is_rewritten_in_the_new_shape(db_session, monkeypatch):
+    """It corrects itself in one refresh, which is why no migration was
+    needed — an entry with no title simply doesn't render until then."""
+    monkeypatch.setattr(
+        artist_sync, "fetch_artist", lambda browse_id, all_songs=True: _artist(singles=[_release()])
+    )
+    artist = _followed(db_session)
+    artist.release_snapshot = '["MPREb_aaaaaaaaaaa"]'
+    db_session.commit()
+
+    result = artist_sync.fetch_artist_data(artist.browse_id, artist.release_snapshot, None)
+    apply_artist_data(db_session, artist, result)
+
+    assert json.loads(artist.release_snapshot) == [
+        {
+            "browse_id": "MPREb_aaaaaaaaaaa",
+            "title": "A Single",
+            "year": "2026",
+            "kind": "Single",
+            "cover_url": None,
+        }
+    ]
+
+
+def test_snapshot_readers_survive_junk():
+    """A truncated or hand-edited column is a shelf with nothing on it, not
+    a 500 on Home."""
+    from app.services.artist_sync import snapshot_release_ids, snapshot_releases
+
+    for junk in (None, "", "not json", "{}", "[1, 2]"):
+        assert snapshot_releases(junk) == []
+        assert snapshot_release_ids(junk) == set()
+
+
+def test_a_release_that_wont_open_stays_out_of_the_snapshot(db_session, monkeypatch):
+    """So the next refresh tries it again rather than writing it off on one
+    bad response — unchanged behaviour, re-pinned because the snapshot now
+    holds objects and the removal had to be rewritten."""
+    monkeypatch.setattr(
+        artist_sync,
+        "fetch_artist",
+        lambda browse_id, all_songs=True: _artist(
+            singles=[_release(), _release("MPREb_bbbbbbbbbbb", title="Broken")]
+        ),
+    )
+    monkeypatch.setattr(
+        artist_sync,
+        "fetch_release",
+        lambda browse_id: None
+        if browse_id == "MPREb_bbbbbbbbbbb"
+        else ReleaseDetail(
+            title="A Single", year="2026", kind="Single", cover_url=None,
+            artist_names="An Artist", tracks=[_track("newtrack001")],
+        ),
+    )
+
+    artist = _followed(db_session)
+    artist.release_snapshot = "[]"
+    db_session.commit()
+
+    result = artist_sync.fetch_artist_data(artist.browse_id, artist.release_snapshot, None)
+    apply_artist_data(db_session, artist, result)
+
+    stored = [entry["browse_id"] for entry in json.loads(artist.release_snapshot)]
+    assert stored == ["MPREb_aaaaaaaaaaa"]

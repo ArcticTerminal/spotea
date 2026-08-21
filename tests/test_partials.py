@@ -271,7 +271,9 @@ def test_fragments_are_empty_but_valid_for_a_fresh_profile(client):
         for target in targets:
             assert f'data-target="{target}"' in res.text
 
-    assert "add a channel in the Explore tab" in client.get("/partials/home").text
+    # A fresh profile's Home is the first-run panel, which is the whole of
+    # what that fragment has to say at that point.
+    assert 'id="onboarding"' in client.get("/partials/home").text
     assert "Nothing downloaded yet" in client.get("/partials/downloads").text
 
 

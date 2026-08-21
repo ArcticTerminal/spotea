@@ -13,6 +13,7 @@ import {
   setupRefreshButton,
 } from "../home/library.js";
 import { setupLyricsPanel } from "../home/lyrics.js";
+import { setupOnboarding } from "../home/onboarding.js";
 import { resumeOverlayIfNeeded, setupPlayerOverlay } from "../home/overlay.js";
 import {
   setupDownloadsOverlay,
@@ -37,6 +38,7 @@ setupPlayerOverlay();
 // now, and setupPlayer is what puts it there.
 setupLyricsPanel();
 setupDetailPanel();
+setupOnboarding();
 resumeOverlayIfNeeded();
 // resumeOverlayIfNeeded only reopens a track left playing in a previous
 // session; a #channel/42 or #player/123 hash in the URL right now is a

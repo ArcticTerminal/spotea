@@ -2509,6 +2509,78 @@ button.track-link {
   color: var(--text-primary);
 }
 
+/* First run — see _home_shelves.html. Sized like a page rather than a card:
+   on an empty library this is the only thing on Home, so a boxed panel
+   floating in the middle would read as a dialog over nothing. */
+.onboarding {
+  max-width: 640px;
+  padding: var(--space-6) 0;
+}
+
+.onboarding[hidden] {
+  display: none;
+}
+
+.onboarding-title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-2xl);
+  font-weight: 700;
+}
+
+.onboarding-help {
+  margin: 0 0 var(--space-5);
+  color: var(--text-secondary);
+  font-size: var(--text-md);
+  line-height: 1.55;
+}
+
+.onboarding-genres {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-6);
+}
+
+/* Wraps rather than scrolling sideways, unlike .channel-chip's row: these
+   are a set to choose from, and one you have to scroll to see all of is one
+   you will not read to the end of. */
+.genre-chip {
+  border: 1px solid var(--border-default);
+  background: var(--bg-base);
+  color: var(--text-secondary);
+  border-radius: var(--radius-pill);
+  padding: var(--space-2) var(--space-4);
+  font: inherit;
+  font-size: var(--text-md);
+  font-weight: 600;
+  cursor: pointer;
+  /* 44px minimum tap target — these are the first thing a new install is
+     asked to touch, and on a phone that is a thumb. */
+  min-height: 44px;
+}
+
+.genre-chip:hover {
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+
+.genre-chip.is-on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--black);
+}
+
+.onboarding-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.onboarding-actions .btn-primary:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 .btn-quiet {
   background: none;
   border: none;

@@ -19,9 +19,21 @@ def test_html_is_compressed(client):
     assert res.headers.get("content-encoding") == "gzip"
 
 
-def test_small_responses_are_left_uncompressed(client):
-    """minimum_size=1000: below it, the gzip header and trailer cost more than
-    the compression saves. An empty library's Home fragment is ~150 bytes."""
+def test_small_responses_are_left_uncompressed(client, db_session):
+    """minimum_size=1000: below it, the gzip header and trailer cost more
+    than the compression saves.
+
+    An interest is listed so Home's first-run panel doesn't render — with
+    it, the fragment is a heading, help text and eighteen genre chips, which
+    is comfortably over the threshold and tests the wrong branch. Without
+    it, the fragment is one "nothing played yet" line at ~150 bytes, which
+    is the case this is about.
+    """
+    from app.models import User
+
+    db_session.query(User).filter(User.id == 1).update({"interests": "rock"})
+    db_session.commit()
+
     res = client.get("/partials/home", headers={"Accept-Encoding": "gzip"})
 
     assert res.status_code == 200

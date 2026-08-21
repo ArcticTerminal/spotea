@@ -9,9 +9,11 @@ fix: an is_preview=True row (an Explore result never favorited/saved) must
 not inflate a count whose matching list excludes it.
 """
 
+import json
+
 from app.content_query import count_content
-from app.models import Artist, Content
-from app.page_context import library_context, playlist_detail_context
+from app.models import Artist, Content, User
+from app.page_context import home_context, library_context, playlist_detail_context
 from app.timeutil import utcnow
 
 USER_ID = 1
@@ -129,3 +131,98 @@ def test_favorites_playlist_count_excludes_previews(db_session):
     assert context["video_count"] == len(context["content"])
 
 
+
+
+# --------------------------------------------------------------------------
+# Home's "New releases" shelf, read off Artist.release_snapshot.
+# --------------------------------------------------------------------------
+
+
+def _release_entry(browse_id, title, year="2026"):
+    return {
+        "browse_id": browse_id,
+        "title": title,
+        "year": year,
+        "kind": "Single",
+        "cover_url": None,
+    }
+
+
+def _followed_with_releases(db_session, name, *entries, user_id=USER_ID):
+    artist = Artist(
+        user_id=user_id,
+        channel_id=f"UC{name}".ljust(24, "0"),
+        name=name,
+        followed=True,
+        release_snapshot=json.dumps(list(entries)),
+    )
+    db_session.add(artist)
+    db_session.commit()
+    return artist
+
+
+def test_the_shelf_reads_releases_off_the_snapshot(db_session):
+    """No network: the sync already stored these — see
+    services/artist_sync.snapshot_releases."""
+    _followed_with_releases(db_session, "Alpha", _release_entry("MPREb_a1", "Alpha Single"))
+
+    shelf = home_context(db_session, USER_ID)["home_new_releases"]
+
+    assert [r["title"] for r in shelf] == ["Alpha Single"]
+    assert shelf[0]["artist_name"] == "Alpha"
+
+
+def test_the_shelf_is_newest_year_first(db_session):
+    _followed_with_releases(
+        db_session,
+        "Alpha",
+        _release_entry("MPREb_old", "Old One", year="2019"),
+        _release_entry("MPREb_new", "New One", year="2026"),
+    )
+
+    shelf = home_context(db_session, USER_ID)["home_new_releases"]
+
+    assert [r["title"] for r in shelf] == ["New One", "Old One"]
+
+
+def test_one_prolific_artist_does_not_fill_the_shelf(db_session):
+    """Same lesson as Explore's shelves — an artist with a long catalogue
+    would otherwise take every slot."""
+    _followed_with_releases(
+        db_session, "Alpha", *[_release_entry(f"MPREb_a{i}", f"Alpha {i}") for i in range(20)]
+    )
+    _followed_with_releases(
+        db_session, "Beta", *[_release_entry(f"MPREb_b{i}", f"Beta {i}") for i in range(20)]
+    )
+
+    shelf = home_context(db_session, USER_ID)["home_new_releases"]
+
+    assert any(r["title"].startswith("Beta") for r in shelf), "the second artist got no slot"
+
+
+def test_an_unfollowed_artists_releases_are_not_shown(db_session):
+    artist = _followed_with_releases(db_session, "Gone", _release_entry("MPREb_g1", "Gone Single"))
+    artist.followed = False
+    db_session.commit()
+
+    assert home_context(db_session, USER_ID)["home_new_releases"] == []
+
+
+def test_an_old_bare_id_snapshot_renders_nothing_rather_than_crashing(db_session):
+    """It has no title to show. One refresh rewrites it in full — see
+    test_artists.py's snapshot tests."""
+    artist = _followed_with_releases(db_session, "Alpha")
+    artist.release_snapshot = '["MPREb_a1", "MPREb_a2"]'
+    db_session.commit()
+
+    assert home_context(db_session, USER_ID)["home_new_releases"] == []
+
+
+def test_another_users_releases_stay_out(db_session):
+    other = User(email="releases-other@example.com", password_hash="x")
+    db_session.add(other)
+    db_session.commit()
+    db_session.refresh(other)
+    _followed_with_releases(db_session, "Theirs", _release_entry("MPREb_t1", "Theirs"), user_id=other.id)
+
+    assert home_context(db_session, USER_ID)["home_new_releases"] == []
