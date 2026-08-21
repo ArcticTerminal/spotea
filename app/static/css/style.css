@@ -2088,78 +2088,18 @@ button.track-link {
   font-variant-numeric: tabular-nums;
 }
 
-.track-downloaded {
-  width: 13px;
-  height: 13px;
-  color: var(--accent);
-}
+/* No mobile override for .track-row any more, and that is the fix for the
+   title running into the duration.
 
-@media (max-width: 480px) {
-  /* At mobile width, duration + save button ate ~150px of the ~358px usable
-     row, leaving only ~155px for the title before it truncated. Fix: give
-     the title its own full line, and move duration down next to the date
-     on a second line.
-
-     .track-link and .track-info are only wrappers (an <a>/<button> and a
-     column layout) with no visual identity of their own here, so making
-     them `display: contents` lets their children (index/thumb/title/date)
-     become direct grid items of .track-row alongside .track-duration and
-     the save button — grid, unlike flex, can lay out items from different
-     nesting depths on a shared row/column grid. This only changes layout;
-     .track-link keeps intercepting clicks/taps normally since that's DOM-
-     based (closest() in home/detail.js), not box-based. Desktop is
-     untouched — the flex rules above still apply above this breakpoint. */
-  .track-row {
-    display: grid;
-    grid-template-columns: 1.5rem 44px 1fr auto auto;
-    grid-template-areas:
-      "index thumb title    title    save"
-      "index thumb meta duration save";
-    column-gap: 0.75rem;
-    row-gap: 0.15rem;
-  }
-
-  .track-link,
-  .track-info {
-    display: contents;
-  }
-
-  .track-index,
-  .track-thumb,
-  .track-row .btn-save {
-    align-self: center;
-  }
-
-  .track-index {
-    grid-area: index;
-  }
-
-  .track-thumb {
-    grid-area: thumb;
-  }
-
-  .track-title {
-    /* Grid items default to min-width: auto, i.e. never smaller than their
-       content — which for nowrap text is the full, untruncated string. That
-       would force the title's 1fr track to grow and blow out the row
-       instead of ellipsizing. min-width: 0 restores the truncation. */
-    grid-area: title;
-    min-width: 0;
-  }
-
-  .track-artist {
-    grid-area: meta;
-    min-width: 0;
-  }
-
-  .track-duration {
-    grid-area: duration;
-  }
-
-  .track-row .btn-save {
-    grid-area: save;
-  }
-}
+   There used to be one: at ≤480px the row became a grid whose title spanned
+   both the title *and* the duration column ("title title" on the first
+   line, "meta duration" on the second), so a long title ran right across
+   the column the duration lives in. That existed because the duration plus
+   a save button ate ~150px of a ~358px row and left the title almost
+   nothing. The save button is gone with save-for-later, the duration alone
+   costs ~35px, and the flex rules above already give the title everything
+   left over and ellipsize it — so the grid bought nothing and cost the
+   collision. One layout at every width now. */
 
 .card {
   background: var(--bg-base);
@@ -2215,31 +2155,6 @@ button.track-link {
   height: 100%;
   object-fit: cover;
   display: block;
-}
-
-/* Marks content that's already on disk and will start instantly. The one
-   badge left over the artwork — a duration badge used to sit in the opposite
-   corner, but stamping a runtime on cover art is a video convention, and the
-   duration is already in every track list. */
-.downloaded-badge {
-  position: absolute;
-  /* Bottom-left, the corner the duration badge used to hold. The right-hand
-     corner belongs to the play button that appears on hover. */
-  bottom: var(--space-2);
-  left: var(--space-2);
-  width: 18px;
-  height: 18px;
-  border-radius: var(--radius-circle);
-  background: var(--accent);
-  color: var(--black);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.downloaded-badge svg {
-  width: 11px;
-  height: 11px;
 }
 
 /* The play affordance on a card's artwork — the one gesture that most says

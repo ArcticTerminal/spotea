@@ -7,14 +7,12 @@
     {% if item.thumbnail_url %}
     <img src="{{ item.thumbnail_url }}" alt="" loading="lazy" />
     {% endif %}
-    {# No duration badge over the artwork: that's a video-thumbnail
-       convention, and the duration is already in the track list, on the
-       right, where a music app puts it. #}
-    {% if item.status == "ready" %}
-    <span class="downloaded-badge" title="Downloaded — plays instantly">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-download" /></svg>
-    </span>
-    {% endif %}
+    {# Nothing is stamped on the artwork. Not a duration — that's a
+       video-thumbnail convention, and the duration is already in the track
+       list on the right, where a music app puts it. Not a "downloaded"
+       badge either: the Downloads page answers that question properly, so
+       everywhere else it was noise. The only thing that appears here is the
+       play affordance, and only on hover. #}
   </a>
   <div class="card-body">
     <h3 class="card-title" title="{{ item.title }}">

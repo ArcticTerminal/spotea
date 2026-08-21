@@ -23,10 +23,9 @@
       {% endif %}
     </span>
   </a>
-  <span class="track-duration">
-    {% if item.status == "ready" %}
-    <svg class="track-downloaded" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" title="Downloaded — plays instantly"><use href="#i-check" /></svg>
-    {% endif %}
-    {{ item.duration_seconds | duration if item.duration_seconds else '' }}
-  </span>
+  {# No "downloaded" tick next to the duration. The Downloads page is the
+     one place that question gets asked, and it answers it in full; a badge
+     on every row of every list was the same answer repeated where nobody
+     was asking. #}
+  <span class="track-duration">{{ item.duration_seconds | duration if item.duration_seconds else '' }}</span>
 </div>

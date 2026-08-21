@@ -129,7 +129,7 @@ class Artist(Base):
     # YouTube Music's own "fans also like" list for this artist, as a JSON
     # array of ChannelSearchResult dicts — same free-data reasoning as
     # monthly_listeners above, and refreshed the same way on every sync.
-    # What powers Explore's "Similar artists" shelf (see
+    # What powers Explore's "Artists you may like" shelf (see
     # services/recommendations.py._similar_to_followed): merged across every
     # artist this user follows, rather than fetched fresh at request time.
     related_artists: Mapped[str | None] = mapped_column(Text, default=None)

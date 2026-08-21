@@ -18,7 +18,7 @@ from your browser — a personal, free alternative to a streaming subscription.
 - Play anything without following anyone: add a single song straight from
   search and it plays like everything else.
 - Explore fills up on its own once you follow a few artists: **Songs** and
-  **Similar artists** come from who you actually follow, not from typing
+  **Artists you may like** come from who you actually follow, not from typing
   anything. List genres, artists or moods under **Interests** in Settings
   and that drives the **Playlists** shelf too. This week's charts and every
   one of YouTube Music's moods to browse are there regardless.

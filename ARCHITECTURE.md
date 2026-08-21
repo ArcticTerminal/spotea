@@ -128,7 +128,7 @@ profiles); the profile model is gone.
 | `followed` | False for a placeholder created to hold one Explore track, and for an artist unfollowed while keeping some of their content |
 | `release_snapshot` | JSON array of every release browse id the page listed last time. The whole change-detection mechanism. NULL means never synced |
 | `monthly_listeners` | YouTube Music's own count string ("1.91M"), refreshed every sync |
-| `related_artists` | JSON array of their "fans also like" artists, refreshed every sync — feeds Explore's **Similar artists** shelf |
+| `related_artists` | JSON array of their "fans also like" artists, refreshed every sync — feeds Explore's **Artists you may like** shelf |
 | `top_tracks` | JSON array of their page-preview songs, refreshed every sync — feeds Explore's **Songs** shelf |
 
 The last three cost nothing extra: they arrive on the same `get_artist` call
@@ -216,11 +216,11 @@ changes, or the Refresh button is pressed (`GET/POST /recommendations`,
 |---|---|---|
 | **Playlists** | YouTube Music playlist search, keyed on a sample of the typed interest list | a live search per sampled interest |
 | **Songs** | every followed artist's own `top_tracks` (§3), merged and deduped | none — already on disk |
-| **Similar artists** | every followed artist's own `related_artists` (§3), merged and deduped | none — already on disk |
+| **Artists you may like** | every followed artist's own `related_artists` (§3), merged and deduped | none — already on disk |
 | **Charts** / **Charting artists** | `MUSIC_CHART_COUNTRY`'s YouTube Music chart | one live request, shared by both |
 | **Moods & genres** | every category in YouTube Music's "Moods & moments" menu | one live request, playlists not fetched until a mood is opened |
 
-Songs and Similar artists used to both be interest-driven search too, the
+Songs and Artists you may like used to both be interest-driven search too, the
 same way Playlists still is. Both were dropped: an interest is free text,
 and it was routinely a genre or a mood rather than a song title or an
 artist's name ("Hip Hop", not "Drake") — YouTube Music's artist search in
