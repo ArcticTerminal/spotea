@@ -4,8 +4,11 @@
   data-status="{{ item.status }}"
 >
   <a class="thumb" href="/#player/{{ item.id }}" aria-label="Play {{ item.title }}">
-    {% if item.thumbnail_url %}
-    <img src="{{ item.thumbnail_url }}" alt="" loading="lazy" />
+    {# See _content_row.html — `| cover` falls back to the video still for a
+       track stored without artwork of its own. #}
+    {% set cover = item | cover %}
+    {% if cover %}
+    <img src="{{ cover }}" alt="" loading="lazy" />
     {% endif %}
     {# Nothing is stamped on the artwork. Not a duration — that's a
        video-thumbnail convention, and the duration is already in the track

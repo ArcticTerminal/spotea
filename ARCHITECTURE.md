@@ -252,7 +252,7 @@ changes, or the Refresh button is pressed (`GET/POST /recommendations`,
 | **Playlists** | YouTube Music playlist search, keyed on a sample of the typed interest list | a live search per sampled interest |
 | **Songs** | every followed artist's own `top_tracks` (§3), interleaved a position at a time and deduped | none — already on disk |
 | **Artists you may like** | every followed artist's own `related_artists` (§3), interleaved a position at a time and deduped | none — already on disk |
-| **Charts** / **Charting artists** | each `MUSIC_CHART_COUNTRIES` entry's YouTube Music chart, blended a rank at a time | one live request per country, shared by both |
+| **Charts** / **Charting artists** | each `MUSIC_CHART_COUNTRIES` entry's "Trending 20" playlist, plus its charting artists blended a rank at a time | one live request per country, shared by both |
 | **Moods** (listed first) | every category in YouTube Music's "Moods & moments" menu | one live request, playlists not fetched until a mood is opened |
 
 Songs and Artists you may like used to both be interest-driven search too, the
