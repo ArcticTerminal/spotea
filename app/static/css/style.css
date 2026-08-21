@@ -2997,11 +2997,35 @@ audio {
   transition-delay: 0s;
 }
 
-/* On the body rather than the panel so the collapse clips them too. */
-#queue-panel-body {
+/* The panel's header, above the scroller rather than inside it — a header
+   that scrolls away with its own contents isn't one. It carries the divider
+   that used to sit on #queue-panel-body, since it is the panel's first
+   element now.
+
+   Kept here, above the desktop block below, on purpose: a media query adds
+   no specificity, so the override in there only wins by coming later in the
+   file. Moved down past it and the desktop tabs silently get the drawer's
+   divider and 24px of space back. */
+.panel-tabs {
+  display: flex;
+  gap: var(--space-4);
+  flex: 0 0 auto;
   margin-top: var(--space-5);
   border-top: 1px solid var(--border-subtle);
   padding-top: var(--space-4);
+  margin-bottom: var(--space-3);
+}
+
+/* A collapsed drawer has no height, so without this the tabs would be drawn
+   over the controls above while it opens and closes. .queue-panel-inner
+   solves the same problem for itself with visibility; the tabs sit outside
+   it, so this clip belongs to the panel. */
+.queue-panel {
+  overflow: hidden;
+}
+
+.queue-panel:not(.is-open) .panel-tabs {
+  visibility: hidden;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -3009,6 +3033,79 @@ audio {
   .queue-panel-inner,
   .player-art {
     transition: none;
+  }
+}
+
+/* Not a layout box on a phone: the card's children stay its own direct flex
+   items, so everything above — the artwork giving up height for the queue,
+   the drag-to-close — works exactly as it did. This wrapper exists only for
+   the desktop rule below. */
+.player-main {
+  display: contents;
+}
+
+/* Desktop: the queue is not something you open.
+ *
+ * On a phone the panel is a drawer because there is one column and the
+ * artwork has to give up its height for it. A wide screen has a whole empty
+ * half instead, so the panel simply lives there, already open, from the
+ * moment the player does — and the toggle that opened it has nothing left
+ * to do.
+ *
+ * 900px is where 380px of player plus a track list wide enough to read stop
+ * competing for the same space. Below it, everything above still applies
+ * unchanged.
+ */
+@media (min-width: 900px) {
+  .player-card {
+    max-width: 980px;
+    flex-direction: row;
+    align-items: stretch;
+    gap: var(--space-7);
+    justify-content: center;
+  }
+
+  .player-main {
+    display: flex;
+    flex-direction: column;
+    justify-content: safe center;
+    /* The width the whole card used to be, so the left half is the player
+       people already know rather than a stretched version of it. */
+    flex: 0 0 380px;
+    min-width: 0;
+  }
+
+  /* Open, and not animating: flex-grow is the drawer's mechanism and there
+     is no drawer here. */
+  .queue-panel {
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: 460px;
+    align-self: center;
+    /* The list is the tall thing on this screen; cap it against the viewport
+       so a long queue scrolls inside the panel instead of stretching the
+       card past the fold. */
+    max-height: min(680px, 100%);
+    transition: none;
+  }
+
+  .queue-panel-inner {
+    visibility: visible;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    transition: none;
+  }
+
+  /* Nothing above the tabs to separate them from — the border and the gap
+     were there to divide the panel from the controls it sat under. */
+  .panel-tabs {
+    margin-top: 0;
+    border-top: none;
+    padding-top: 0;
+  }
+
+  #queue-toggle {
+    display: none;
   }
 }
 
@@ -3023,19 +3120,32 @@ audio {
   color: var(--accent);
 }
 
-.queue-heading {
-  margin: 0 0 var(--space-2);
+/* The panel's two views. This replaced the queue's own <h2>: with a second
+   view to reach, the heading had to become a control, so it kept the
+   heading's size and letterspacing and gained a selected state. */
+.panel-tab {
+  background: none;
+  border: none;
+  padding: 0 0 var(--space-2);
+  font: inherit;
   font-size: var(--text-xs);
   font-weight: 700;
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--text-muted);
+  cursor: pointer;
+  /* Transparent rather than absent, so selecting a tab doesn't move the
+     rows underneath it by the height of a border. */
+  border-bottom: 2px solid transparent;
 }
 
-/* The second heading follows a list, so it needs room the first one doesn't. */
-.queue-heading + .track-row + .queue-heading,
-.track-row + .queue-heading {
-  margin-top: var(--space-5);
+.panel-tab:hover {
+  color: var(--text-hover);
+}
+
+.panel-tab.is-selected {
+  color: var(--text-primary);
+  border-bottom-color: var(--accent);
 }
 
 .queue-empty {
@@ -3043,6 +3153,45 @@ audio {
   color: var(--text-muted);
   font-size: var(--text-sm);
   line-height: 1.55;
+}
+
+/* Timed lyrics. Dim by default and bright on the current line, which is the
+   convention everywhere this exists — the whole point is being able to find
+   your place at a glance without reading. */
+.lyrics-body {
+  padding-bottom: var(--space-6);
+}
+
+.lyrics-line {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-lg);
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--text-disabled);
+  transition: color 180ms ease;
+}
+
+.lyrics-line.is-active {
+  color: var(--text-primary);
+}
+
+.lyrics-source {
+  margin: var(--space-5) 0 0;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.lyrics-empty {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: 1.55;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lyrics-line {
+    transition: none;
+  }
 }
 
 .volume-group {
@@ -3183,6 +3332,33 @@ audio {
 .player-overlay.is-queue-open .player-art,
 .player-overlay.is-queue-open .player-meta {
   touch-action: none;
+}
+
+/* Undoing the three drawer rules above on a wide screen, where the panel is
+   not a drawer (see the min-width: 900px block by .player-main).
+   `is-queue-open` is always set there — it is what "this panel is showing"
+   means, and setQueueOpen forces it — so all three would otherwise apply:
+   the artwork would sit permanently half-closed with nothing gained by it,
+   a mouse drag on the cover would try to dismiss a panel that can't close,
+   and the overlay would refuse to scroll on a short window.
+
+   Deliberately here rather than in that block: these three selectors match
+   the ones directly above at equal specificity, so the override has to come
+   after them in the file to win. Moving it back up silently reinstates the
+   half-height cover — which is exactly how it was found. */
+@media (min-width: 900px) {
+  .player-overlay.is-queue-open .player-art {
+    max-height: 340px;
+  }
+
+  .player-overlay.is-queue-open .player-art,
+  .player-overlay.is-queue-open .player-meta {
+    touch-action: auto;
+  }
+
+  .player-overlay.is-queue-open {
+    overflow-y: auto;
+  }
 }
 
 

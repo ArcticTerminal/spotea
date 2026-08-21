@@ -14,7 +14,8 @@
 
    Filled by GET /partials/queue, which is handed the ids by the client —
    the queue's order lives in the browser, not the database. #}
-<h2 class="queue-heading">Queue</h2>
+{# No heading of its own: the panel's tab strip says which of the two views
+   this is (see _player_overlay.html). #}
 {% if queue_items %}
 {% for item in queue_items %}
 {% with index = loop.index, show_channel = true %}

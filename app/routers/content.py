@@ -13,8 +13,9 @@ from app.images import needs_thumbnail_caching
 from app.models import Content, User
 from app.page_context import playlist_filter
 from app.progress import ProgressRegistry
-from app.schemas import ContentOut, FavoriteOut, QueueOut, StatusOut
+from app.schemas import ContentOut, FavoriteOut, LyricsOut, QueueOut, StatusOut
 from app.services.artist_sync import cache_thumbnail
+from app.services.lyrics import lyrics_for
 from app.timeutil import utcnow
 from app.youtube.urls import VIDEO_ID_RE
 
@@ -264,6 +265,22 @@ def remove_favorite(
     content.is_favorite = False
     db.commit()
     return FavoriteOut(id=content.id, is_favorite=content.is_favorite)
+
+
+@router.get("/{content_id}/lyrics", response_model=LyricsOut)
+def track_lyrics(
+    content_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)
+) -> LyricsOut:
+    """This track's timed lyrics, for the player panel's Lyrics tab.
+
+    Only ever reached by opening that tab. Nothing calls this when a track
+    starts playing, because a cache miss costs two live YouTube requests and
+    most tracks turn out to have no lyrics — see services/lyrics.py.
+
+    `lines: null` is a normal answer ("this track has none"), not an error.
+    """
+    content = _get_content_or_404(db, content_id, user.id)
+    return LyricsOut(**lyrics_for(db, content.video_id))
 
 
 @router.get("/{content_id}/stream")
