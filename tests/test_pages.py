@@ -73,19 +73,40 @@ def test_home_renders_every_shelf_and_the_library_grid(client, db_session):
 
     assert res.status_code == 200
     body = res.text
-    assert "Fresh Upload" in body  # New uploads shelf
+    # Not "Fresh Upload": Home's "New releases" shelf is releases read off
+    # Artist.release_snapshot now, not is_new_upload Content rows — see
+    # page_context._new_releases. That row is still reachable through
+    # Library's own New releases playlist.
     assert "A Favorite" in body  # Favorites shelf
     assert "Played And Downloaded" in body  # Recently played shelf
     assert "Page Test Channel" in body  # Library channel card + Home chip
 
 
-def test_home_renders_for_an_empty_library(client):
-    """The "no content yet" path is a different branch of index.html than
-    the one every seeded test takes."""
+def test_home_offers_onboarding_to_a_brand_new_library(client):
+    """Nothing followed and no interests listed: every shelf on this page and
+    most of Explore has nothing to build from, so Home asks what the user
+    listens to instead of naming a tab and leaving it there. Interests are
+    what Explore's Playlists shelf is built from — see interests.py."""
     res = client.get("/")
 
     assert res.status_code == 200
-    assert "add a channel in the Explore tab" in res.text
+    assert 'id="onboarding"' in res.text
+    assert "What do you listen to?" in res.text
+    assert 'data-genre="Rock"' in res.text
+
+
+def test_a_library_that_has_been_started_gets_no_onboarding(client, db_session):
+    """One interest is enough to mean "this person has been here" — the panel
+    would otherwise come back on every visit until something is played."""
+    from app.models import User
+
+    db_session.query(User).filter(User.id == 1).update({"interests": "rock"})
+    db_session.commit()
+
+    body = client.get("/").text
+
+    assert 'id="onboarding"' not in body
+    assert "Nothing played yet" in body
 
 def test_channel_avatars_are_lazy_loaded(client, db_session):
     """70 eager image requests were measured on a real, heavy library —

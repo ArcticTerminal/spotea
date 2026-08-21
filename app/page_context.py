@@ -24,8 +24,9 @@ from app.content_query import (
     query_content_page,
 )
 from app.images import needs_thumbnail_caching
-from app.models import Artist, Content
-from app.services.artist_sync import cache_thumbnail
+from app.interests import SUGGESTED_GENRES
+from app.models import Artist, Content, User
+from app.services.artist_sync import cache_thumbnail, snapshot_releases
 from app.services.initial_sync import syncing_artist_ids
 from app.storage import collect_usage, usage_summary
 
@@ -52,6 +53,59 @@ def queue_thumbnail_caching(background_tasks: BackgroundTasks, items: Iterable[C
             continue
         seen.add(item.video_id)
         background_tasks.add_task(cache_thumbnail, item.video_id, item.thumbnail_url)
+
+
+def _new_releases(db: Session, user_id: int) -> list[dict]:
+    """Home's "New releases" shelf: what the artists you follow have put out,
+    read entirely off `Artist.release_snapshot`.
+
+    This replaced a shelf of Content rows flagged `is_new_upload`, which only
+    ever held releases that appeared *after* the follow and expired after
+    fourteen days — so on a library where the follows are recent it showed
+    almost nothing, and on a settled one it showed nothing at all. Measured
+    on the live database before this was written: nine such rows existed,
+    six of them belonging to an artist no longer followed, leaving three
+    cards that would all have aged out within a fortnight.
+
+    It cannot be fixed by sorting Content rows by date instead, because the
+    app has no release dates for tracks: `Content.published_at` records when
+    this app first saw a track, and every row for a followed artist on that
+    same database read as one of the last three days. The only place a real
+    ordering exists is the artist page, which lists releases newest first
+    and reports a year.
+
+    **No network.** An earlier design fetched each followed artist's
+    releases live, and was rejected for exactly that — Home is rendered
+    entirely from the database and putting a request in front of it is a
+    different kind of page. Nothing is fetched here either: the sync already
+    reads the artist page and now keeps the title, year, kind and cover it
+    was throwing away (see services/artist_sync.snapshot_releases).
+
+    Interleaved across artists before sorting, for the same reason Explore's
+    shelves are (see services/recommendations._merge_from_followed): a
+    prolific artist with thirty releases this year would otherwise fill
+    every slot and the rest would never appear.
+    """
+    artists = followed_artists(db, user_id).all()
+    per_artist = [
+        [
+            {**entry, "artist_name": artist.name, "artist_id": artist.id}
+            for entry in snapshot_releases(artist.release_snapshot)
+        ]
+        for artist in artists
+    ]
+
+    merged: list[dict] = []
+    for position in range(max((len(items) for items in per_artist), default=0)):
+        for items in per_artist:
+            if position < len(items):
+                merged.append(items[position])
+
+    # Year is the finest date YouTube Music reports on this surface. Stable,
+    # so releases sharing a year keep the round-robin order above rather
+    # than collapsing back into per-artist runs.
+    merged.sort(key=lambda release: release.get("year") or "", reverse=True)
+    return merged[:HOME_SHELF_LIMIT]
 
 
 def _shelf_query(db: Session, user_id: int):
@@ -81,16 +135,22 @@ def home_context(db: Session, user_id: int) -> dict:
 
     return {
         "home_recent_artists": recent_artists,
+        # First run: nothing followed and no interests listed, so every shelf
+        # on this page and most of Explore has nothing to build from. Derived
+        # rather than stored — a "has been onboarded" column would need a
+        # migration (create_all adds tables to an existing database, never
+        # columns), and this answers the same question from data that is
+        # already there. It also means it comes back if someone empties their
+        # library, which is the moment it is useful again.
+        "show_onboarding": (
+            not recent_artists
+            and not (db.query(User.interests).filter(User.id == user_id).scalar() or "").strip()
+        ),
+        "suggested_genres": SUGGESTED_GENRES,
         # Drives the "nothing here yet" branch — a cheap existence check
         # rather than counting anything.
         "has_content": db.query(Content.id).filter(Content.user_id == user_id).first() is not None,
-        "home_new_uploads": (
-            _shelf_query(db, user_id)
-            .filter(new_upload_filter())
-            .order_by(Content.published_at.desc())
-            .limit(HOME_SHELF_LIMIT)
-            .all()
-        ),
+        "home_new_releases": _new_releases(db, user_id),
         # Not built on _shelf_query: an Explore preview that's actually been
         # played earns a spot here even though it's still is_preview (never
         # favorited) — otherwise playing something from Explore and
@@ -115,7 +175,10 @@ def home_context(db: Session, user_id: int) -> dict:
     }
 
 
-HOME_SHELF_KEYS = ("home_new_uploads", "home_recently_played", "home_favorites")
+# Deliberately without home_new_releases: those are releases to browse, not
+# Content rows, so there is no thumbnail of ours to cache for them (their
+# covers are proxied straight from YouTube Music, see _proxied_cover_url).
+HOME_SHELF_KEYS = ("home_recently_played", "home_favorites")
 
 
 def home_shelf_items(context: dict) -> list[Content]:

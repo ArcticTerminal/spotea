@@ -303,9 +303,37 @@ function pageFromHref(href) {
   return match ? Number(match[1]) : 1;
 }
 
+/** Opens a release card, wherever it was rendered — an artist's profile or
+ *  Home's "New releases" shelf.
+ *
+ *  Marked busy for the duration, because what this click does isn't decided
+ *  until the answer arrives: a multi-track release swaps the panel in
+ *  (visible straight away), but a single plays and leaves the page where it
+ *  was, and without this the tap would look ignored. */
+function openReleaseCard(card) {
+  card.classList.add("is-loading");
+  openDetail("yt-release", card.dataset.releaseId).finally(() => {
+    card.classList.remove("is-loading");
+  });
+}
+
 export function setupDetailPanel() {
   const panel = document.getElementById("detail-panel");
   if (!panel) return;
+
+  // Home's "New releases" shelf holds the same cards the artist profile
+  // does, so they need the same handler — and #detail-panel's listener below
+  // can't see them. Bound here rather than in home/overlay.js because that
+  // module can't import this one (it is imported *by* it), and rather than
+  // in home/library.js because opening a release is this module's job.
+  //
+  // No conflict with overlay.js's own Home click handler: that one requires
+  // an <a> to have been clicked, and a release card's only control is a
+  // <button>.
+  document.getElementById("tab-home")?.addEventListener("click", (event) => {
+    const releaseCard = event.target.closest(".release-card");
+    if (releaseCard) openReleaseCard(releaseCard);
+  });
 
   // Delegated, not bound to specific ids: swapFragmentHtml replaces
   // #detail-panel's children wholesale on every open/paginate, which would
@@ -357,14 +385,7 @@ export function setupDetailPanel() {
 
     const releaseCard = event.target.closest(".release-card");
     if (releaseCard) {
-      // Marked busy for the duration, because what this click does isn't
-      // decided until the answer arrives: a multi-track release swaps the
-      // panel in (visible straight away), but a single stays on this page
-      // until the player opens, and without this the tap would look ignored.
-      releaseCard.classList.add("is-loading");
-      openDetail("yt-release", releaseCard.dataset.releaseId).finally(() => {
-        releaseCard.classList.remove("is-loading");
-      });
+      openReleaseCard(releaseCard);
       return;
     }
 

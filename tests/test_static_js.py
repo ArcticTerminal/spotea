@@ -394,7 +394,10 @@ def test_a_release_card_opens_by_browse_id() -> None:
     music.ArtistRelease."""
     source = (JS_DIR / "home" / "detail.js").read_text()
 
-    assert 'openDetail("yt-release", releaseCard.dataset.releaseId)' in source
+    assert 'openDetail("yt-release", card.dataset.releaseId)' in source
+    # Reached from both places a release card is rendered: the artist profile
+    # (inside #detail-panel) and Home's "New releases" shelf.
+    assert source.count("openReleaseCard(") == 3
 
 
 def test_a_single_is_resolved_before_any_history_is_pushed() -> None:
@@ -545,3 +548,20 @@ def test_the_moods_shelf_does_not_promise_genres() -> None:
 
     assert "Moods &amp; genres" not in source
     assert '<h3 class="shelf-title">Moods</h3>' in source
+
+
+def test_onboarding_binds_once_to_a_region_that_survives_a_swap() -> None:
+    """The panel lives inside #home-shelves, which refreshFragments replaces
+    wholesale, so a listener on the panel itself dies on the first swap.
+
+    Re-binding after each swap was tried and was worse: the swap does not
+    always replace the node, so the same element ended up with two listeners
+    and every toggle immediately undid itself — which on screen is
+    indistinguishable from a click that never registered at all. Delegating
+    from #tab-home, which is never swapped, needs no re-binding.
+    """
+    source = (JS_DIR / "home" / "onboarding.js").read_text()
+
+    assert 'getElementById("tab-home")' in source
+    assert "onFragmentsSwapped" not in source, "re-binding is the bug, not the fix"
+    assert source.count("addEventListener") == 1

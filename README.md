@@ -10,8 +10,12 @@ from your browser — a personal, free alternative to a streaming subscription.
   artist returns their tracks rather than reaction videos and compilations.
 - Follow an artist and their releases start arriving. A background sync
   compares what YouTube Music lists for them against what it listed last
-  time; anything new lands on Home's **New releases** shelf. Only artists
-  can be followed — this app holds music and nothing else.
+  time, and Home's **New releases** shelf shows what your artists have put
+  out — read from what that sync already stored, so opening Home never waits
+  on the network. Only artists can be followed — this app holds music and
+  nothing else.
+- A brand new library asks what you listen to and fills Explore from the
+  answer, rather than handing you an empty page.
 - Open an artist and you get their page: popular songs, albums, singles and
   similar artists. Open an album or single and you get its tracks, with real
   durations and cover art.
