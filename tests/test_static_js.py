@@ -527,6 +527,36 @@ def test_the_pinned_panel_breakpoint_matches_the_stylesheet() -> None:
     assert "@media (min-width: 900px)" in css
 
 
+def test_a_remote_track_row_says_it_is_clickable() -> None:
+    """.track-link is an <a href> in _content_row.html but a <button> in
+    _remote_track_row.html, and a button's default cursor is an arrow. Every
+    row on a chart, album, mood or artist-release page is the remote one, so
+    without this they were the only tracks in the app that gave no sign of
+    being clickable, beside local rows that looked identical and did.
+
+    Asserted on button.track-link specifically: that block exists to strip
+    button chrome so the row reads as a link, and the cursor is the piece of
+    chrome it originally missed. A plain .track-link rule would also pass
+    here while leaving the button's own default in place."""
+    css = (JS_DIR.parent / "css" / "style.css").read_text()
+
+    start = css.index("button.track-link {")
+    assert "cursor: pointer" in css[start : css.index("}", start)]
+
+
+def test_the_desktop_panel_is_not_centred_against_the_card() -> None:
+    """The tab strip is the panel's first element, so a panel sized to its
+    own contents drifts up and down as the queue fills and empties, taking
+    Queue and Lyrics with it. Stretching pins them where a full panel would
+    have put them, which is the only place a tab strip may be."""
+    css = (JS_DIR.parent / "css" / "style.css").read_text()
+
+    desktop = css[css.index("@media (min-width: 900px) {") :]
+    panel = desktop[desktop.index(".queue-panel {") : desktop.index("}", desktop.index(".queue-panel {"))]
+    assert "align-self: stretch" in panel
+    assert "align-self: center" not in panel
+
+
 def test_moods_is_the_first_shelf_in_explore() -> None:
     """It is the only shelf that needs nothing followed and nothing typed,
     so on a library that has just been created it is the difference between

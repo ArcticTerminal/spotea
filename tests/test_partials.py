@@ -158,6 +158,27 @@ def test_library_fragment_counts_follow_the_data(client, db_session):
     assert "2 songs</span>" in after
 
 
+def test_new_releases_is_the_first_pinned_tile(client, db_session):
+    """Of the three pinned tiles it is the only one whose contents change
+    without the user doing anything — Favorites and Recently Played are both
+    records of something they just did. So it goes first: it is the tile
+    that answers the question the Library is opened with.
+
+    Asserted on positions rather than eyeballed, because the three are
+    interchangeable-looking blocks of markup and a later edit that adds a
+    fourth tile has no other reason to notice which one leads.
+    """
+    _seed(db_session)
+
+    body = _fragment_body(client.get("/partials/library").text, "library-grid")
+
+    assert (
+        body.index('data-detail-kind="new-uploads"')
+        < body.index('data-detail-kind="favorites"')
+        < body.index('data-detail-kind="recently-played"')
+    )
+
+
 def test_an_artists_library_card_opens_their_profile(client, db_session):
     """The card stands for the artist, so it opens the artist — albums,
     singles, what they just released — rather than the track list of
