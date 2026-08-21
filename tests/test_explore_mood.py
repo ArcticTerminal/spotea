@@ -1,5 +1,5 @@
 """A mood's playlists (GET /partials/detail/yt-mood/{params}), opened from
-Explore's "Moods & genres" row — see templates/_mood_panel.html.
+Explore's "Moods" row — see templates/_mood_panel.html.
 
 Both YouTube Music calls are monkeypatched out, same as
 test_explore_remote.py. What's under test: the params validation guarding
@@ -118,3 +118,19 @@ def test_yt_mood_route_requires_login():
         res = anonymous.get(f"/partials/detail/yt-mood/{PARAMS}", follow_redirects=False)
 
     assert res.status_code == 303
+
+
+def test_a_moods_playlists_render_as_a_grid_not_a_slider(client, fake_mood):
+    """Explore's shelves scroll sideways because each is one of several and
+    has to leave room for the ones below. In a mood's own panel the
+    playlists are the entire page, and one row of them with the rest
+    scrolled off made a full mood look nearly empty.
+
+    .shelf-row is also what home/scrollers.js binds drag-to-scroll to, so
+    this must not merely be styled differently — it has to be a different
+    class.
+    """
+    text = client.get(f"/partials/detail/yt-mood/{PARAMS}", params={"title": "Sad"}).text
+
+    assert 'class="mood-grid"' in text
+    assert 'class="shelf-row"' not in text

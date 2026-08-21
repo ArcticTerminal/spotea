@@ -791,3 +791,124 @@ def test_the_topic_channel_is_matched_regardless_of_case(client):
     profile = music.fetch_artist("UCaNrhBiXsXIM2epDl_kEzgQ", all_songs=False)
 
     assert profile.topic_channel_id == ARTIST_TOPIC_ID
+
+
+# --- Several countries' charts, blended ------------------------------------
+
+
+def _chart_artist(slug, title):
+    """A chart entry with a real-shaped browse id — _artist_result drops
+    anything that isn't a 24-character UC channel id."""
+    return {**CHART_ARTIST, "browseId": f"UC{slug}".ljust(24, "0"), "title": title}
+
+
+def _country_charts(**by_country):
+    """A get_charts stub that answers differently per country code."""
+
+    def respond(country):
+        return by_country.get(country, {"videos": [], "artists": []})
+
+    return respond
+
+
+def test_one_country_still_costs_one_request(client):
+    """The ordinary case must not pay for the blend it doesn't need."""
+    fake = client(get_charts=_country_charts(TR={"videos": [CHART_PLAYLIST], "artists": []}))
+
+    music.fetch_charts_for(["TR"])
+
+    assert len(fake.calls) == 1
+
+
+def test_charting_artists_are_taken_a_rank_at_a_time(client):
+    """Not one country's whole chart and then the next. Concatenating would
+    leave the first country owning every slot, which is the same failure the
+    global chart has by population — see fetch_charts_for."""
+    client(
+        get_charts=_country_charts(
+            TR={"videos": [], "artists": [
+                _chart_artist("tr1", "TR One"),
+                _chart_artist("tr2", "TR Two"),
+            ]},
+            US={"videos": [], "artists": [
+                _chart_artist("us1", "US One"),
+                _chart_artist("us2", "US Two"),
+            ]},
+        )
+    )
+
+    charts = music.fetch_charts_for(["TR", "US"])
+
+    assert [a.title for a in charts.artists] == ["TR One", "US One", "TR Two", "US Two"]
+
+
+def test_an_artist_charting_in_two_countries_gets_one_tile(client):
+    client(
+        get_charts=_country_charts(
+            TR={"videos": [], "artists": [_chart_artist("shared", "Shared")]},
+            US={"videos": [], "artists": [
+                _chart_artist("shared", "Shared"),
+                _chart_artist("us1", "US Only"),
+            ]},
+        )
+    )
+
+    charts = music.fetch_charts_for(["TR", "US"])
+
+    assert [a.title for a in charts.artists] == ["Shared", "US Only"]
+
+
+def test_a_country_with_a_shorter_chart_doesnt_stop_the_others(client):
+    client(
+        get_charts=_country_charts(
+            TR={"videos": [], "artists": [_chart_artist("tr1", "TR One")]},
+            US={"videos": [], "artists": [
+                _chart_artist("us1", "US One"),
+                _chart_artist("us2", "US Two"),
+            ]},
+        )
+    )
+
+    charts = music.fetch_charts_for(["TR", "US"])
+
+    assert [a.title for a in charts.artists] == ["TR One", "US One", "US Two"]
+
+
+def test_chart_playlists_are_interleaved_and_capped(client):
+    """A country chart carries three or four playlists, not the global
+    chart's two, so four countries overflow a twelve-tile shelf — and taking
+    them in country order dropped the last country listed entirely."""
+
+    def playlists(prefix, count):
+        return [
+            {**CHART_PLAYLIST, "playlistId": f"OLAK5uy_{prefix}{i}".ljust(34, "0"),
+             "title": f"{prefix} {i}"}
+            for i in range(count)
+        ]
+
+    client(
+        get_charts=_country_charts(
+            TR={"videos": playlists("TR", 4), "artists": []},
+            US={"videos": playlists("US", 4), "artists": []},
+            GB={"videos": playlists("GB", 4), "artists": []},
+            DE={"videos": playlists("DE", 4), "artists": []},
+        )
+    )
+
+    titles = [p.title for p in music.fetch_charts_for(["TR", "US", "GB", "DE"]).playlists]
+
+    assert len(titles) == 12, "the shelf's cap was not applied"
+    assert titles[:4] == ["TR 0", "US 0", "GB 0", "DE 0"]
+    # The country listed last still gets tiles, which is the whole point.
+    assert sum(t.startswith("DE") for t in titles) == 3
+
+
+def test_the_same_chart_playlist_in_two_countries_appears_once(client):
+    client(
+        get_charts=_country_charts(
+            TR={"videos": [CHART_PLAYLIST], "artists": []},
+            US={"videos": [CHART_PLAYLIST], "artists": []},
+        )
+    )
+
+    assert len(music.fetch_charts_for(["TR", "US"]).playlists) == 1

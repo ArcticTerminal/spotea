@@ -541,3 +541,60 @@ def test_recommendation_routes_require_login():
     with TestClient(app) as anonymous:
         assert anonymous.get("/recommendations", follow_redirects=False).status_code == 303
         assert anonymous.post("/recommendations/refresh", follow_redirects=False).status_code == 303
+
+
+# --- One artist must not own a shelf ---------------------------------------
+
+
+def test_similar_artists_interleaves_instead_of_draining_one_artist(client, db_session, fake_browse):
+    """The reported symptom was a shelf dominated by whoever was followed
+    most recently. The cause was walking each artist's list to exhaustion
+    and returning as soon as the shelf was full, so with a dozen slots and
+    lists this long the first artist filled it alone and the rest were never
+    read at all.
+    """
+    fake_browse()
+    _followed_with_related(
+        db_session, "UCfirst", *[_related_dict(f"UCfirst{i}", f"First {i}") for i in range(20)]
+    )
+    _followed_with_related(
+        db_session, "UCsecond", *[_related_dict(f"UCsecond{i}", f"Second {i}") for i in range(20)]
+    )
+
+    body = client.get("/recommendations").json()
+    ids = [a["channel_id"] for a in body["similar_artists"]]
+
+    assert ids, "the shelf came back empty"
+    assert any(i.startswith("UCsecond") for i in ids), "the second artist never got a slot"
+    # Strictly alternating, because both lists are longer than the shelf.
+    assert [i.startswith("UCfirst") for i in ids] == [i % 2 == 0 for i in range(len(ids))]
+
+
+def test_the_songs_shelf_interleaves_too(client, db_session, fake_browse):
+    """Same machinery, same complaint — see _merge_from_followed."""
+    fake_browse()
+    _followed_with_tracks(
+        db_session, "UCfirst", *[_track_dict(f"firstvid{i:03d}", f"First {i}") for i in range(20)]
+    )
+    _followed_with_tracks(
+        db_session, "UCsecond", *[_track_dict(f"secondvid{i:02d}", f"Second {i}") for i in range(20)]
+    )
+
+    body = client.get("/recommendations").json()
+    titles = [v["title"] for v in body["videos"]]
+
+    assert titles
+    assert any(t.startswith("Second") for t in titles), "the second artist never got a slot"
+
+
+def test_a_single_followed_artist_still_fills_the_shelf(client, db_session, fake_browse):
+    """Interleaving across one list is just that list — nothing about the
+    fix may cost a library with one artist its shelf."""
+    fake_browse()
+    _followed_with_related(
+        db_session, "UConly", *[_related_dict(f"UConly{i}", f"Only {i}") for i in range(20)]
+    )
+
+    body = client.get("/recommendations").json()
+
+    assert len(body["similar_artists"]) == 12

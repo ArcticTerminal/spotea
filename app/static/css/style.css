@@ -1918,6 +1918,27 @@ button.track-link {
   margin-bottom: 1.75rem;
 }
 
+/* A mood's playlists, stacking downward rather than scrolling sideways —
+   see _mood_panel.html for why this isn't a .shelf-row. Four across on a
+   wide screen, which is what the request was; auto-fill rather than a fixed
+   `repeat(4, …)` so the same rule gives two on a phone and three in
+   between, instead of four columns 80px wide.
+   minmax(0, 1fr) rather than minmax(0, auto): a grid track sized to its
+   content would let a long playlist title widen its own column. */
+.mood-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 0.75rem;
+  align-items: start;
+}
+
+@media (min-width: 480px) {
+  .mood-grid {
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 1rem;
+  }
+}
+
 /* Narrow phones: shrink the avatar and title so the row still has room for
    the detail-actions (Play/Shuffle) column on the right. Title/count/
    Unfollow already stack inside .channel-hero-info at every width. */
