@@ -522,3 +522,26 @@ def test_the_pinned_panel_breakpoint_matches_the_stylesheet() -> None:
 
     assert 'matchMedia("(min-width: 900px)")' in overlay
     assert "@media (min-width: 900px)" in css
+
+
+def test_moods_is_the_first_shelf_in_explore() -> None:
+    """It is the only shelf that needs nothing followed and nothing typed,
+    so on a library that has just been created it is the difference between
+    Explore being somewhere to start and Explore being a heading over
+    nothing."""
+    source = (JS_DIR / "home" / "explore.js").read_text()
+    shelves = source[source.index("const shelves = ["): source.index("].join(\"\")")]
+
+    calls = re.findall(r"(moodsShelfHtml|shelfHtml)\(", shelves)
+    assert calls[0] == "moodsShelfHtml", f"Moods is not first — order is {calls}"
+
+
+def test_the_moods_shelf_does_not_promise_genres() -> None:
+    """ytmusicapi fails to parse 25 of YouTube Music's 40 mood categories and
+    they are every entry under Genres (see music.MOOD_SECTION), so only the
+    moods section is listed. The old "Moods & genres" heading offered Rock
+    and Jazz and then showed neither."""
+    source = (JS_DIR / "home" / "explore.js").read_text()
+
+    assert "Moods &amp; genres" not in source
+    assert '<h3 class="shelf-title">Moods</h3>' in source

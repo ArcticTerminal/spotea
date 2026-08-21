@@ -111,7 +111,7 @@ All configuration is via environment variables (see `.env.example`):
 | `THUMBNAILS_DIR` | no | `/app/data/thumbnails` | Where cached song/album thumbnails are stored |
 | `AUDIO_FORMAT` | no | `m4a` | Audio format yt-dlp extracts to |
 | `SESSION_HTTPS_ONLY` | no | `false` | Marks the session cookie Secure — turn on once the app sits behind HTTPS |
-| `MUSIC_CHART_COUNTRY` | no | `ZZ` (global) | Two-letter country code for Explore's Charts shelf, e.g. `TR`, `US` |
+| `MUSIC_CHART_COUNTRIES` | no | `ZZ` (global) | Country codes for Explore's Charts shelf, comma separated — `TR`, or `TR,US,GB,DE` to blend several a rank at a time. The global chart is weighted by market size; naming countries is the only way to change that mix |
 | `HOST_PORT` | no | `8000` | Host port docker-compose publishes the app on (Docker only) |
 
 ## License

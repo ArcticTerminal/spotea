@@ -231,10 +231,10 @@ changes, or the Refresh button is pressed (`GET/POST /recommendations`,
 | shelf | source | cost |
 |---|---|---|
 | **Playlists** | YouTube Music playlist search, keyed on a sample of the typed interest list | a live search per sampled interest |
-| **Songs** | every followed artist's own `top_tracks` (§3), merged and deduped | none — already on disk |
-| **Artists you may like** | every followed artist's own `related_artists` (§3), merged and deduped | none — already on disk |
-| **Charts** / **Charting artists** | `MUSIC_CHART_COUNTRY`'s YouTube Music chart | one live request, shared by both |
-| **Moods & genres** | every category in YouTube Music's "Moods & moments" menu | one live request, playlists not fetched until a mood is opened |
+| **Songs** | every followed artist's own `top_tracks` (§3), interleaved a position at a time and deduped | none — already on disk |
+| **Artists you may like** | every followed artist's own `related_artists` (§3), interleaved a position at a time and deduped | none — already on disk |
+| **Charts** / **Charting artists** | each `MUSIC_CHART_COUNTRIES` entry's YouTube Music chart, blended a rank at a time | one live request per country, shared by both |
+| **Moods** (listed first) | every category in YouTube Music's "Moods & moments" menu | one live request, playlists not fetched until a mood is opened |
 
 Songs and Artists you may like used to both be interest-driven search too, the
 same way Playlists still is. Both were dropped: an interest is free text,
@@ -251,7 +251,7 @@ cost a query over local data, not a network call, so there's no reason to
 let them go stale with the rest of the batch. A profile with nothing
 followed gets neither shelf at all, with no seeded default.
 
-**Opening a mood.** Clicking one in "Moods & genres" opens
+**Opening a mood.** Clicking one in "Moods" opens
 `GET /partials/detail/yt-mood/{params}` — a panel of that mood's playlists
 (`templates/_mood_panel.html`, one more live request, paid only for the
 mood actually opened), rendered as a shelf of cards rather than a track
@@ -396,7 +396,7 @@ clears the flag, which is the manual "try again".
 
 **ytmusicapi is unofficial.** Its playlist parser already fails on 25 of
 YouTube Music's 40 mood/genre categories — every one of them under "Genres",
-plus one mood — measured live, which is why "Moods & genres" lists only the
+plus one mood — measured live, which is why the shelf is called "Moods" and lists only the
 "Moods & moments" section (`youtube/music.py`'s `MOOD_SECTION`); the other
 section would 500 the moment one of those categories was opened. A parser
 break takes out discovery; it cannot take out the library, because playback

@@ -85,6 +85,12 @@ MOOD_PLAYLIST_LIMIT = 24
 # The chart's artist list runs to 40. Same reasoning.
 CHART_ARTIST_LIMIT = 12
 
+# And the same cap on the chart playlists, which only matters once several
+# countries are blended: one country's chart carries three or four of them,
+# so four countries would otherwise be fourteen tiles in a shelf sized for
+# twelve.
+CHART_PLAYLIST_LIMIT = 12
+
 # How many tracks an artist page lists. Set above what YouTube Music will
 # ever hand over, so in practice it caps nothing and every artist fits on
 # the one page the remote detail panel has (there is no pagination there —
@@ -427,6 +433,73 @@ def fetch_charts(
         playlists=_playlist_results(charts.get("videos")),
         artists=[artist for artist in artists if artist is not None][:artist_limit],
     )
+
+
+def fetch_charts_for(
+    countries: list[str], artist_limit: int = CHART_ARTIST_LIMIT
+) -> Charts:
+    """Several countries' charts as one shelf pair, taken a rank at a time.
+
+    One country is the ordinary case and costs one request; this is what
+    makes more than one possible without the result being "country A's
+    chart, then country B's" stuck end to end.
+
+    **Why this exists rather than a filter.** The global chart ("ZZ") is
+    heavily weighted toward the most populous music markets — measured on
+    2026-08-21, nine of its top twenty artists were Indian playback singers
+    and the top five were all of them. There is no way to filter that: a
+    chart artist comes back as `browseId, rank, subscribers, thumbnails,
+    title, trend` and nothing else, so nothing in the response says which
+    market it charted in. Script detection on the name doesn't work either —
+    they are Latin-script ("Alka Yagnik") like everything else. Naming the
+    countries you want is the only mechanism the API actually supports.
+
+    Round-robin by rank, not concatenation: taking each country's #1, then
+    each country's #2, gives a shelf where every listed country is
+    represented near the top rather than the first one owning the whole
+    thing. Deduped by browse id, since the same artist charts in several
+    places and the second listing is not worth a tile.
+    """
+    if len(countries) == 1:
+        return fetch_charts(countries[0], artist_limit)
+
+    per_country = [fetch_charts(country, artist_limit) for country in countries]
+    return Charts(
+        # Interleaved like the artists, and for the same reason. A country
+        # chart carries three or four playlists, not the global chart's two
+        # ("Trending 20 Turkey", "Daily Top Music Videos - Turkey", "Top 100
+        # Music Videos Turkey", and in some countries "Top 100 Live
+        # Performances"), so four countries is fourteen tiles against a
+        # twelve-tile shelf — and taking them in country order meant the
+        # last country listed fell off the end entirely.
+        playlists=_round_robin(
+            [charts.playlists for charts in per_country], "playlist_id"
+        )[:CHART_PLAYLIST_LIMIT],
+        artists=_round_robin([charts.artists for charts in per_country], "channel_id")[
+            :artist_limit
+        ],
+    )
+
+
+def _round_robin(lists: list[list], identity: str) -> list:
+    """One from each list, then the next from each, until they run out.
+
+    Deduped by `identity`, since the same artist charts in several countries
+    and the second listing is not worth a tile.
+    """
+    merged = []
+    seen = set()
+    for position in range(max((len(items) for items in lists), default=0)):
+        for items in lists:
+            if position >= len(items):
+                continue
+            candidate = items[position]
+            key = getattr(candidate, identity)
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(candidate)
+    return merged
 
 
 @dataclass

@@ -55,7 +55,7 @@ from app.config import settings
 from app.interests import interests_signature, parse_interests
 from app.models import Artist, Content, RecommendationCache, User
 from app.timeutil import utcnow
-from app.youtube.music import fetch_charts, fetch_mood_categories
+from app.youtube.music import fetch_charts_for, fetch_mood_categories
 from app.youtube.music import search_playlists as search_music_playlists
 
 logger = logging.getLogger(__name__)
@@ -128,12 +128,15 @@ def empty_batch() -> dict:
 
 def _charts_shelves() -> dict:
     """The chart pair, which has nothing to do with anyone's interests — it
-    is what everyone in a country is listening to this week. Included in the
-    batch rather than served from a route of its own so it shares the cache,
-    the TTL and the refresh button that already exist for the shelves beside
-    it; the cost of that is one duplicated copy per user, which is a few
-    kilobytes of JSON against a whole second endpoint."""
-    charts = fetch_charts(settings.music_chart_country)
+    is what everyone in the charted countries is listening to this week.
+    Included in the batch rather than served from a route of its own so it
+    shares the cache, the TTL and the refresh button that already exist for
+    the shelves beside it; the cost of that is one duplicated copy per user,
+    which is a few kilobytes of JSON against a whole second endpoint.
+
+    Costs one request per configured country (see config.chart_countries),
+    which the batch's 30-minute TTL is what makes affordable."""
+    charts = fetch_charts_for(settings.chart_countries)
     return {
         "charts": [asdict(playlist) for playlist in charts.playlists],
         "chart_artists": [asdict(artist) for artist in charts.artists],
@@ -257,7 +260,12 @@ def _cached_batch(
 def _merge_from_followed(db: Session, user: User, column, exclude_ids: set[str], identity_field: str) -> list[dict]:
     """Shared machinery behind _similar_to_followed and _songs_from_followed:
     merge every followed artist's own stored JSON list (whichever column is
-    asked for), deduped by identity_field, capped at RESULTS_PER_SHELF.
+    asked for), deduped by identity_field, capped at RESULTS_PER_SHELF, and
+    interleaved a position at a time so no one artist can own the shelf.
+
+    Both callers get the interleaving, on purpose: they are the same shelf
+    shape with a different column behind them, and "dominated by one artist"
+    is the same complaint in either.
 
     Deliberately not part of `batch`/build_batch: unlike the searches and
     the browse builders, this costs nothing but a query over data this
@@ -274,14 +282,35 @@ def _merge_from_followed(db: Session, user: User, column, exclude_ids: set[str],
         Artist.user_id == user.id, Artist.followed.is_(True), column.isnot(None)
     )
 
-    seen = set(exclude_ids)
-    merged: list[dict] = []
+    per_artist: list[list[dict]] = []
     for (raw,) in rows:
         try:
             candidates = json.loads(raw)
         except (TypeError, ValueError):
             continue
-        for candidate in candidates:
+        if isinstance(candidates, list):
+            per_artist.append(candidates)
+
+    # Round-robin, not one artist at a time.
+    #
+    # This used to walk each artist's list to exhaustion and return the
+    # moment it had RESULTS_PER_SHELF, which meant the first artist's list
+    # filled the shelf on its own and every artist after them was never
+    # read at all. With a dozen slots and lists this long, "the first
+    # artist" was in practice the only artist — the reported symptom being
+    # that the shelf is dominated by whoever was followed most recently.
+    #
+    # Flat, deliberately: no weighting by play count or recency. The
+    # complaint is that one artist owns the shelf, and one from each in turn
+    # is the whole of the fix. A weight would soften that rather than remove
+    # it, and would need a reason to prefer any particular curve.
+    seen = set(exclude_ids)
+    merged: list[dict] = []
+    for position in range(max((len(items) for items in per_artist), default=0)):
+        for items in per_artist:
+            if position >= len(items):
+                continue
+            candidate = items[position]
             identity = candidate.get(identity_field)
             if not identity or identity in seen:
                 continue

@@ -222,18 +222,25 @@ function moodChipHtml(mood) {
   `;
 }
 
-/** Moods & genres: a chip row rather than shelfHtml's card grid. A mood
- *  category has no artwork of its own — only the playlists inside it do —
- *  so a text chip (the same one Home's "Recently followed" row uses) reads
- *  better than an image card with nothing to show. Clicking one opens all
- *  of that mood's playlists (see templates/_mood_panel.html), not a track
- *  list, so the user picks a playlist from there rather than this app
- *  guessing which one they meant. */
+/** Moods: a chip row rather than shelfHtml's card grid. A mood category has
+ *  no artwork of its own — only the playlists inside it do — so a text chip
+ *  (the same one Home's "Recently followed" row uses) reads better than an
+ *  image card with nothing to show. Clicking one opens all of that mood's
+ *  playlists (see templates/_mood_panel.html), not a track list, so the
+ *  user picks a playlist from there rather than this app guessing which one
+ *  they meant.
+ *
+ *  Called "Moods" and not "Moods & genres" because there are no genres in
+ *  it: ytmusicapi fails to parse 25 of YouTube Music's 40 categories and
+ *  they are every single entry under Genres (see music.MOOD_SECTION), so
+ *  only the moods section is listed. The old name promised Rock and Jazz
+ *  and then showed neither. If that parser is ever fixed the name comes
+ *  back with them. */
 function moodsShelfHtml(moods) {
   if (!moods.length) return "";
   return `
     <div class="shelf">
-      <div class="shelf-header"><h3 class="shelf-title">Moods &amp; genres</h3></div>
+      <div class="shelf-header"><h3 class="shelf-title">Moods</h3></div>
       <div class="channel-row">${moods.map(moodChipHtml).join("")}</div>
     </div>
   `;
@@ -244,6 +251,13 @@ function renderRecommendations(data) {
   if (!body) return;
 
   const shelves = [
+    // Moods first, and it is the only shelf that can't be empty: it needs
+    // nothing followed and nothing typed, so on a library that has just
+    // been created it is the difference between Explore being a place to
+    // start and Explore being a blank page with a heading on it. The
+    // shelves below it are all "here is more of what you already have",
+    // which is exactly what a new library hasn't got yet.
+    moodsShelfHtml(data.moods),
     // Songs and Artists used to both be typed-interest search, same as
     // Playlists still is — and both went badly for anything that wasn't
     // literally a song title or an artist's name, since an interest was
@@ -260,10 +274,9 @@ function renderRecommendations(data) {
     // keeps the "Similar artists" name, because there it really is one.
     // The `similar_artists` payload key is unchanged — this is copy only.
     shelfHtml("Artists you may like", data.similar_artists, artistCardHtml),
-    // Then what everyone gets: this week's charts and every mood to browse.
+    // Then what everyone gets regardless: this week's charts.
     shelfHtml("Charts", data.charts, recPlaylistCardHtml),
     shelfHtml("Charting artists", data.chart_artists, artistCardHtml),
-    moodsShelfHtml(data.moods),
   ].join("");
 
   body.innerHTML =
