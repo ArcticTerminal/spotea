@@ -3,6 +3,8 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.images import track_cover
+
 if TYPE_CHECKING:  # import cycle otherwise — models has no reason to know about schemas
     from app.models import Content
 
@@ -65,12 +67,17 @@ class ContentOut(BaseModel):
         """Build from a Content row. Requires `content.artist` to be loaded —
         every caller uses joinedload(Content.artist) for exactly this reason.
 
-        Not `model_validate`: two of the fields aren't columns. channel_title
-        comes from the related Artist, and is_played is a derived boolean rather
-        than the raw last_played_at timestamp (the client only ever needs
-        "has this been played", and the timestamp isn't the client's business).
-        This was written out field-by-field at both call sites, which is a
-        long list of trivially-forgettable lines to keep in sync.
+        Not `model_validate`: three of the fields aren't columns.
+        channel_title comes from the related Artist, is_played is a derived
+        boolean rather than the raw last_played_at timestamp (the client only
+        ever needs "has this been played", and the timestamp isn't the
+        client's business), and thumbnail_url is what to *draw* rather than
+        what is stored — a track with no cover of its own falls back to its
+        video still (see images.track_cover). That last one is why this can't
+        be model_validate: the player overlay and the mini player set their
+        artwork straight from this payload, so a raw column here meant a
+        blank square in the player for a track whose row and card, rendered
+        through the same fallback in a template, showed a cover.
         """
         return cls(
             id=content.id,
@@ -78,7 +85,7 @@ class ContentOut(BaseModel):
             channel_title=content.artist.name,
             video_id=content.video_id,
             title=content.title,
-            thumbnail_url=content.thumbnail_url,
+            thumbnail_url=track_cover(content),
             duration_seconds=content.duration_seconds,
             published_at=content.published_at,
             status=content.status,

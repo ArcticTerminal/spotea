@@ -3123,25 +3123,53 @@ audio {
     max-width: 460px;
     /* Full height of the card, not centred against it. The tab strip is the
        panel's first element, so a panel sized to its own contents put Queue
-       and Lyrics halfway down the screen whenever the queue was empty or
-       the track had no lyrics — the two tabs drifted up and down as their
+       and Lyrics halfway down the screen whenever the queue was empty or the
+       track had no lyrics — the two tabs drifted up and down as their
        contents changed, which is exactly what a tab strip must not do.
-       Stretched, they stay where the full panel would have put them.
-       (Clamped by the max-height below, a stretched item aligns to the
-       start of the cross axis, which is what pins them to the top.) */
+
+       Stretching is only half of it, and on its own it aimed at the wrong
+       box: the card used to fill the whole overlay, so the panel started
+       104px above Collapse instead of level with it. The other half is the
+       overlay centring the card (`align-items: safe center`, further down)
+       and the panel no longer contributing height of its own — see
+       .queue-panel-inner just below. */
     align-self: stretch;
-    /* The list is the tall thing on this screen; cap it against the viewport
-       so a long queue scrolls inside the panel instead of stretching the
-       card past the fold. */
-    max-height: min(680px, 100%);
     transition: none;
   }
 
+  /* The panel stops deciding how tall the card is.
+   *
+   * The tab strip is its only in-flow content here; the list below is taken
+   * out of flow (see the rule after this one). So the card's height comes
+   * from the player column alone, and a panel stretched to that card is
+   * exactly as tall as the player beside it — which is what keeps Queue and
+   * Lyrics level with Collapse whether the queue holds nothing or forty
+   * tracks. Measured both ways: tab strip and Collapse both at 128.
+   *
+   * This replaced a `max-height: min(680px, 100%)` cap, which quietly stopped
+   * capping anything the moment the card stopped having a definite height —
+   * a percentage max-height against an auto-height parent computes to none.
+   * The panel then grew to its full 40-track length and dragged the card
+   * with it. */
   .queue-panel-inner {
     visibility: visible;
-    overflow-y: auto;
-    overscroll-behavior: contain;
+    position: relative;
+    overflow: hidden;
     transition: none;
+  }
+
+  /* Both bodies, whichever is showing. `inset: 0` rather than a top offset
+     past the tabs: this sits inside .queue-panel-inner, which is already
+     below them. No display of its own, so [hidden] on the unselected one
+     still hides it (see the icon-toggle rules for where that has bitten). */
+  .queue-panel-inner > [role="tabpanel"] {
+    position: absolute;
+    inset: 0;
+    overflow-y: auto;
+    /* The overlay behind this can't scroll while the panel is open, but the
+       page behind *that* can — without this a flick that runs off the end of
+       the queue scrolls Home underneath the player. */
+    overscroll-behavior: contain;
   }
 
   /* Nothing above the tabs to separate them from — the border and the gap
@@ -3395,6 +3423,28 @@ audio {
    after them in the file to win. Moving it back up silently reinstates the
    half-height cover — which is exactly how it was found. */
 @media (min-width: 900px) {
+  /* The card hugs its contents instead of filling the overlay.
+   *
+   * Stretched, the card was the height of the window and the panel beside it
+   * stretched with it — so the Queue/Lyrics tabs sat at the very top while
+   * the player's own first element, Collapse, sat 104px lower (measured:
+   * card top 24, Collapse 128). Two columns of one card starting at two
+   * different heights.
+   *
+   * `safe center` rather than plain `center`, which keeps the reason the
+   * base rule says `stretch`: a centred flex item taller than its scroll
+   * container overflows in *both* directions and the top becomes unreachable
+   * at any scroll position. `safe` falls back to start exactly then, so the
+   * short-window case is still correct.
+   *
+   * Deliberately in this block rather than the earlier min-width: 900px one:
+   * .player-overlay's base rule is further down the file than that block, so
+   * an override up there loses to it at equal specificity — the same trap the
+   * comment above this block describes. */
+  .player-overlay {
+    align-items: safe center;
+  }
+
   .player-overlay.is-queue-open .player-art {
     max-height: 340px;
   }
