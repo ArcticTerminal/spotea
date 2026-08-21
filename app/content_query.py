@@ -7,55 +7,13 @@ upload" is, and they used to say so in four separate expressions that
 could drift apart independently.
 """
 
-from datetime import datetime, timedelta
 
-from sqlalchemy import and_, or_
+from sqlalchemy import or_
 from sqlalchemy.orm import Query, Session, joinedload
-from sqlalchemy.sql.elements import ColumnElement
 
 from app.models import Artist, Content
-from app.timeutil import utcnow
 
 DEFAULT_PAGE_SIZE = 50
-
-# How far back "New releases" reaches — is_new_upload alone (see models.py's
-# Content.is_new_upload) only means "RSS-sourced, not backfilled," which
-# without this stays true forever, so a channel's uploads from months ago
-# never age out of the shelf/list.
-NEW_UPLOAD_MAX_AGE = timedelta(days=14)
-
-
-def new_upload_cutoff() -> datetime:
-    # Naive UTC, matching Content.published_at's own convention (see e.g.
-    # routers/explore.py's add_single_video) — SQLite has no timezone type, and
-    # mixing naive/aware datetimes in the same column makes string comparison
-    # unreliable.
-    return utcnow() - NEW_UPLOAD_MAX_AGE
-
-
-def new_upload_filter() -> ColumnElement[bool]:
-    """What "New releases" means, in one place: sync-sourced, recent, and from
-    a channel still followed.
-
-    All three conditions are load-bearing and none is implied by the others.
-    is_new_upload alone never expires (see NEW_UPLOAD_MAX_AGE). The
-    Artist.followed check covers two separate cases: Explore-added content
-    keeps a live artist_id even after being favorited, but that artist is
-    only a placeholder (see routers/explore.py's _get_or_create_placeholder);
-    and a channel that was unfollowed while some of its content was kept
-    (see routers/artists.py's delete_feed) leaves is_new_upload=True rows
-    behind that shouldn't keep surfacing as if still followed.
-
-    Expressed as `Content.artist.has(...)` rather than a join so it composes
-    into any query over Content without the caller having to arrange for
-    Artist to be joined first.
-    """
-    return and_(
-        Content.is_new_upload.is_(True),
-        Content.published_at >= new_upload_cutoff(),
-        Content.artist.has(Artist.followed.is_(True)),
-    )
-
 
 def followed_artists(db: Session, user_id: int | None = None) -> Query[Artist]:
     """Feeds actually followed, newest first.
@@ -104,16 +62,10 @@ def _content_query(
     if artist_id is not None:
         query = query.filter(Content.artist_id == artist_id)
 
-    # Only the filters that actually match on a Artist column need the join.
-    # __new_uploads__ used to be in here too, back when it spelled its
-    # follow check out as `Artist.followed.is_(True)`; new_upload_filter()
-    # carries its own EXISTS instead, so it composes without one.
-    needs_feed_join = filter not in (
-        "",
-        "__favorites__",
-        "__played__",
-        "__new_uploads__",
-    )
+    # Only the filters that actually match on an Artist column need the join,
+    # which after __new_uploads__ was removed means only the free-text search
+    # below (it matches on Artist.name).
+    needs_feed_join = filter not in ("", "__favorites__", "__played__")
     if needs_feed_join:
         query = query.join(Artist)
 
@@ -121,8 +73,6 @@ def _content_query(
         query = query.filter(Content.is_favorite.is_(True))
     elif filter == "__played__":
         query = query.filter(Content.last_played_at.isnot(None))
-    elif filter == "__new_uploads__":
-        query = query.filter(new_upload_filter())
     elif filter:
         # Substring, case-insensitive, against either field: this is the
         # free-text search box, not a channel picklist, so a search for a

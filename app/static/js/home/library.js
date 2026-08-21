@@ -167,11 +167,10 @@ async function refreshArtists(alsoRefresh) {
   ]);
 
   // Always re-render, regardless of new_content_count: that figure only
-  // counts rows this exact call inserted, not rows apply_feed_data re-marked
-  // is_new_upload on an already-existing row (its "self-heal" path — see
-  // feed_sync.py), nor content some other trigger (the background refresh
-  // job, another tab, another device) had already added since this page was
-  // rendered. This used to be a full page reload, which meant saving and
+  // counts rows this exact call inserted, not the release snapshots the same
+  // sync rewrote (which is what both "New releases" surfaces read), nor
+  // content some other trigger (the background refresh job, another tab,
+  // another device) had already added since this page was rendered. This used to be a full page reload, which meant saving and
   // restoring playback around it; re-rendering the shelves in place leaves
   // the player alone entirely.
   if (ok) await refreshFragments();

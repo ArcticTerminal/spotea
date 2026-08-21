@@ -39,7 +39,6 @@ def _seed(db_session, *, followed=True):
             title="Fresh Upload",
             published_at=now - timedelta(days=1),
             duration_seconds=305,
-            is_new_upload=True,
         ),
         Content(
             artist_id=artist.id,
@@ -143,8 +142,10 @@ def test_the_duration_and_filesize_template_filters_are_registered(client, db_se
 
     assert "MB" in client.get("/").text  # filesize, from the storage summary
 
-    rows = client.get("/partials/detail/playlist/new-uploads").text
-    assert "5:05" in rows  # duration, from duration_seconds=305
+    # Favorites rather than New releases: that one stopped being a track
+    # list — it holds releases now, which have no duration to render.
+    rows = client.get("/partials/detail/playlist/favorites").text
+    assert "1:01" in rows  # duration, from duration_seconds=61
 
 
 def test_channel_and_playlist_pages_redirect_to_their_hash_route(client):

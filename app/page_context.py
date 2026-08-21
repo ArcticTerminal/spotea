@@ -19,7 +19,6 @@ from app.content_query import (
     DEFAULT_PAGE_SIZE,
     count_content,
     followed_artists,
-    new_upload_filter,
     query_content_by_ids,
     query_content_page,
 )
@@ -29,6 +28,7 @@ from app.models import Artist, Content, User
 from app.services.artist_sync import cache_thumbnail, snapshot_releases
 from app.services.initial_sync import syncing_artist_ids
 from app.storage import collect_usage, usage_summary
+from app.timeutil import utcnow
 
 HOME_SHELF_LIMIT = 12
 HOME_CHANNEL_LIMIT = 8
@@ -55,7 +55,7 @@ def queue_thumbnail_caching(background_tasks: BackgroundTasks, items: Iterable[C
         background_tasks.add_task(cache_thumbnail, item.video_id, item.thumbnail_url)
 
 
-def _new_releases(db: Session, user_id: int) -> list[dict]:
+def _new_releases(db: Session, user_id: int, limit: int | None = HOME_SHELF_LIMIT) -> list[dict]:
     """Home's "New releases" shelf: what the artists you follow have put out,
     read entirely off `Artist.release_snapshot`.
 
@@ -81,16 +81,35 @@ def _new_releases(db: Session, user_id: int) -> list[dict]:
     reads the artist page and now keeps the title, year, kind and cover it
     was throwing away (see services/artist_sync.snapshot_releases).
 
-    Interleaved across artists before sorting, for the same reason Explore's
-    shelves are (see services/recommendations._merge_from_followed): a
-    prolific artist with thirty releases this year would otherwise fill
-    every slot and the rest would never appear.
+    **This calendar year only.** The year is the only date YouTube Music
+    publishes — measured across both surfaces that could carry one, there is
+    no month, no day, no timestamp and no ISO date anywhere — so "new" can
+    mean nothing finer than this. Without the filter the pool is each
+    artist's last ~20 releases going back a decade, and an artist who last
+    put something out in 2016 would eventually surface it here.
+
+    One caveat that comes with it and cannot be worked around: `year` is the
+    year of *this listing*, not of the original recording. A 2026 reissue of
+    a 1969 album reports 2026 (measured: Jimmy Cliff's, whose own description
+    calls it a 1969 album). Nothing in the response distinguishes the two.
+
+    Interleaved across artists, for the same reason Explore's shelves are
+    (see services/recommendations._merge_from_followed): a prolific artist
+    with thirty releases this year would otherwise fill every slot and the
+    rest would never appear. No sort after that — every entry shares a year,
+    so there is nothing left to sort by, and the round-robin order is the
+    one that keeps artists mixed.
+
+    `limit` is None for Library's panel, which shows all of them; Home's
+    shelf takes twelve and links there for the rest.
     """
+    this_year = str(utcnow().year)
     artists = followed_artists(db, user_id).all()
     per_artist = [
         [
             {**entry, "artist_name": artist.name, "artist_id": artist.id}
             for entry in snapshot_releases(artist.release_snapshot)
+            if entry.get("year") == this_year
         ]
         for artist in artists
     ]
@@ -100,12 +119,7 @@ def _new_releases(db: Session, user_id: int) -> list[dict]:
         for items in per_artist:
             if position < len(items):
                 merged.append(items[position])
-
-    # Year is the finest date YouTube Music reports on this surface. Stable,
-    # so releases sharing a year keep the round-robin order above rather
-    # than collapsing back into per-artist runs.
-    merged.sort(key=lambda release: release.get("year") or "", reverse=True)
-    return merged[:HOME_SHELF_LIMIT]
+    return merged if limit is None else merged[:limit]
 
 
 def _shelf_query(db: Session, user_id: int):
@@ -249,11 +263,10 @@ def library_context(db: Session, user_id: int) -> dict:
             .filter(Content.user_id == user_id, Content.is_favorite.is_(True))
             .scalar()
         ),
-        "new_uploads_count": (
-            db.query(func.count(Content.id))
-            .filter(Content.user_id == user_id, Content.is_preview.is_(False), new_upload_filter())
-            .scalar()
-        ),
+        # Releases this year, matching exactly what the tile opens onto —
+        # a count that disagrees with the page it leads to is worse than no
+        # count (same rule as the docstring above).
+        "new_uploads_count": len(_new_releases(db, user_id, limit=None)),
         "recently_played_count": (
             db.query(func.count(Content.id))
             .filter(Content.user_id == user_id, Content.last_played_at.isnot(None))
@@ -370,6 +383,27 @@ def playlist_detail_context(db: Session, user_id: int, kind: str, page: int) -> 
     config = PLAYLIST_KINDS.get(kind)
     if config is None:
         return None
+
+    # One of these is not a track list. "New releases" holds albums and
+    # singles read off Artist.release_snapshot — same cards Home's shelf of
+    # that name shows, all of them rather than twelve, and rendered by
+    # _releases_panel.html instead of the track-list body (see
+    # _fragment_detail.html). It has no filter, no pagination and no Play
+    # all; see that template for why.
+    if kind == "new-uploads":
+        releases = _new_releases(db, user_id, limit=None)
+        return {
+            "kind": kind,
+            "artist": None,
+            "title": config.title,
+            "releases": releases,
+            "count_label": f"{len(releases)} release{'' if len(releases) == 1 else 's'} this year",
+            "empty_message": config.empty_title,
+            "empty_help": config.empty_help,
+            "empty_cta": config.empty_cta,
+            "empty_cta_href": EMPTY_CTA_HREF,
+        }
+
     video_count = count_content(db, user_id, filter=config.filter)
     items, page, total_pages = query_content_page(db, user_id, page=page, filter=config.filter)
 

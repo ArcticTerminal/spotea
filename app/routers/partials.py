@@ -137,7 +137,11 @@ def playlist_detail_fragment(
     context = playlist_detail_context(db, user.id, kind, page)
     if context is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown playlist")
-    queue_thumbnail_caching(background_tasks, context["content"])
+    # "New releases" is the one kind here that isn't a track list — it holds
+    # releases, which have no Content row and so no thumbnail of ours to
+    # cache (their covers are proxied straight from YouTube Music).
+    if "content" in context:
+        queue_thumbnail_caching(background_tasks, context["content"])
     return templates.TemplateResponse(request, "_fragment_detail.html", context)
 
 

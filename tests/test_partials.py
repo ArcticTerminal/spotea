@@ -68,7 +68,7 @@ def _seed(db_session):
         [
             Content(
                 artist_id=artist.id, user_id=USER_ID, video_id="partnew0001", title="Fresh Upload",
-                published_at=now - timedelta(days=1), duration_seconds=300, is_new_upload=True,
+                published_at=now - timedelta(days=1), duration_seconds=300,
             ),
             Content(
                 artist_id=artist.id, user_id=USER_ID, video_id="partfav0001", title="A Favorite",
@@ -292,9 +292,11 @@ def test_fragments_require_login():
 def test_playlist_detail_fragments(client, db_session):
     _seed(db_session)
 
+    # new-uploads is deliberately absent: it is the one pinned kind that
+    # isn't a track list any more — it holds releases off
+    # Artist.release_snapshot, and has its own tests below.
     for kind, expected, unexpected in [
         ("favorites", "A Favorite", "Fresh Upload"),
-        ("new-uploads", "Fresh Upload", "A Favorite"),
         ("recently-played", "Played Recently", "Fresh Upload"),
     ]:
         res = client.get(f"/partials/detail/playlist/{kind}")
@@ -323,6 +325,8 @@ def test_empty_playlist_detail_fragments_render_their_empty_state(client):
         ("new-uploads", "No new releases yet"),
         ("recently-played", "Nothing played yet"),
     ]:
+        # All three still explain themselves when empty, including the
+        # releases grid — see _releases_panel.html's else branch.
         res = client.get(f"/partials/detail/playlist/{kind}")
         assert res.status_code == 200, kind
         assert title in res.text, kind
@@ -508,3 +512,103 @@ def test_fragments_are_scoped_to_the_current_profile(client, db_session):
     for url, _targets in FRAGMENTS:
         assert "Not Yours" not in client.get(url).text, url
         assert "Someone Else" not in client.get(url).text, url
+
+
+# --- Library's "New releases" is a grid of releases, not a track list ------
+
+
+def _followed_with_releases(db_session, name, *entries):
+    import json as _json
+
+    from app.timeutil import utcnow as _utcnow
+
+    artist = Artist(
+        user_id=USER_ID,
+        channel_id=f"UC{name}".ljust(24, "0"),
+        name=name,
+        followed=True,
+        release_snapshot=_json.dumps(
+            [
+                {
+                    "browse_id": browse_id,
+                    "title": title,
+                    "year": year or str(_utcnow().year),
+                    "kind": kind,
+                    "cover_url": None,
+                }
+                for browse_id, title, kind, year in entries
+            ]
+        ),
+    )
+    db_session.add(artist)
+    db_session.commit()
+    return artist
+
+
+def test_the_releases_panel_is_a_grid_of_release_cards(client, db_session):
+    """It used to be a track list of is_new_upload rows. Those only ever held
+    releases that appeared *after* the follow and expired after fourteen
+    days; releases read off the snapshot have neither limit."""
+    _followed_with_releases(db_session, "Alpha", ("MPREb_a1", "Alpha Album", "Album", None))
+
+    body = _fragment_body(client.get("/partials/detail/playlist/new-uploads").text, "detail-panel")
+
+    assert 'class="mood-grid"' in body
+    assert 'data-release-id="MPREb_a1"' in body
+    assert "Alpha Album" in body
+    assert 'class="track-list"' not in body
+
+
+def test_the_releases_panel_has_no_play_all(client, db_session):
+    """Deliberate, not missing: a release carries no video ids until it is
+    opened, so "play all of these" would be one live request per release.
+    Each release has its own Play all once opened."""
+    _followed_with_releases(db_session, "Alpha", ("MPREb_a1", "Alpha Album", "Album", None))
+
+    body = _fragment_body(client.get("/partials/detail/playlist/new-uploads").text, "detail-panel")
+
+    assert 'id="detail-play-all"' not in body
+    assert 'id="detail-shuffle"' not in body
+
+
+def test_a_release_card_says_what_kind_it_is(client, db_session):
+    _followed_with_releases(
+        db_session,
+        "Alpha",
+        ("MPREb_a1", "An Album", "Album", None),
+        ("MPREb_a2", "A Single", "Single", None),
+    )
+
+    body = _fragment_body(client.get("/partials/detail/playlist/new-uploads").text, "detail-panel")
+
+    assert '<span class="badge-kind">Album</span>' in body
+    assert '<span class="badge-kind">Single</span>' in body
+
+
+def test_the_releases_panel_shows_this_year_only(client, db_session):
+    _followed_with_releases(
+        db_session,
+        "Alpha",
+        ("MPREb_now", "This Year", "Album", None),
+        ("MPREb_old", "Years Ago", "Album", "2019"),
+    )
+
+    body = _fragment_body(client.get("/partials/detail/playlist/new-uploads").text, "detail-panel")
+
+    assert "This Year" in body
+    assert "Years Ago" not in body
+
+
+def test_the_library_tile_counts_releases_not_songs(client, db_session):
+    """A count that disagrees with the page it opens onto is worse than no
+    count — the same rule library_context's docstring already states."""
+    _followed_with_releases(
+        db_session,
+        "Alpha",
+        ("MPREb_a1", "One", "Album", None),
+        ("MPREb_a2", "Two", "Single", None),
+    )
+
+    body = _fragment_body(client.get("/partials/library").text, "library-grid")
+
+    assert "2 releases</span>" in body
