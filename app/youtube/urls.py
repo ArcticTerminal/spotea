@@ -163,6 +163,26 @@ def cover_url_at_size(url: str | None, size: int) -> str | None:
     return avatar_url_at_size(url, size)
 
 
+def video_still_url(video_id: str | None) -> str | None:
+    """A video's own thumbnail, derived from its id alone.
+
+    The last-resort cover for a track stored without one. It costs no
+    request and cannot go stale — every video on YouTube has this URL, and
+    it is built rather than fetched — which is exactly what a fallback
+    needs to be, since the case it exists for is a row whose real cover was
+    already missed once.
+
+    Not square, unlike everything YouTube Music serves: this is the 16:9
+    video still, and it lands in slots drawn for album art. Every one of
+    them sets `object-fit: cover`, so it arrives as a centre crop rather
+    than a letterboxed rectangle. mqdefault over hqdefault because hq pads
+    4:3 with black bars, which a centre crop cannot remove.
+    """
+    if not video_id:
+        return None
+    return f"https://i.ytimg.com/vi/{video_id}/mqdefault.jpg"
+
+
 # YouTube Music hands back playlist ids as *browse* ids: the same id with a
 # "VL" glued on the front ("VLPL…", "VLRDCLAK5uy_…"). Nothing downstream
 # speaks that dialect — playlist_url() would build a youtube.com/playlist

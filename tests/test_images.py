@@ -19,6 +19,7 @@ from app.images import (
     _download_image,
     cached_avatar_path,
     fetch_image_bytes,
+    needs_thumbnail_caching,
 )
 
 JPEG = b"\xff\xd8\xff" + b"\x00" * 512
@@ -205,6 +206,29 @@ def test_fetch_image_bytes_returns_none_on_a_failed_fetch(network):
     network(urllib.error.URLError("no route to host"))
 
     assert fetch_image_bytes("https://yt3.ggpht.com/abc") is None
+
+
+@pytest.mark.parametrize(
+    "url, expected",
+    [
+        ("https://yt3.ggpht.com/abc", True),
+        ("http://i.ytimg.com/vi/abc/mqdefault.jpg", True),
+        # Already ours: nothing to fetch.
+        ("/thumbnails/abc.jpg", False),
+        # The one that mattered. Nearly every track is stored in this shape
+        # (see music._proxied_cover_url), and it used to pass — after which
+        # download_thumbnail handed the relative path to
+        # urllib.request.Request, which raises ValueError("unknown url
+        # type"). _download_image catches URLError/OSError/TimeoutError and
+        # not that, so the background task died on it every single time and
+        # no thumbnail was ever cached for any of them.
+        ("/image-proxy?u=https%3A%2F%2Fyt3.ggpht.com%2Fabc", False),
+        (None, False),
+        ("", False),
+    ],
+)
+def test_only_a_fetchable_url_is_queued_for_caching(url, expected):
+    assert needs_thumbnail_caching(url) is expected
 
 
 def test_cached_avatar_path_reports_only_what_is_on_disk():
