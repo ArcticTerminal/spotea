@@ -42,16 +42,20 @@ services:
       # looks like. `service_started` just makes explicit what an unqualified
       # depends_on already gave us implicitly — pot-provider's container is
       # running, not that port 4416 is accepting requests yet.
-      # app/downloader.py already treats pot-provider being unreachable as
-      # non-fatal (falls back to PO-token-free clients), so this is a
-      # startup-ordering nicety, not a correctness dependency.
+      # This used to be a startup-ordering nicety rather than a correctness
+      # dependency, because app/downloader.py could fall back to a
+      # PO-token-free client. There is no longer one that works (see its
+      # _ATTEMPTS), so pot-provider being up is now what makes downloads
+      # possible at all. Nothing crashes without it — yt-dlp just drops
+      # every format it couldn't get a token for and every download fails.
       pot-provider:
         condition: service_started
 
   # Generates YouTube PO (Proof-of-Origin) tokens for yt-dlp — see
-  # app/downloader.py's ydl_opts. Without this, YouTube's SABR rollout
-  # increasingly 403s clients (including android_vr, previously token-free)
-  # unless a valid token is attached to the request. Internal-only, no host
+  # app/downloader.py's ydl_opts. Without this, YouTube's SABR rollout 403s
+  # clients unless a valid token is attached to the request; android_vr held
+  # out longest as a token-free client and has since stopped returning any
+  # audio-only format at all, so nothing plays without this. Internal-only, no host
   # port published; app reaches it at http://pot-provider:4416 over the
   # compose network.
   pot-provider:
