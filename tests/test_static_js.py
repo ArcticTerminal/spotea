@@ -580,6 +580,34 @@ def test_the_moods_shelf_does_not_promise_genres() -> None:
     assert '<h3 class="shelf-title">Moods</h3>' in source
 
 
+def test_onboarding_only_counts_its_own_chips() -> None:
+    """The picker partial is mounted twice now — Home's first-run panel and
+    Settings' "Your interests" overlay — so an unscoped .genre-chip query
+    reads both. It happens to be harmless today, because the panel only shows
+    when the interest list is empty and every chip in the overlay is
+    therefore off, but that is a coincidence of two unrelated conditions."""
+    source = (JS_DIR / "home" / "onboarding.js").read_text()
+
+    for match in re.finditer(r"querySelectorAll\(\s*[\"'`]([^\"'`]+)", source):
+        selector = match.group(1)
+        if ".genre-chip" in selector:
+            assert "#onboarding-genres" in selector, f"unscoped chip query: {selector}"
+
+
+def test_settings_reads_the_picker_rather_than_a_second_copy_of_it() -> None:
+    """Which chips are on is server-rendered into aria-pressed (see
+    interests.interest_chips). Shipping the same fact a second time — as JSON
+    on the element, which is how the free-text editor did it — would only be
+    something to keep in step."""
+    source = (JS_DIR / "home" / "settings.js").read_text()
+
+    assert 'getAttribute("aria-pressed")' in source
+    assert "dataset.interests" not in source
+    # The free-text editor's own machinery, gone rather than left unreachable.
+    for gone in ("interests-input", "interests-form", "interest-chip-remove", "renderInterests"):
+        assert gone not in source, gone
+
+
 def test_onboarding_binds_once_to_a_region_that_survives_a_swap() -> None:
     """The panel lives inside #home-shelves, which refreshFragments replaces
     wholesale, so a listener on the panel itself dies on the first swap.

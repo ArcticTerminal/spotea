@@ -1,6 +1,6 @@
 // The Settings tab's controls, plus the Downloads modal they open.
 
-import { api, confirmDialog, escapeHtml, setupOverlay, showToast } from "../core.js";
+import { api, confirmDialog, setupOverlay } from "../core.js";
 import { refreshDownloadsBody, refreshFragments } from "../fragments.js";
 import { reloadRecommendations } from "./explore.js";
 
@@ -89,45 +89,46 @@ export function setupStorage() {
   });
 }
 
-// The interest tags Explore's recommendations are searched from. Kept here
-// as one array and PUT whole on every change (see schemas.SettingsUpdate) —
-// the server normalizes what it stores (trimming, deduping, capping), so the
-// response, not this array, is what the chips are re-rendered from.
+// The interests Explore's recommendations are searched from. Held here as
+// one array and PUT whole on every change (see schemas.SettingsUpdate) — the
+// server normalizes what it stores (trimming, deduping, capping), so the
+// response, not this array, is what the chips are re-synced from.
+//
+// The chips themselves are server-rendered (see _interest_picker.html), which
+// is the same partial Home's first-run panel uses. There used to be a
+// free-text chip list and an add form here instead: a second editor of one
+// field, which looked nothing like the genre picker and did the same job.
 let interests = [];
 
-function renderInterests() {
-  const list = document.getElementById("interests-list");
-  const empty = document.getElementById("interests-empty");
-  if (!list) return;
+function pickerChips() {
+  return [...document.querySelectorAll("#interests-picker .genre-chip")];
+}
 
-  list.innerHTML = interests
-    .map(
-      (interest) => `
-        <li class="interest-chip">
-          <span>${escapeHtml(interest)}</span>
-          <button type="button" class="interest-chip-remove" data-interest="${escapeHtml(interest)}" aria-label="Remove ${escapeHtml(interest)}">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-close" /></svg>
-          </button>
-        </li>
-      `
-    )
-    .join("");
-  if (empty) empty.hidden = interests.length > 0;
+/** Push `interests` back onto the chips. The source of truth after a save is
+ *  the server's normalized list, which can differ from what was sent — an
+ *  over-long or duplicate tag comes back cleaned up rather than rejected. */
+function syncChips() {
+  const on = new Set(interests.map((interest) => interest.toLowerCase()));
+  for (const chip of pickerChips()) {
+    const selected = on.has(chip.dataset.genre.toLowerCase());
+    chip.setAttribute("aria-pressed", String(selected));
+    chip.classList.toggle("is-on", selected);
+  }
 }
 
 // Saves run one after another rather than overlapping. Every PUT carries the
-// whole list, so two in flight at once can land in either order — adding two
-// chips in quick succession left the server holding the shorter list, and the
-// second response then re-rendered the chips to match it, silently undoing
-// the add.
+// whole list, so two in flight at once can land in either order — toggling
+// two chips in quick succession left the server holding the earlier list, and
+// the second response then re-synced the chips to match it, silently undoing
+// the change.
 let pendingSave = Promise.resolve();
 
 export function saveInterests(next, errorMessage) {
   const previous = interests;
-  // Rendered before the request is even sent so adding a chip feels instant;
+  // Applied before the request is even sent so a chip responds instantly;
   // reverted below if the save doesn't land.
   interests = next;
-  renderInterests();
+  syncChips();
 
   pendingSave = pendingSave.then(async () => {
     const { ok, data } = await api("/settings", {
@@ -138,16 +139,13 @@ export function saveInterests(next, errorMessage) {
 
     // Both branches below only act while this edit is still the current
     // state (each edit assigns a fresh array, so identity is the test). If
-    // something has been added or removed since, that edit's own queued save
-    // owns what the chips should say — adopting this response's list, or
-    // rolling back to this edit's predecessor, would undo it.
+    // something has been toggled since, that edit's own queued save owns what
+    // the chips should say — adopting this response's list, or rolling back
+    // to this edit's predecessor, would undo it.
     if (next !== interests) return;
 
-    // On success: the server's normalized list, which can differ from what
-    // was sent — an over-long or duplicate tag comes back cleaned up rather
-    // than rejected.
     interests = ok ? data.interests : previous;
-    renderInterests();
+    syncChips();
     // Explore's shelves were searched from the old list, and so was the
     // batch the server has cached — both are now answers to a question
     // nobody asked. Rebuilt right here, in the background, rather than
@@ -157,54 +155,43 @@ export function saveInterests(next, errorMessage) {
     // are what this save owes the user.
     if (ok) reloadRecommendations();
   });
-  // Returned so a caller that needs the save to have actually landed before
-  // doing anything else (the onboarding wizard's step 2, which searches for
-  // channel suggestions against these same interests) can await it — every
-  // existing caller here fires it and moves on, so this is additive.
   return pendingSave;
 }
 
 export function setupInterests() {
-  const list = document.getElementById("interests-list");
-  const form = document.getElementById("interests-form");
-  const input = document.getElementById("interests-input");
-  if (!list || !form || !input) return;
+  const picker = document.getElementById("interests-picker");
+  if (!picker) return;
 
-  // A modal rather than an inline editor: a wrapping chip list plus its own
-  // add form doesn't fit the label-left/control-right shape every other
-  // Settings row has, and this way the row looks like its neighbours.
+  // A modal rather than an inline editor: a wrapping grid of chips doesn't
+  // fit the label-left/control-right shape every other Settings row has, and
+  // this way the row looks like its neighbours.
   setupOverlay("interests-overlay", "interests-close", ["open-interests"]);
-  document.getElementById("open-interests")?.addEventListener("click", () => input.focus());
 
-  // Server-rendered into the element's dataset rather than fetched on boot,
-  // so the chips are already right on first paint (see index.html).
-  try {
-    interests = JSON.parse(list.dataset.interests || "[]");
-  } catch {
-    interests = [];
-  }
-  renderInterests();
+  // Read off the markup rather than fetched on boot or handed over as JSON,
+  // because the chips already carry it: the server rendered which ones are
+  // on (see interests.interest_chips), and a second copy of the same fact
+  // would only be something to keep in step.
+  interests = pickerChips()
+    .filter((chip) => chip.getAttribute("aria-pressed") === "true")
+    .map((chip) => chip.dataset.genre);
 
-  form.addEventListener("submit", (event) => {
-    event.preventDefault();
-    const value = input.value.trim();
-    if (!value) return;
-    if (interests.some((interest) => interest.toLowerCase() === value.toLowerCase())) {
-      showToast("That's already in your interests");
-      input.value = "";
-      return;
-    }
-    input.value = "";
-    saveInterests([...interests, value], "Could not save your interests");
-  });
-
-  list.addEventListener("click", (event) => {
-    const button = event.target.closest(".interest-chip-remove");
-    if (!button) return;
-    const removed = button.dataset.interest;
+  // Bound to the picker, not to each chip: the chip set is fixed for the life
+  // of the page (this overlay is not one of the regions refreshFragments
+  // replaces), but one listener is still the honest shape for this and cannot
+  // be double-bound the way per-element handlers were on Home.
+  picker.addEventListener("click", (event) => {
+    const chip = event.target.closest(".genre-chip");
+    if (!chip) return;
+    const genre = chip.dataset.genre;
+    const on = chip.getAttribute("aria-pressed") === "true";
+    // No Save button: a toggle is the whole edit, and one that needed
+    // confirming would be the second thing this screen asks for after the
+    // free-text form was removed for asking the first.
     saveInterests(
-      interests.filter((interest) => interest !== removed),
-      "Could not remove that interest"
+      on
+        ? interests.filter((interest) => interest.toLowerCase() !== genre.toLowerCase())
+        : [...interests, genre],
+      on ? "Could not remove that interest" : "Could not save your interests"
     );
   });
 }
