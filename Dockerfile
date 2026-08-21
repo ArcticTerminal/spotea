@@ -40,7 +40,11 @@ COPY app ./app
 # ytmusicapi belongs in this layer for the same reason rather than a
 # different one: it talks to YouTube Music's private InnerTube endpoint (see
 # app/youtube/music.py), which changes on YouTube's schedule, not on ours.
-RUN pip install --no-cache-dir --upgrade yt-dlp bgutil-ytdlp-pot-provider ytmusicapi
+#
+# bgutil-ytdlp-pot-provider used to be installed here too, as the client half
+# of the PO-token pair whose server ran as a compose service. Both are gone —
+# see docker-compose.yml for why, and for how to put them back together.
+RUN pip install --no-cache-dir --upgrade yt-dlp ytmusicapi
 
 # yt-dlp caches its remote JS-challenge-solver component (see downloader.py's
 # remote_components=["ejs:github"]) and PO tokens under XDG_CACHE_HOME.

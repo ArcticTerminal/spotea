@@ -7,6 +7,7 @@ gives up quickly. The measurements behind the client choices are in the
 comment on _ATTEMPTS.
 """
 
+import logging
 import time
 
 import pytest
@@ -50,25 +51,47 @@ def _clients_of(opts):
 
 
 def test_the_client_that_gets_served_goes_first(fake_ydl, tmp_path):
-    """tv_simply is the only client measured whose media URL carries a GVS PO
-    token and gets served, so it's what a play pays for from the first
-    attempt rather than after one that was always going to fail."""
+    """visionos was the fastest client measured (~1.6s against tv_simply's
+    ~3.3s), served 9/9 tracks from the live library, and needs no PO token,
+    so it's what a play pays for from the first attempt."""
     fake_ydl.outcomes = [None]
     (tmp_path / "vid00000001.m4a").write_bytes(b"audio")
 
     downloader.download_audio("vid00000001")
 
     assert len(fake_ydl.calls) == 1
-    assert _clients_of(fake_ydl.calls[0]) == ["tv_simply"]
+    assert _clients_of(fake_ydl.calls[0]) == ["visionos"]
 
 
-def test_the_clients_that_never_deliver_audio_are_not_asked_for(fake_ydl):
-    """Each of these was on the ladder at some point and each was measured to
-    give nothing back. android_vr is the newest: it led the ladder for being
-    the fast path, and now returns no audio-only format at all — ten of ten
-    tracks — so `bestaudio[...]` misses and FORMAT_BY_QUALITY's `/best` rung
-    picks a muxed video stream YouTube then refuses. That refusal is what
-    made this look like a random 403 rather than a client with no audio."""
+def test_the_pinned_client_is_one_upstream_still_defends(fake_ydl):
+    """The guard this ladder didn't have. android_vr was pinned here for
+    being fastest; YouTube broke it, yt-dlp dropped it from its own defaults
+    and shipped visionos in its place the next day, and because the
+    Dockerfile installs yt-dlp unpinned that fix was sitting in the image
+    while this pin overrode it. Nothing said so — downloads just 403'd.
+
+    Asserting the lead client is still in yt-dlp's default list turns the
+    next such move into a failed test on the rebuild that introduces it,
+    which is the only part of that episode worth preventing: the pin was
+    fine, its silence wasn't."""
+    from yt_dlp.extractor.youtube import YoutubeIE
+
+    lead = downloader._ATTEMPTS[0].player_clients
+    assert set(lead) <= set(YoutubeIE._DEFAULT_CLIENTS), (
+        f"_ATTEMPTS leads with {lead}, which yt-dlp {yt_dlp.version.__version__} no longer "
+        f"defaults to ({YoutubeIE._DEFAULT_CLIENTS}). Either upstream dropped it and this "
+        f"ladder needs re-measuring, or the yt-dlp here is older than the image's."
+    )
+
+
+def test_the_clients_measured_not_to_deliver_are_not_asked_for(fake_ydl):
+    """Each was on this ladder at some point and each was measured failing,
+    though not all for the reason once written here. android_vr does return
+    audio formats — yt-dlp skips them, deliberately, because YouTube demands
+    a GVS PO token bgutil can't mint for an Android client, leaving only the
+    muxed itag 18 that FORMAT_BY_QUALITY's `/best` tail then picked up. And
+    mweb offers *more* audio formats than any client here; its URLs simply
+    403 anyway, with a valid token, which is an upstream bug."""
     fake_ydl.outcomes = ["403", "403", "403"]
 
     with pytest.raises(downloader.DownloadError):
@@ -76,9 +99,23 @@ def test_the_clients_that_never_deliver_audio_are_not_asked_for(fake_ydl):
 
     for call in fake_ydl.calls:
         clients = _clients_of(call)
-        assert "android_vr" not in clients  # measured: zero audio-only formats
+        assert "android_vr" not in clients  # measured: every format 403s, itag 18 included
         assert "web_safari" not in clients  # measured: SABR-forced, no URLs at all
-        assert "mweb" not in clients  # measured: PO-bound URL, still 403s
+        assert "mweb" not in clients  # measured: valid token, still 403 on 2 of 3
+
+
+def test_the_last_rung_is_a_different_client_from_the_first(fake_ydl):
+    """Repeating the lead client is worth a rung because refusals are
+    per-URL, but not the last one: if visionos itself is what's broken,
+    a third go at it is the one thing guaranteed not to help. web_embedded
+    is a separate client family, also PO-token-free, and the fallback
+    yt-dlp's own maintainers recommend."""
+    fake_ydl.outcomes = ["403", "403", "403"]
+
+    with pytest.raises(downloader.DownloadError):
+        downloader.download_audio("vid00000001")
+
+    assert _clients_of(fake_ydl.calls[-1]) != _clients_of(fake_ydl.calls[0])
 
 
 def test_ytdlp_does_not_write_its_own_errors_to_stderr(fake_ydl):
@@ -97,11 +134,23 @@ def test_ytdlp_does_not_write_its_own_errors_to_stderr(fake_ydl):
         assert isinstance(call["logger"], downloader._YtdlpLogger)
 
 
+def test_the_reason_a_format_was_dropped_is_still_recoverable(caplog):
+    """Warnings are where yt-dlp puts the only explanation of a missing
+    format — "requires a GVS PO Token which was not provided", "forcing SABR
+    streaming for this client". Discarding them left this ladder to be
+    diagnosed from bare 403s, which took days and reached the wrong cause.
+    They stay off the container's stderr, but at DEBUG rather than nowhere."""
+    with caplog.at_level(logging.DEBUG, logger=downloader.__name__):
+        downloader._YtdlpLogger().warning("android_vr client https formats require a GVS PO Token")
+
+    assert "GVS PO Token" in caplog.text
+
+
 def test_a_refused_url_gets_a_second_and_third_extraction(fake_ydl, tmp_path):
-    """The whole point of the ladder, and the reason repeating one client is
-    not a pointless repeat: the refusal is per-URL, so a fresh extraction of
-    the same video by the same client produces a URL that can be served even
-    though the last one wasn't."""
+    """The whole point of the ladder, and the reason repeating the lead
+    client on the second rung is not a pointless repeat: the refusal is
+    per-URL, so a fresh extraction of the same video by the same client
+    produces a URL that can be served even though the last one wasn't."""
     fake_ydl.outcomes = [
         "ERROR: unable to download video data: HTTP Error 403: Forbidden",
         "ERROR: unable to download video data: HTTP Error 403: Forbidden",
@@ -248,6 +297,12 @@ def test_retryable_refusals_are_left_alone(message):
 
 
 def test_quality_selects_the_capped_format(fake_ydl, tmp_path):
+    """Asking for the cap is only half of it — whether anything matches it
+    depends on the client. Under tv_simply nothing did, on any video tried,
+    and "low" silently downloaded the same ~130kbps stream as "high" for as
+    long as that client led the ladder. visionos carries the ~49kbps itag
+    139, which is what makes the setting mean something (3.78 MB against
+    1.43 MB, measured end to end)."""
     fake_ydl.outcomes = [None]
     (tmp_path / "vid00000001.m4a").write_bytes(b"audio")
 

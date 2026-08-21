@@ -13,8 +13,8 @@ const SKIP_SECONDS = 15;
 // the common case feels immediate without a genuinely slow download turning
 // into a request every 300ms for minutes on end.
 // Poll tightly through the window where downloads actually land, then back
-// off. Measured end to end, server side: ~1.8s when android_vr resolves a URL
-// YouTube honours, ~3.5s when the ladder falls through to tv_simply.
+// off. Measured end to end, server side: ~2.5s when visionos resolves a URL
+// YouTube honours, ~3.7s when the ladder falls through to web_embedded.
 //
 // The schedule this replaces ramped 250ms up to 2500ms, which put its widest
 // gaps exactly where those two land — a 1s gap between 2s and 3s, a 1.5s gap
@@ -766,7 +766,7 @@ export async function prepareAudio(onStart, onFail) {
       stopPolling();
       // A 403 here means YouTube resolved a media URL and then refused it.
       // By the time this shows, downloader.py has already been through every
-      // rung of its ladder — android_vr and then tv_simply twice — so trying
+      // rung of its ladder — visionos twice, then web_embedded — so trying
       // again right now is worth a shot but not something to promise.
       const refused = data.error_message && /\b403\b|Forbidden/i.test(data.error_message);
       fail(refused ? "YouTube wouldn't serve this track — try again" : "Download failed");

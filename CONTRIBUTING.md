@@ -33,7 +33,7 @@ Example: `fix/avatar-cache-eviction`
 ```bash
 python -m venv .venv
 .venv/bin/pip install -r requirements-dev.txt
-.venv/bin/pip install yt-dlp bgutil-ytdlp-pot-provider
+.venv/bin/pip install yt-dlp ytmusicapi
 ```
 
 Or run the app itself via Docker as described in the README; the test

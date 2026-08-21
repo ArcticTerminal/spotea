@@ -72,10 +72,10 @@ let upcomingTrack = null;
 
 // Caps openPlayer's auto-skip-on-failure (below) at this many failures in a
 // row before it gives up instead of trying yet another track. Without a
-// cap, a systemic hiccup — YouTube rate-limiting/bot-checking the IP, the
-// PO token provider having a bad moment — reads as "every remaining track in
-// the queue is broken" and the skip chain burns through all of them in
-// seconds, each one running its own multi-attempt retry ladder against
+// cap, a systemic hiccup — YouTube rate-limiting/bot-checking the IP, or
+// deciding a whole player client is no longer welcome — reads as "every
+// remaining track in the queue is broken" and the skip chain burns through
+// all of them in seconds, each one running its own multi-attempt ladder against
 // YouTube. That volume is itself what trips the bot check in the first
 // place, which is how one bad track once took out an entire session: every
 // track after it failed with the exact same "Sign in to confirm you're not
