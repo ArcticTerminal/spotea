@@ -47,11 +47,14 @@ def test_health_is_503_when_the_database_is_unreachable(client, monkeypatch):
     assert body["database"] is False
 
 
-def test_refresh_loop_survives_a_failure_during_a_cycle(monkeypatch):
+def test_the_background_loop_survives_a_failure_during_a_cycle(monkeypatch):
     """The actual regression: an exception anywhere in the cycle.
 
     Before the fix this killed the task outright and the only place that
     would ever have surfaced it was the `await` in the lifespan's shutdown.
+    Aimed at the sweep now that refreshing has moved off this loop (see
+    app/services/refresh.py) — the property being pinned is the loop's, not
+    any particular piece of work inside it.
     """
     calls: list[int] = []
 
@@ -59,9 +62,9 @@ def test_refresh_loop_survives_a_failure_during_a_cycle(monkeypatch):
         calls.append(1)
         if len(calls) == 1:
             raise RuntimeError("database is locked")
-        # Second time round: nothing due, so this is a normal no-op cycle.
+        # Second time round: a normal no-op cycle.
 
-    monkeypatch.setattr(scheduler, "_refresh_due_users", sometimes_locked)
+    monkeypatch.setattr(scheduler, "_sweep_disk", sometimes_locked)
     monkeypatch.setattr(scheduler, "ERROR_BACKOFF_SECONDS", 0)
 
     async def drive() -> tuple[bool, int]:

@@ -1,21 +1,25 @@
+"""The one thing that still has to happen on a clock: disk and row cleanup.
+
+Artist refreshing used to live here too — every five minutes this asked
+which users' intervals had elapsed and fetched for those, whether or not
+anyone was using the app. That moved to the moment someone opens it (see
+services/refresh.py). What is left is genuinely nobody's page load: orphaned
+files and expired preview rows accumulate on their own and no request is
+waiting on them being gone.
+"""
+
 import asyncio
 import contextlib
 import logging
 
-from sqlalchemy.orm import Session
-
-from app.content_query import followed_artists
 from app.database import SessionLocal
-from app.models import User
-from app.services.artist_sync import refresh_feeds
 from app.storage import sweep_orphans, sweep_stale_previews
-from app.timeutil import utcnow
 
 logger = logging.getLogger(__name__)
 
 # The running loop's task, owned here rather than by main.py's lifespan so
-# that /health can ask whether background refreshing is actually still
-# happening — see is_alive below.
+# that /health can ask whether the sweeper is actually still running — see
+# is_alive below.
 _task: asyncio.Task | None = None
 
 # How long to wait before starting the cycle over after an unexpected failure.
@@ -24,56 +28,16 @@ _task: asyncio.Task | None = None
 # keeps trying at a rate that stays readable in the log.
 ERROR_BACKOFF_SECONDS = 60
 
-# How often the loop wakes to check which users are due. The cadence a
-# given user actually experiences is still whatever it chose in Settings
-# (User.refresh_interval_minutes) — this is just the clock that choice
-# is checked against. Short enough that even the shortest preset (15 minutes) is checked several
-# times within its own window, so a settings change takes effect within a
-# few minutes rather than needing an interrupt; long enough that a user
-# on the longest preset (2 hours) isn't polled for nothing 24 times before
-# it's ever due.
-TICK_SECONDS = 5 * 60
-
-
-def _due_users(db: Session) -> list[User]:
-    """Users whose own interval has elapsed since their own last refresh.
-
-    A never-refreshed user (refreshed_at is None — brand new) is
-    always due.
-    """
-    now = utcnow()
-    due = []
-    for user in db.query(User).all():
-        if user.refreshed_at is None:
-            due.append(user)
-            continue
-        elapsed_minutes = (now - user.refreshed_at).total_seconds() / 60
-        if elapsed_minutes >= user.refresh_interval_minutes:
-            due.append(user)
-    return due
-
-
-def _refresh_due_users() -> None:
-    with SessionLocal() as db:
-        for user in _due_users(db):
-            artists = followed_artists(db, user_id=user.id).all()
-            new_count = refresh_feeds(db, artists)
-            user.refreshed_at = utcnow()
-            db.commit()
-            if new_count:
-                logger.info(
-                    "Background refresh added %d new item(s) across %d artist(s) for user %d",
-                    new_count,
-                    len(artists),
-                    user.id,
-                )
+# How often the sweeps run. It was five minutes when this loop also had to
+# notice a user becoming due for a refresh; nothing is waiting on a sweep, so
+# a slower cadence costs only that an orphaned file lingers a little longer.
+TICK_SECONDS = 15 * 60
 
 
 def _sweep_disk() -> None:
-    """The other half of every tick — file and row cleanup that has nothing
-    to do with any one user, so it runs unconditionally rather than
-    gated on _due_users. See storage.py's module docstring for why these
-    two (and not a ".part" sweep) are safe to run on this cadence."""
+    """The whole of every tick now: file and row cleanup that has nothing to
+    do with any one user. See storage.py's module docstring for why these two
+    (and not a ".part" sweep) are safe to run on this cadence."""
     with SessionLocal() as db:
         sweep_orphans(db)
         sweep_stale_previews(db)
@@ -81,35 +45,28 @@ def _sweep_disk() -> None:
 
 async def run_scheduler() -> None:
     """Runs for the lifetime of the app (started/stopped via start/stop
-    below), checking on TICK_SECONDS which users are due for their own
-    configured interval and refreshing just those — see _due_users and
-    User.refresh_interval_minutes — then sweeping disk/DB leftovers
-    (see _sweep_disk) regardless of which, if any, accounts were due.
+    below), sweeping disk and DB leftovers every TICK_SECONDS.
 
-    The whole cycle is guarded, not just the refresh. It used to be only the
-    refresh: reading the (then-singleton) interval setting sat outside any
-    try, so a single "database is locked" there — entirely plausible while
-    eight refresh threads are writing — killed this task outright. Nothing
-    noticed. The lifespan only awaits it at shutdown, so from the outside the
-    app was healthy and simply never fetched a new upload again; the only
-    symptom was "no new videos", which reads as a YouTube or RSS problem. See
-    is_alive below for the other half of the fix.
+    The cycle is guarded because an unguarded one died silently once: a
+    single "database is locked" killed this task outright, and since the
+    lifespan only awaits it at shutdown, the app went on reporting itself
+    healthy while nothing in the background ran again. See is_alive below for
+    the other half of that fix.
     """
     while True:
         # CancelledError is a BaseException, so `except Exception` below lets
         # a shutdown through untouched.
         try:
-            await asyncio.to_thread(_refresh_due_users)
             await asyncio.to_thread(_sweep_disk)
         except Exception:
-            logger.exception("Artist refresh cycle failed; retrying in %ds", ERROR_BACKOFF_SECONDS)
+            logger.exception("Sweep cycle failed; retrying in %ds", ERROR_BACKOFF_SECONDS)
             await asyncio.sleep(ERROR_BACKOFF_SECONDS)
             continue
         await asyncio.sleep(TICK_SECONDS)
 
 
 def start() -> None:
-    """Begin the refresh loop, keeping a handle on it for is_alive/stop."""
+    """Begin the sweep loop, keeping a handle on it for is_alive/stop."""
     global _task
     _task = asyncio.create_task(run_scheduler())
 
@@ -125,10 +82,10 @@ async def stop() -> None:
 
 
 def is_alive() -> bool:
-    """Whether the refresh loop is still running.
+    """Whether the sweep loop is still running.
 
-    False means background refreshing has stopped for good and the process
-    needs replacing — which is exactly what /health reports, so that
-    compose's `restart: unless-stopped` can act on it.
+    False means background cleanup has stopped for good and the process needs
+    replacing — which is exactly what /health reports, so that compose's
+    `restart: unless-stopped` can act on it.
     """
     return _task is not None and not _task.done()

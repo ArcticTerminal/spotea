@@ -8,12 +8,14 @@ from your browser — a personal, free alternative to a streaming subscription.
 - **Explore** searches YouTube Music for artists, songs and ready-made
   playlists — the music catalogue, not youtube.com, so a search for an
   artist returns their tracks rather than reaction videos and compilations.
-- Follow an artist and their releases start arriving. A background sync
-  compares what YouTube Music lists for them against what it listed last
-  time, and Home's **New releases** shelf shows what your artists have put
-  out — read from what that sync already stored, so opening Home never waits
-  on the network. Only artists can be followed — this app holds music and
-  nothing else.
+- Follow an artist and their releases start arriving. Opening the app checks
+  what YouTube Music lists for your artists against what it listed last time,
+  and Home's **New releases** shelf shows what they've put out — read from
+  what that check already stored, so opening Home never waits on the network.
+  The check runs behind the page rather than in front of it, and no more
+  often than the interval in Settings; the Refresh button ignores that and
+  looks straight away. Only artists can be followed — this app holds music
+  and nothing else.
 - A brand new library asks what you listen to and fills Explore from the
   answer, rather than handing you an empty page.
 - Open an artist and you get their page: popular songs, albums, singles and
