@@ -3,6 +3,7 @@
 import { api, confirmDialog, setupOverlay } from "../core.js";
 import { refreshDownloadsBody, refreshFragments } from "../fragments.js";
 import { reloadRecommendations } from "./explore.js";
+import { activate } from "./tabs.js";
 
 export function setupDownloadsOverlay() {
   setupOverlay("downloads-overlay", "downloads-close", ["open-downloads"]);
@@ -114,6 +115,27 @@ function syncChips() {
     chip.setAttribute("aria-pressed", String(selected));
     chip.classList.toggle("is-on", selected);
   }
+  syncDoneButton();
+}
+
+/** How many more are needed before the first run will let go, reflected on
+ *  the Continue button and the line beside it.
+ *
+ *  Called from syncChips rather than from the click handler, so it follows
+ *  the same list the chips do — including the correction after a save comes
+ *  back with a normalized list, and the roll-back after one that failed.
+ *  A Continue that stayed enabled on a save that didn't land would close the
+ *  overlay onto an empty interest list, which is the one outcome the whole
+ *  first run exists to prevent. */
+function syncDoneButton() {
+  const done = document.getElementById("interests-done");
+  const picker = document.getElementById("interests-picker");
+  if (!done || !picker) return;
+  const minimum = Number(picker.dataset.minInterests) || 0;
+  const remaining = minimum - interests.length;
+  done.disabled = remaining > 0;
+  const note = document.getElementById("interests-remaining");
+  if (note) note.textContent = remaining > 0 ? `Pick ${remaining} more` : "";
 }
 
 // Saves run one after another rather than overlapping. Every PUT carries the
@@ -162,10 +184,16 @@ export function setupInterests() {
   const picker = document.getElementById("interests-picker");
   if (!picker) return;
 
-  // A modal rather than an inline editor: a wrapping grid of chips doesn't
-  // fit the label-left/control-right shape every other Settings row has, and
-  // this way the row looks like its neighbours.
-  setupOverlay("interests-overlay", "interests-close", ["open-interests"]);
+  // One overlay for both jobs — Settings' "Manage interests" and, on a brand
+  // new profile, the first run (see index.html's data-required). It used to
+  // be this modal plus an inline panel on Home with its own template, its own
+  // module and its own batch-save; the panel is gone.
+  //
+  // A modal rather than an inline Settings editor for the original reason: a
+  // wrapping grid of chips doesn't fit the label-left/control-right shape
+  // every other Settings row has, and this way the row looks like its
+  // neighbours.
+  const overlay = setupOverlay("interests-overlay", "interests-close", ["open-interests"]);
 
   // Read off the markup rather than fetched on boot or handed over as JSON,
   // because the chips already carry it: the server rendered which ones are
@@ -174,6 +202,7 @@ export function setupInterests() {
   interests = pickerChips()
     .filter((chip) => chip.getAttribute("aria-pressed") === "true")
     .map((chip) => chip.dataset.genre);
+  syncDoneButton();
 
   // Bound to the picker, not to each chip: the chip set is fixed for the life
   // of the page (this overlay is not one of the regions refreshFragments
@@ -184,15 +213,35 @@ export function setupInterests() {
     if (!chip) return;
     const genre = chip.dataset.genre;
     const on = chip.getAttribute("aria-pressed") === "true";
-    // No Save button: a toggle is the whole edit, and one that needed
-    // confirming would be the second thing this screen asks for after the
-    // free-text form was removed for asking the first.
+    // No Save button, on a first run as much as afterwards: a toggle is the
+    // whole edit, and one that needed confirming would be the second thing
+    // this screen asks for after the free-text form was removed for asking
+    // the first. Continue below is therefore not a save — by the time it can
+    // be pressed, everything it would have saved is already saved.
     saveInterests(
       on
         ? interests.filter((interest) => interest.toLowerCase() !== genre.toLowerCase())
         : [...interests, genre],
       on ? "Could not remove that interest" : "Could not save your interests"
     );
+  });
+
+  document.getElementById("interests-done")?.addEventListener("click", () => {
+    // Clearing this first is what turns the overlay back into an ordinary
+    // one — the close button, the backdrop and Escape all consult it (see
+    // core.js's isRequired). Without it, opening Manage interests later in
+    // the same session would trap the user in a screen they had already
+    // finished with.
+    document.getElementById("interests-overlay")?.removeAttribute("data-required");
+    overlay?.close();
+
+    // Explore is the payoff: its shelves are searched from exactly what was
+    // just picked. The rebuild itself is already running — every toggle
+    // queued one (see saveInterests) — so this only goes and looks at it.
+    // refreshFragments because Home is still showing the empty-library copy
+    // it was rendered with.
+    activate("explore");
+    refreshFragments();
   });
 }
 

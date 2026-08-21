@@ -618,18 +618,17 @@ def test_the_moods_shelf_does_not_promise_genres() -> None:
     assert '<h3 class="shelf-title">Moods</h3>' in source
 
 
-def test_onboarding_only_counts_its_own_chips() -> None:
-    """The picker partial is mounted twice now — Home's first-run panel and
-    Settings' "Your interests" overlay — so an unscoped .genre-chip query
-    reads both. It happens to be harmless today, because the panel only shows
-    when the interest list is empty and every chip in the overlay is
-    therefore off, but that is a coincidence of two unrelated conditions."""
-    source = (JS_DIR / "home" / "onboarding.js").read_text()
+def test_there_is_no_second_module_editing_interests() -> None:
+    """home/onboarding.js was a whole second copy of this — its own chip
+    query, its own selected-set, its own PUT /settings — for a panel that
+    showed the same partial. Both jobs are one overlay and one module now."""
+    assert not (JS_DIR / "home" / "onboarding.js").exists()
 
-    for match in re.finditer(r"querySelectorAll\(\s*[\"'`]([^\"'`]+)", source):
-        selector = match.group(1)
-        if ".genre-chip" in selector:
-            assert "#onboarding-genres" in selector, f"unscoped chip query: {selector}"
+    for path in JS_DIR.rglob("*.js"):
+        if path.name == "settings.js":
+            continue
+        source = path.read_text()
+        assert ".genre-chip" not in source, f"{path.name} still reaches for the chips"
 
 
 def test_settings_reads_the_picker_rather_than_a_second_copy_of_it() -> None:
@@ -646,18 +645,51 @@ def test_settings_reads_the_picker_rather_than_a_second_copy_of_it() -> None:
         assert gone not in source, gone
 
 
-def test_onboarding_binds_once_to_a_region_that_survives_a_swap() -> None:
-    """The panel lives inside #home-shelves, which refreshFragments replaces
-    wholesale, so a listener on the panel itself dies on the first swap.
+def test_the_first_run_releases_the_overlay_when_it_is_done() -> None:
+    """The same element is a locked first run and, later in the same session,
+    what Settings' "Manage interests" opens. Every way out consults
+    data-required at the moment of the click (see core.js's isRequired), so
+    removing the attribute is what hands the overlay back — without it,
+    reopening it from Settings afterwards would trap the user in a screen
+    they had already finished with, until they reloaded the page."""
+    source = (JS_DIR / "home" / "settings.js").read_text()
 
-    Re-binding after each swap was tried and was worse: the swap does not
-    always replace the node, so the same element ended up with two listeners
-    and every toggle immediately undid itself — which on screen is
-    indistinguishable from a click that never registered at all. Delegating
-    from #tab-home, which is never swapped, needs no re-binding.
+    assert 'removeAttribute("data-required")' in source
+
+    core = (JS_DIR / "core.js").read_text()
+    # A wiring-time flag can't express "locked for part of a session", which
+    # is the shape this actually needs.
+    assert "dismissible" not in core, "a fixed flag is what this replaced"
+    assert core.count("isRequired(overlay)") >= 2  # the Escape path and the click paths
+
+
+def test_the_interests_modal_outranks_the_generic_one() -> None:
+    """.modal-interests and .modal are both a single class, so neither
+    out-specifies the other and whichever comes last in the file wins.
+
+    This block used to sit up with the Settings rules, ~1500 lines above
+    .modal — so its max-width lost to .modal's 360px and the declaration sat
+    there doing nothing, which is not something reading either rule reveals.
+    Anything .modal also sets has to be declared below it.
     """
-    source = (JS_DIR / "home" / "onboarding.js").read_text()
+    css = (JS_DIR.parent / "css" / "style.css").read_text()
 
-    assert 'getElementById("tab-home")' in source
-    assert "onFragmentsSwapped" not in source, "re-binding is the bug, not the fix"
-    assert source.count("addEventListener") == 1
+    assert css.index("\n.modal {") < css.index("\n.modal-interests {")
+
+
+def test_the_first_run_is_fullscreen_and_the_settings_one_is_not() -> None:
+    """Both modes are the same element, so the difference has to live in a
+    selector rather than in a class the template picks. Scoped to
+    [data-required] — an id-plus-attribute selector, which outranks .modal
+    wherever it sits in the file, unlike the class-only rules around it.
+
+    The fullscreen treatment deliberately doesn't apply in both: Settings'
+    picker has no Continue row and about half a screen of chips, so a
+    full-height panel there was mostly empty space below them.
+    """
+    css = (JS_DIR.parent / "css" / "style.css").read_text()
+
+    fullscreen = css[css.index("#interests-overlay[data-required] .modal-interests {") :][:400]
+    assert "height: 100%" in fullscreen
+    assert "max-width: none" in fullscreen
+    assert "modal-overlay-full" not in css, "the class this replaced applied to both modes"

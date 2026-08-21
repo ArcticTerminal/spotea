@@ -10,6 +10,8 @@ import pytest
 from app.interests import (
     MAX_INTEREST_LENGTH,
     MAX_INTERESTS,
+    ONBOARDING_MIN_INTERESTS,
+    SUGGESTED_GENRES,
     interests_signature,
     normalize_interests,
     parse_interests,
@@ -146,14 +148,64 @@ def test_a_saved_genre_lights_up_its_suggested_chip_rather_than_repeating_it(cli
     assert 'class="genre-chip is-on"' in body[hip_hop - 120 : hip_hop]
 
 
-def test_the_picker_is_the_same_partial_in_both_places(client, db_session):
-    """One picker, not two editors of one field. Settings' overlay and Home's
-    first-run panel render the same partial — this is what keeps them from
-    drifting back apart."""
+def test_there_is_exactly_one_picker_on_the_page(client, db_session):
+    """One picker, not two editors of one field, and now not two mounts of
+    one picker either: Settings' "Manage interests" and a new profile's first
+    run open the same overlay. Two chip grids in the document is the shape
+    this keeps coming back as — first a free-text editor beside a genre
+    picker, then the same partial included in two places — and each time the
+    bug was one of them silently saving without the other's chips."""
     body = client.get("/").text
 
     assert body.count('id="interests-picker"') == 1
-    assert body.count('id="onboarding-genres"') == 1
-    # The free-text editor that used to be the other half of this.
-    for gone in ("interests-input", "interests-form", "interest-chip-remove"):
+    assert body.count('class="interest-chips"') == 1
+    # The free-text editor, and then the first-run panel, that each used to be
+    # the other half of this.
+    for gone in ("interests-input", "interests-form", "interest-chip-remove", 'id="onboarding"'):
         assert gone not in body, gone
+
+
+def test_every_chip_can_be_turned_on_at_once():
+    """The cap is a safety bound, not a rule the picker enforces by surprise.
+
+    normalize_interests *truncates* rather than rejecting, so if the picker
+    could draw more chips than MAX_INTERESTS, someone who turned them all on
+    would have the extras dropped on save with nothing anywhere saying so —
+    and, because the chips re-sync from the server's normalized list, watch
+    them switch themselves back off. The slack above the chip count is for
+    anything a profile already had that isn't a suggested genre (see
+    interest_chips), which is drawn alongside them.
+    """
+    assert len(SUGGESTED_GENRES) < MAX_INTERESTS
+
+    picked = normalize_interests(SUGGESTED_GENRES)
+
+    assert list(picked) == list(SUGGESTED_GENRES)
+
+
+def test_the_first_run_floor_is_reachable():
+    assert 0 < ONBOARDING_MIN_INTERESTS <= len(SUGGESTED_GENRES)
+
+
+def test_no_suggested_genre_is_a_duplicate_of_another():
+    """They go to search verbatim and are matched case-insensitively against
+    what a profile saved (see interest_chips), so two spellings of one genre
+    would light up together and search twice for the same shelf."""
+    folded = [genre.casefold() for genre in SUGGESTED_GENRES]
+
+    assert len(set(folded)) == len(folded)
+
+
+@pytest.mark.parametrize(("wrong", "right"), [("Funk", "Classic Funk"), ("Punk", "Punk Rock")])
+def test_the_genres_youtube_music_mishears_are_not_offered(wrong, right):
+    """These are search queries, not labels. Measured against the live API:
+    "Funk" returns "phonk", "phonk 2026" and "PHONK TRENDING" — a different
+    genre, not a near miss — and "Punk" leads with "phonk 2026" for the same
+    reason. The spellings kept here return what the chip promises.
+
+    "Funk" had shipped. A profile that saved it still gets a chip for it (the
+    unsuggested-tag tail in interest_chips), so nothing becomes unremovable —
+    it just stops being offered.
+    """
+    assert wrong not in SUGGESTED_GENRES
+    assert right in SUGGESTED_GENRES

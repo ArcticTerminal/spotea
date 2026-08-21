@@ -260,10 +260,33 @@
     </section>
   </main>
 
-  <div id="interests-overlay" class="modal-overlay" hidden>
+  {# One overlay in two modes, not two screens.
+
+     Settings' "Manage interests" opens it, and on a brand new profile it is
+     also the first run — open from the start and, until enough is picked,
+     refusing to close. Those were a modal and an inline panel on Home doing
+     the same job with two templates, two JS modules and two save paths; the
+     panel is gone and this is what's left.
+
+     `data-required` is what makes the difference, and it is an attribute
+     rather than a second template because it stops being true mid-session:
+     home/settings.js removes it once the first run is done, and from then on
+     this closes like any other overlay (see core.js's isRequired). That is
+     also why the close button and the Continue row are both always here —
+     CSS shows whichever the current mode calls for, so neither has to be
+     conditionally rendered and then conjured back later.
+
+     A first run is also fullscreen — edge to edge, nothing of the app
+     showing round the side — where Settings' is a centred card. Same
+     attribute decides it; see the CSS. #}
+  <div
+    id="interests-overlay"
+    class="modal-overlay"
+    {% if show_onboarding %}data-required="true"{% else %}hidden{% endif %}
+  >
     <div class="modal modal-interests">
       <div class="modal-header">
-        <h2>Your interests</h2>
+        <h2>{{ "What do you listen to?" if show_onboarding else "Your interests" }}</h2>
         <button type="button" id="interests-close" class="modal-close" aria-label="Close">×</button>
       </div>
 
@@ -272,15 +295,18 @@
         update on the same schedule as your library.
       </p>
 
-      {# The same picker a brand new library gets on Home (see
-         _home_shelves.html) rather than a second editor of the same field.
-         There used to be a free-text chip list and an add form here, which
-         did exactly what the genre picker does and looked nothing like it.
-
-         Toggling a chip saves on its own — no Add button, no Save button.
-         home/settings.js owns that; see setupInterests. #}
-      <div id="interests-picker">
+      {# Toggling a chip saves on its own — no Add button, no Save button, on
+         a first run just as much as afterwards. home/settings.js owns that;
+         see setupInterests. That is why the button below says Continue and
+         not Save: by the time it can be pressed, everything it would have
+         saved is already saved. #}
+      <div id="interests-picker" data-min-interests="{{ onboarding_min_interests }}">
         {% with chips = interest_chips %}{% include "_interest_picker.html" %}{% endwith %}
+      </div>
+
+      <div class="modal-actions" id="interests-actions">
+        <button type="button" class="btn-primary" id="interests-done" disabled>Continue</button>
+        <span class="muted" id="interests-remaining"></span>
       </div>
     </div>
   </div>

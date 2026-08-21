@@ -38,38 +38,12 @@
     </div>
     {% endif %}
 
-    {% if show_onboarding %}
-    {# First run. This replaced a one-line "add a channel in the Explore tab"
-       that named a tab and left the rest to the reader — on a library with
-       nothing followed and no interests listed, Explore's own shelves are
-       mostly empty too, so following that instruction landed on a second
-       near-blank page.
-
-       Genres go into the same free-text `interests` field Settings writes
-       (see interests.py), which is what Explore's Playlists shelf is built
-       from. No new storage, no wizard, no separate route: picking here and
-       typing there are the same edit. Skippable, and it comes back on its
-       own if the library is ever emptied — see home_context's
-       show_onboarding. #}
-    <div class="onboarding" id="onboarding">
-      <h2 class="onboarding-title">What do you listen to?</h2>
-      <p class="onboarding-help">
-        Pick a few and Explore fills up with playlists to browse. You can
-        change these any time under Interests in Settings.
-      </p>
-      {# The same partial Settings' "Your interests" overlay renders, so there
-         is one picker rather than two editors of one field. Here every chip
-         starts off: show_onboarding is only true when the interest list is
-         empty (see page_context.home_context). #}
-      <div id="onboarding-genres">
-        {% with chips = interest_chips %}{% include "_interest_picker.html" %}{% endwith %}
-      </div>
-      <div class="onboarding-actions">
-        <button type="button" class="btn-primary" id="onboarding-save" disabled>Continue</button>
-        <button type="button" class="btn-quiet" id="onboarding-skip">Skip</button>
-      </div>
-    </div>
-    {% elif not has_content %}
+    {# First run used to be an inline panel here, with its own copy of the
+       genre picker and its own JS. It is now the interests overlay in
+       index.html, opened over this page rather than rendered into it — one
+       picker, one save path, and nothing here that has to know whether the
+       profile is new. This branch is what shows behind it. #}
+    {% if not has_content %}
     <p class="muted">Nothing played yet — find something in the Explore tab.</p>
     {% else %}
 

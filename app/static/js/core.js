@@ -242,9 +242,24 @@ const openableOverlays = [];
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
   for (const overlay of openableOverlays) {
-    if (!overlay.hidden) overlay.hidden = true;
+    if (!overlay.hidden && !isRequired(overlay)) overlay.hidden = true;
   }
 });
+
+/**
+ * Whether an overlay is currently refusing to be dismissed.
+ *
+ * An attribute rather than a wiring-time option, because for the interests
+ * overlay it is true only for as long as the first run lasts. That overlay is
+ * both the thing a new profile has to get through *and* what Settings' Manage
+ * interests opens, and it is wired once at page load — so a flag fixed at
+ * wiring time would leave the second one with no way out for the rest of the
+ * session. Onboarding clears the attribute when it's done and the same overlay
+ * behaves like every other one from then on.
+ */
+export function isRequired(overlay) {
+  return overlay.dataset.required === "true";
+}
 
 /**
  * Wire an overlay: one or more triggers open it; the close button, a
@@ -252,15 +267,18 @@ document.addEventListener("keydown", (event) => {
  * can drive it from elsewhere too (the mobile menu opens the profile
  * switcher, for instance) or layer extra behaviour on closing.
  *
- * `dismissible: false` wires none of the three ways out — no close-button
- * listener, no backdrop click, and no entry in the shared Escape handler
- * above — leaving the overlay's own in-flow action as the only exit. The
- * onboarding wizard is the one overlay that wants this: dismissing it drops
- * the profile into an app with an empty library and empty Explore shelves,
- * which is the state it exists to prevent. `close` is still returned, since
- * that in-flow action is what calls it.
+ * All three ways out check `data-required` on the overlay first (see
+ * isRequired above), so an overlay can refuse to be dismissed for part of a
+ * session and behave normally for the rest of it. The interests overlay is
+ * the one that needs this: on a brand new profile it is the first run and
+ * dismissing it would drop the user into an app with an empty library and
+ * empty Explore shelves, which is the state it exists to prevent — but the
+ * same element is what Settings' Manage interests opens afterwards, and that
+ * one has to close.
+ *
+ * `close` is returned regardless, since it's what an in-flow action calls.
  */
-export function setupOverlay(overlayId, closeBtnId, triggerIds = [], { dismissible = true } = {}) {
+export function setupOverlay(overlayId, closeBtnId, triggerIds = []) {
   const overlay = document.getElementById(overlayId);
   if (!overlay) return null;
 
@@ -270,17 +288,18 @@ export function setupOverlay(overlayId, closeBtnId, triggerIds = [], { dismissib
   const close = () => {
     overlay.hidden = true;
   };
+  const dismiss = () => {
+    if (!isRequired(overlay)) close();
+  };
 
   for (const triggerId of triggerIds) {
     document.getElementById(triggerId)?.addEventListener("click", open);
   }
-  if (dismissible) {
-    document.getElementById(closeBtnId)?.addEventListener("click", close);
-    overlay.addEventListener("click", (event) => {
-      if (event.target === overlay) close();
-    });
-    openableOverlays.push(overlay);
-  }
+  document.getElementById(closeBtnId)?.addEventListener("click", dismiss);
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay) dismiss();
+  });
+  openableOverlays.push(overlay);
 
   return { open, close };
 }

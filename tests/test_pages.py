@@ -11,6 +11,7 @@ to catch "the page 500s", not to assert layout.
 
 from datetime import datetime, timedelta
 
+from app.interests import ONBOARDING_MIN_INTERESTS
 from app.models import Artist, Content
 from app.timeutil import utcnow
 
@@ -81,22 +82,44 @@ def test_home_renders_every_shelf_and_the_library_grid(client, db_session):
     assert "Page Test Channel" in body  # Library channel card + Home chip
 
 
-def test_home_offers_onboarding_to_a_brand_new_library(client):
+def test_a_brand_new_library_opens_on_the_interests_overlay(client):
     """Nothing followed and no interests listed: every shelf on this page and
-    most of Explore has nothing to build from, so Home asks what the user
+    most of Explore has nothing to build from, so the app asks what the user
     listens to instead of naming a tab and leaving it there. Interests are
     what Explore's Playlists shelf is built from — see interests.py."""
     res = client.get("/")
 
     assert res.status_code == 200
-    assert 'id="onboarding"' in res.text
+    overlay = res.text[res.text.index('id="interests-overlay"') :][:300]
+    # Open from the start, rather than waiting to be triggered.
+    assert "hidden" not in overlay
+    assert 'data-required="true"' in overlay
     assert "What do you listen to?" in res.text
     assert 'data-genre="Rock"' in res.text
 
 
-def test_a_library_that_has_been_started_gets_no_onboarding(client, db_session):
-    """One interest is enough to mean "this person has been here" — the panel
-    would otherwise come back on every visit until something is played."""
+def test_the_first_run_cannot_be_skipped(client):
+    """It used to have a Skip button beside Continue, which dropped the
+    profile into an app with an empty library and empty Explore shelves —
+    the exact state the screen exists to prevent. There is no way past it now
+    but to pick something; core.js's isRequired is what makes the close
+    button, the backdrop and Escape refuse too."""
+    body = client.get("/").text
+
+    assert 'id="onboarding-skip"' not in body
+    assert ">Skip<" not in body
+    # The floor the Continue button enforces, handed over rather than
+    # duplicated in the client (see interests.ONBOARDING_MIN_INTERESTS).
+    assert f'data-min-interests="{ONBOARDING_MIN_INTERESTS}"' in body
+
+
+def test_a_library_that_has_been_started_is_not_asked_again(client, db_session):
+    """One interest is enough to mean "this person has been here" — the
+    overlay would otherwise open over every visit until something is played.
+
+    The element is still in the page, because it is also what Settings'
+    "Manage interests" opens; what changes is that it starts hidden and
+    unlocked."""
     from app.models import User
 
     db_session.query(User).filter(User.id == 1).update({"interests": "rock"})
@@ -104,7 +127,9 @@ def test_a_library_that_has_been_started_gets_no_onboarding(client, db_session):
 
     body = client.get("/").text
 
-    assert 'id="onboarding"' not in body
+    overlay = body[body.index('id="interests-overlay"') :][:300]
+    assert "hidden" in overlay
+    assert "data-required" not in overlay
     assert "Nothing played yet" in body
 
 def test_channel_avatars_are_lazy_loaded(client, db_session):
