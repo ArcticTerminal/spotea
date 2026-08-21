@@ -254,7 +254,7 @@ list. Picking a playlist from there opens it the ordinary
 | GET | `/partials/detail/playlist/{kind}` | a pinned playlist |
 | GET | `/partials/detail/yt-artist/{browse_id}` | an artist's profile |
 | GET | `/partials/detail/yt-artist-songs/{browse_id}` | their whole song list |
-| GET | `/partials/detail/yt-release/{browse_id}` | an album or single |
+| GET | `/partials/detail/yt-release/{browse_id}` | an album's panel, **or** a one-track release's track as JSON (see below) |
 | GET | `/partials/detail/yt-playlist/{playlist_id}` | a YouTube Music playlist |
 | GET | `/partials/detail/yt-mood/{params}` | a mood's playlists |
 | POST/DELETE | `/artists`, `/artists/{id}` | follow, unfollow |
@@ -296,6 +296,22 @@ Two mechanisms carry almost all of the interactivity:
   playlist shelf (`yt-mood`). Remote fragments are cached per URL for the
   session, since nothing this app does changes what YouTube Music would
   answer.
+
+`yt-release` is the one route with two response shapes. A release holding
+exactly one track answers with that track as JSON instead of a panel, and
+the client plays it rather than opening anything — a one-track panel was a
+cover, a title and a single row, which is a page whose only content is a
+button to do the thing you already asked for. The rule is the track count,
+not YouTube Music's own "Single" label: it puts that label on two- and
+three-track releases too, and going by it would make the other tracks
+unreachable. Deciding costs nothing extra, because the count and the video
+id arrive in the same fetch.
+
+Playing anything that didn't come out of a list — that single, an Explore
+result, one of an artist's videos — sets a queue of exactly that one track
+(`home/remote.js`). Not an empty one: `noteCurrent` drops any queue the
+current track isn't in, so without this the queue panel would go blank while
+something plays.
 
 The player is a single `<audio>` element. It is the only one, deliberately:
 adding a second to solve an iOS background-playback problem is what caused

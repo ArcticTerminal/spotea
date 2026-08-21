@@ -19,8 +19,8 @@ Each response is one or more <template data-target="…"> blocks, so a single
 render can update several places at once.
 """
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
+from fastapi.responses import HTMLResponse, JSONResponse
 from sqlalchemy.orm import Session
 
 from app.deps import get_current_user, get_db, require_login
@@ -204,16 +204,57 @@ def remote_artist_songs_fragment(
     return templates.TemplateResponse(request, "_fragment_detail.html", context)
 
 
+def _single_track_payload(track) -> dict:
+    """The one track of a one-track release, keyed exactly the way
+    _remote_track_row.html writes its dataset — so home/remote.js's
+    playRemoteVideo takes this without caring whether it came off an element
+    or off the wire. Strings throughout for the same reason: a dataset read
+    only ever yields strings, and that function already normalizes them.
+    """
+    return {
+        "videoId": track.video_id,
+        "title": track.title,
+        "channelId": track.channel_id or "",
+        "thumbnailUrl": track.thumbnail_url or "",
+        "durationSeconds": str(track.duration_seconds) if track.duration_seconds else "",
+        "channelTitle": track.channel_title or "",
+    }
+
+
 @router.get("/detail/yt-release/{browse_id}", response_class=HTMLResponse)
-def remote_release_fragment(browse_id: str, request: Request) -> HTMLResponse:
+def remote_release_fragment(browse_id: str, request: Request) -> Response:
     """An album or single, opened from an artist's profile. One route for
-    both — YouTube Music answers them identically (see music.fetch_release)."""
+    both — YouTube Music answers them identically (see music.fetch_release).
+
+    Two response shapes, though, and which one you get is the whole of "a
+    single plays instead of opening":
+
+    - More than one track: the panel, as HTML, like every other detail route.
+    - Exactly one: that track as JSON, and no panel at all. A one-track
+      release's panel was a cover, a title and a single row — a page whose
+      only content was a button to do the thing you had already asked for.
+
+    "Exactly one track" rather than YouTube Music's own "Single" type,
+    because the type is not the question being asked: YT labels plenty of
+    two- and three-track releases "Single" too, and force-playing the first
+    of those would make the rest unreachable. It also costs nothing to be
+    accurate here — the track count and the video id arrive in the same
+    fetch, so this branch is free either way.
+
+    The client (home/detail.js's resolveRelease) tells the two apart by
+    content type and caches whichever it got, so a second click on the same
+    release costs no YouTube request regardless of which shape it is.
+    """
     if not RELEASE_ID_RE.match(browse_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Release not found")
 
     context = remote_release_context(browse_id)
     if context is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Could not open this release")
+
+    tracks = context["content"]
+    if len(tracks) == 1:
+        return JSONResponse(_single_track_payload(tracks[0]))
     return templates.TemplateResponse(request, "_fragment_detail.html", context)
 
 

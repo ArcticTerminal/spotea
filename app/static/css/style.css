@@ -2113,6 +2113,18 @@ button.track-link {
   display: none;
 }
 
+/* A release card that has been clicked and is waiting to find out what it
+   is (see home/detail.js — a one-track release plays, a longer one opens a
+   panel). Only this card dims, not the shelf, because only this one is
+   busy; pointer-events stops a second click firing a second request while
+   the first is still in the air. No spinner: the wait is one request long
+   and a spinner appearing and vanishing inside a small card reads as a
+   flicker rather than as progress. */
+.card.is-loading {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
 .card .thumb {
   position: relative;
   display: block;
