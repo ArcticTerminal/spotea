@@ -874,33 +874,61 @@ def test_a_country_with_a_shorter_chart_doesnt_stop_the_others(client):
     assert [a.title for a in charts.artists] == ["TR One", "US One", "US Two"]
 
 
-def test_chart_playlists_are_interleaved_and_capped(client):
-    """A country chart carries three or four playlists, not the global
-    chart's two, so four countries overflow a twelve-tile shelf — and taking
-    them in country order dropped the last country listed entirely."""
+def _country_chart_playlists(country):
+    """The four playlists a country's chart actually returns, in the order
+    YouTube Music returns them — Trending is not first. Titles and shapes
+    measured live on 2026-08-21 (US, GB, AU)."""
+    return [
+        {**CHART_PLAYLIST, "playlistId": f"PL4fGSI1pDJnLIVE{country}".ljust(34, "0"),
+         "title": f"Top 100 Live Performances - {country}"},
+        {**CHART_PLAYLIST, "playlistId": f"OLAK5uy_TREND{country}".ljust(34, "0"),
+         "title": f"Trending 20 {country}"},
+        {**CHART_PLAYLIST, "playlistId": f"PL4fGSI1pDJnDAILY{country}".ljust(34, "0"),
+         "title": f"Daily Top Music Videos - {country}"},
+        {**CHART_PLAYLIST, "playlistId": f"PL4fGSI1pDJnTOP{country}".ljust(34, "0"),
+         "title": f"Top 100 Music Videos {country}"},
+    ]
 
-    def playlists(prefix, count):
-        return [
-            {**CHART_PLAYLIST, "playlistId": f"OLAK5uy_{prefix}{i}".ljust(34, "0"),
-             "title": f"{prefix} {i}"}
-            for i in range(count)
-        ]
 
+def test_only_the_trending_playlist_survives(client):
+    """The other three are video charts — the same songs ranked by their
+    official music video's view count, plus live sets — which is not what
+    this app is for. Trending is also not first in the response, so this
+    cannot be done by taking [0]."""
+    client(get_charts={"videos": _country_chart_playlists("Turkey"), "artists": []})
+
+    titles = [p.title for p in music.fetch_charts("TR").playlists]
+
+    assert titles == ["Trending 20 Turkey"]
+
+
+def test_each_country_contributes_exactly_one_tile(client):
+    """Six countries, six tiles, in the order they were configured. The
+    interleaving that used to matter here (a country chart carried three or
+    four playlists, so four countries overflowed a twelve-tile shelf and the
+    last one listed fell off) has nothing left to do — but the shelf still
+    has to hold every country asked for."""
     client(
         get_charts=_country_charts(
-            TR={"videos": playlists("TR", 4), "artists": []},
-            US={"videos": playlists("US", 4), "artists": []},
-            GB={"videos": playlists("GB", 4), "artists": []},
-            DE={"videos": playlists("DE", 4), "artists": []},
+            **{
+                code: {"videos": _country_chart_playlists(code), "artists": []}
+                for code in ("US", "GB", "CA", "AU", "IE", "NZ")
+            }
         )
     )
 
-    titles = [p.title for p in music.fetch_charts_for(["TR", "US", "GB", "DE"]).playlists]
+    titles = [
+        p.title for p in music.fetch_charts_for(["US", "GB", "CA", "AU", "IE", "NZ"]).playlists
+    ]
 
-    assert len(titles) == 12, "the shelf's cap was not applied"
-    assert titles[:4] == ["TR 0", "US 0", "GB 0", "DE 0"]
-    # The country listed last still gets tiles, which is the whole point.
-    assert sum(t.startswith("DE") for t in titles) == 3
+    assert titles == [
+        "Trending 20 US",
+        "Trending 20 GB",
+        "Trending 20 CA",
+        "Trending 20 AU",
+        "Trending 20 IE",
+        "Trending 20 NZ",
+    ]
 
 
 def test_the_same_chart_playlist_in_two_countries_appears_once(client):

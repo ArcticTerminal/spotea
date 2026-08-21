@@ -2,6 +2,13 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# The English-speaking markets Explore's charts cover out of the box. Named
+# here rather than written inline so chart_countries can compare against it
+# — the deprecated single-country setting is only honoured while this one is
+# untouched, and that check has to mean "still the default" rather than
+# "still some particular country code".
+DEFAULT_CHART_COUNTRIES = "US,GB,CA,AU,IE,NZ"
+
 
 class Settings(BaseSettings):
     secret_key: str
@@ -17,22 +24,26 @@ class Settings(BaseSettings):
     session_https_only: bool = False
     # Whose YouTube Music charts Explore shows (see
     # services/recommendations.py). One or more country codes, comma
-    # separated: "TR", or "TR,US,GB,DE" to blend several a rank at a time
+    # separated: "TR", or "US,GB,CA" to blend several a rank at a time
     # (see music.fetch_charts_for).
     #
-    # "ZZ" is YouTube Music's own global chart and stays the default,
-    # because it is the only defensible answer for an app that has no idea
-    # where it is running. It is worth knowing what it actually contains,
-    # though: measured 2026-08-21, nine of its top twenty artists were
-    # Indian playback singers and the top five were all of them. That is not
-    # a fault, it is what the world listens to — but if it isn't what you
-    # want to browse, naming a few countries here is the fix. Nothing in the
-    # API allows filtering the global chart itself: a chart entry carries no
-    # market, and the names are Latin-script either way.
+    # The English-speaking markets, which is a choice about what this app is
+    # for rather than a technical one. "ZZ" (YouTube Music's own global
+    # chart) was the previous default and is still accepted, but it is worth
+    # knowing what it actually contains: measured 2026-08-21, nine of its top
+    # twenty artists were Indian playback singers and the top five were all
+    # of them. That is not a fault, it is what the world listens to. Nothing
+    # in the API allows filtering it — a chart entry carries no market, and
+    # the names are Latin-script either way — so naming countries is the only
+    # mechanism there is.
+    #
+    # Six of them, each contributing exactly one tile: only a country's
+    # Trending playlist is kept now (see music.CHART_TRENDING_PREFIX). All 69
+    # countries YouTube Music offers are valid here.
     #
     # One request per country, and only when Explore's batch is rebuilt (30
     # minute TTL), not per page view.
-    music_chart_countries: str = "ZZ"
+    music_chart_countries: str = DEFAULT_CHART_COUNTRIES
     # Superseded by music_chart_countries. Still read so that an existing
     # .env keeps working across the upgrade instead of silently falling back
     # to the global chart — pydantic's extra="ignore" would otherwise drop
@@ -45,13 +56,16 @@ class Settings(BaseSettings):
     def chart_countries(self) -> list[str]:
         """The country codes to chart, in order. Always at least one."""
         raw = self.music_chart_countries
-        if self.music_chart_country and self.music_chart_countries == "ZZ":
+        if self.music_chart_country and self.music_chart_countries == DEFAULT_CHART_COUNTRIES:
             # The old single-country setting is only honoured while the new
             # one is untouched, so setting both doesn't leave the deprecated
-            # one quietly winning.
+            # one quietly winning. Compared against the default rather than
+            # against a literal country code: this used to read `== "ZZ"`,
+            # which silently stopped meaning "untouched" the moment the
+            # default changed.
             raw = self.music_chart_country
         codes = [code.strip().upper() for code in raw.split(",") if code.strip()]
-        return codes or ["ZZ"]
+        return codes or DEFAULT_CHART_COUNTRIES.split(",")
 
 
 settings = Settings()
