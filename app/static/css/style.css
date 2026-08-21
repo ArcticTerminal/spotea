@@ -1,5 +1,5 @@
 /* Design tokens — every color in this file is one of these variables, never
-   a literal hex/rgb again. Change the look (e.g. swap the accent green) by
+   a literal hex/rgb again. Change the look (e.g. swap the accent color) by
    editing a value here once, instead of hunting down every place it's used.
    Values are unchanged from what they replaced — this block introduces the
    tokens without altering how anything renders.
@@ -44,10 +44,13 @@
   --text-faint-alt: #a7a7a7;
   --text-disabled: #444;
 
-  /* Accent (warm orange) */
-  --accent: #f97316;
-  --accent-hover: #fb923c;
-  --accent-tint: rgba(249, 115, 22, 0.08);
+  /* Accent (red). --accent-hover lifts rather than deepens, matching how
+     the orange it replaced behaved — a hover that darkens reads as the
+     control switching off on a #121212 page. It stops at a lightness that
+     still reads red; going lighter turns pink. */
+  --accent: #ff4343;
+  --accent-hover: #ff6161;
+  --accent-tint: rgba(255, 67, 67, 0.08);
 
   /* Danger / destructive actions */
   --danger: #f15e6c;
@@ -2253,7 +2256,7 @@ button.track-link {
    visual layer on top of it rather than another focusable element in the tab
    order, which is already four stops per card.
 
-   Hidden where there is no hover: on a phone it would be a permanent orange
+   Hidden where there is no hover: on a phone it would be a permanent accent
    disc covering the corner of every cover, and tapping the artwork plays the
    track there anyway. */
 .card .thumb::before,
@@ -2288,7 +2291,7 @@ button.track-link {
 /* The triangle, drawn rather than loaded: the app's CSP allows images only
    from 'self' and YouTube's hosts, so an inline data: URI for the glyph —
    background-image is governed by img-src — was blocked outright and left a
-   blank orange disc. clip-path has no such problem and keeps this to CSS,
+   blank accent disc. clip-path has no such problem and keeps this to CSS,
    which matters because Explore builds its cards in JS and would otherwise
    need the same markup added by hand.
 
@@ -2311,7 +2314,7 @@ button.track-link {
   transform: none;
 }
 
-/* On a touch screen this would be a permanent orange disc over the corner of
+/* On a touch screen this would be a permanent accent disc over the corner of
    every cover, and tapping the artwork already plays the track. */
 @media (hover: none) {
   .card .thumb::before,
@@ -3019,8 +3022,9 @@ audio {
 }
 
 /* (hover: hover) excludes touch — without it, tapping this on mobile leaves
-   it visibly "stuck" orange, because touch browsers apply :hover on tap but
-   never send the mouseleave that would normally clear it on desktop. */
+   it visibly "stuck" on the hover color, because touch browsers apply :hover
+   on tap but never send the mouseleave that would normally clear it on
+   desktop. */
 @media (hover: hover) {
   .btn-play-main:hover {
     transform: scale(1.06);
