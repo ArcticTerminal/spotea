@@ -157,11 +157,27 @@ One row: the last Explore batch, keyed by a hash of the interest list plus a
 payload version. Bumping `PAYLOAD_VERSION` invalidates every stored batch
 without a migration.
 
+### `track_lyrics`
+
+One row per recording (keyed by `video_id`, not by a Content row — the same
+song is several rows across previews, syncs and users). `lines` holds the
+timed lyrics as JSON, and NULL means "asked YouTube, there are none", which
+is different from having no row at all. See §7's player-panel notes for why
+the negative answer is worth storing.
+
 ### Schema changes
 
 There is no migration framework. `Base.metadata.create_all()` builds a fresh
 database; a schema change means a fresh database. The one that existed was
 deleted along with the tables it patched forward.
+
+One asymmetry is worth knowing, because it decides designs: `create_all`
+does add a missing **table** to an existing database, but never a missing
+**column**. So a new table is free and a new column is not — which is why
+`track_lyrics` is a table rather than two columns on `content`. The one
+column this app ever had to drop is handled as a guarded one-off in
+`main.py`'s lifespan (see `_drop_removed_saved_column`), and that is the
+exception, not a pattern to follow.
 
 ---
 
@@ -312,6 +328,33 @@ result, one of an artist's videos — sets a queue of exactly that one track
 (`home/remote.js`). Not an empty one: `noteCurrent` drops any queue the
 current track isn't in, so without this the queue panel would go blank while
 something plays.
+
+### The player panel
+
+The panel beside (or under) the player has two tabs, Queue and Lyrics.
+
+Below 900px it is a drawer: the artwork gives up height, the panel grows
+into it, and a downward drag closes it. At 900px and up it simply lives in
+the other half of the card, open from the moment the player is, and the
+toggle that opened it is hidden. One mechanism, not two — `setQueueOpen`
+forces "open" at that width, so `is-open` still means "this panel is
+showing" and the existing load/refresh paths work unchanged. The breakpoint
+is asserted equal in JS and CSS by a test, because a drift there means a
+panel that loads invisibly or shows empty.
+
+**Lyrics are fetched only when their tab is opened**, never on play, and
+cached in `track_lyrics` keyed by `video_id`. Both halves of that are
+measured rather than assumed: a miss costs two live YouTube requests
+(`get_watch_playlist` for the `MPLYt…` browse id, then `get_lyrics`), and of
+21 tracks sampled, 6 had timed lyrics, **0** had untimed ones, and the rest
+had none. So there is no timed-else-plain ladder — a track has timed lyrics
+or it has nothing — and the *absence* is cached as firmly as a hit (`lines`
+NULL means "asked, there are none"), because that is the common answer.
+
+Following along is a `timeupdate` consumer and touches nothing else about
+the audio element. A test pins that: an unrelated module calling `pause()`
+is the exact shape of the iOS background-playback bug this codebase already
+paid for once.
 
 The player is a single `<audio>` element. It is the only one, deliberately:
 adding a second to solve an iOS background-playback problem is what caused

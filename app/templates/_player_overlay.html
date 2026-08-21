@@ -7,22 +7,30 @@
      in client-side. -->
 <div id="player-overlay" class="player-overlay" hidden>
   <div class="player-card" id="player-root" data-content-id="" data-status="" data-stream="">
-    <button type="button" class="back-link" id="overlay-collapse-btn" aria-label="Collapse">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-arrow-left" /></svg>
-      Collapse
-    </button>
+    <!-- Everything except the panel, grouped so the two can sit side by side
+         on a wide screen. `display: contents` below that breakpoint (see
+         style.css), so on a phone this wrapper isn't in the layout at all and
+         the card's children are still its own direct flex items — the
+         artwork-gives-way-to-queue behaviour depends on that and is
+         deliberately unchanged. -->
+    <div class="player-main">
+      <button type="button" class="back-link" id="overlay-collapse-btn" aria-label="Collapse">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-arrow-left" /></svg>
+        Collapse
+      </button>
 
-    <div class="player-art">
-      <img id="player-art-img" alt="" hidden />
-    </div>
+      <div class="player-art">
+        <img id="player-art-img" alt="" hidden />
+      </div>
 
-    <div class="player-meta">
-      <h1 class="player-title"></h1>
-      <p class="player-channel"></p>
-    </div>
+      <div class="player-meta">
+        <h1 class="player-title"></h1>
+        <p class="player-channel"></p>
+      </div>
 {% with duration_label = '0:00', favorite_content_id = '', favorite_is_on = False %}
 {% include "_player_controls.html" %}
 {% endwith %}
+    </div>
 
     <!-- Starts empty and closed. The queue lives in the browser, so there is
          nothing to render here until the panel is opened and home/overlay.js
@@ -35,8 +43,25 @@
          clipped too — left on the panel they'd draw a stray line under the
          controls with nothing beneath it. -->
     <div id="queue-panel" class="queue-panel">
+      {# Two views of the same panel. The tabs are what used to be the queue's
+         own <h2>: one heading became two, so the heading became a control.
+
+         Outside .queue-panel-inner, which is the scroller — a header that
+         scrolls away with its own contents isn't one. Being outside also
+         means it needs no background to sit on: nothing ever passes behind
+         it, so there's no opaque strip seaming against the overlay's
+         gradient.
+
+         Lyrics deliberately starts empty. Nothing is fetched until this tab
+         is actually selected (see home/lyrics.js): most tracks have none,
+         and asking on every play would be two live requests thrown away. #}
+      <div class="panel-tabs" role="tablist" aria-label="Player panel">
+        <button type="button" class="panel-tab is-selected" id="panel-tab-queue" role="tab" aria-selected="true" aria-controls="queue-panel-body">Queue</button>
+        <button type="button" class="panel-tab" id="panel-tab-lyrics" role="tab" aria-selected="false" aria-controls="lyrics-panel-body">Lyrics</button>
+      </div>
       <div class="queue-panel-inner">
-        <div id="queue-panel-body"></div>
+        <div id="queue-panel-body" role="tabpanel" aria-labelledby="panel-tab-queue"></div>
+        <div id="lyrics-panel-body" class="lyrics-body" role="tabpanel" aria-labelledby="panel-tab-lyrics" hidden></div>
       </div>
     </div>
   </div>

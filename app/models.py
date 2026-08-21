@@ -259,3 +259,36 @@ class Content(Base):
 
     artist: Mapped["Artist"] = relationship(back_populates="content")
     user: Mapped["User"] = relationship(back_populates="content")
+
+
+class TrackLyrics(Base):
+    """One track's timed lyrics, or the fact that it hasn't got any.
+
+    Keyed by `video_id` rather than by a Content row: the same track can be
+    several Content rows (a preview added from Explore and the same song
+    picked up later by a sync, and one row per user besides), and the answer
+    is a property of the recording, not of anyone's library.
+
+    A new table rather than columns on `content` — which is not a stylistic
+    choice. There is no migration framework here (see ARCHITECTURE.md), and
+    `create_all` adds a missing *table* to an existing database but never a
+    missing *column*. A table is therefore free to add and a column is not.
+
+    Caching matters more than usual because a miss costs two live YouTube
+    requests (see music.fetch_timed_lyrics) and, measured, about two thirds
+    of tracks have no lyrics at all. So a negative answer is stored just as
+    firmly as a positive one: `lines` NULL means "asked, there are none",
+    which is different from having no row, meaning "never asked". Without
+    that, the common case would re-ask YouTube every single time.
+
+    Nothing expires these. Lyrics for a released recording don't change, and
+    the app has no surface that would show a stale one.
+    """
+
+    __tablename__ = "track_lyrics"
+
+    video_id: Mapped[str] = mapped_column(String(20), primary_key=True)
+    # JSON array of {text, start_ms, end_ms}. NULL = there are none.
+    lines: Mapped[str | None] = mapped_column(Text, default=None)
+    source: Mapped[str | None] = mapped_column(String(200), default=None)
+    fetched_at: Mapped[datetime] = mapped_column(default=utcnow)

@@ -156,3 +156,46 @@ def test_page_routes_require_login():
             res = anonymous.get(path, follow_redirects=False)
             assert res.status_code == 303, path
             assert res.headers["location"] == "/login", path
+
+
+def test_the_player_overlay_renders_every_element_its_script_binds(client):
+    """A structural regression guard.
+
+    home/overlay.js and player.js bind these by id at boot and, for most of
+    them, without a null check — dropping one from the template doesn't
+    degrade the player, it throws during setup and takes every later
+    setup call in pages/index.js down with it. The symptom is a blank app,
+    and nothing else in this suite would notice: every route still answers
+    200 with markup that merely happens to be missing a div.
+    """
+    body = client.get("/").text
+
+    for element_id in [
+        "player-overlay",
+        "player-root",  # the card. Dropped once; nothing failed but the app.
+        "player-art-img",
+        "queue-panel",
+        "queue-panel-body",
+        "lyrics-panel-body",
+        "panel-tab-queue",
+        "panel-tab-lyrics",
+        "queue-toggle",
+        "overlay-collapse-btn",
+        "mini-player",
+        "mini-player-progress",
+        "mini-player-playpause",
+    ]:
+        assert f'id="{element_id}"' in body, element_id
+
+
+def test_the_player_card_wraps_its_column_and_its_panel(client):
+    """The desktop layout puts .player-main and #queue-panel side by side
+    inside #player-root (see style.css's min-width: 900px block). If the
+    panel ends up inside .player-main, or the card stops wrapping both,
+    the two-column layout silently becomes one column again."""
+    body = client.get("/").text
+
+    card = body.index('id="player-root"')
+    main = body.index('class="player-main"')
+    panel = body.index('id="queue-panel"')
+    assert card < main < panel

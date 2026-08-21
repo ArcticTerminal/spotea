@@ -12,6 +12,7 @@ import {
   setupPreparingArtists,
   setupRefreshButton,
 } from "../home/library.js";
+import { setupLyricsPanel } from "../home/lyrics.js";
 import { resumeOverlayIfNeeded, setupPlayerOverlay } from "../home/overlay.js";
 import {
   setupDownloadsOverlay,
@@ -32,6 +33,9 @@ setupTabs();
 setupPlayer();
 setupFavorite();
 setupPlayerOverlay();
+// After setupPlayer: onPlayerEvent binds to the audio element that exists
+// now, and setupPlayer is what puts it there.
+setupLyricsPanel();
 setupDetailPanel();
 resumeOverlayIfNeeded();
 // resumeOverlayIfNeeded only reopens a track left playing in a previous

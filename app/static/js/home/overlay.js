@@ -409,11 +409,25 @@ function markCurrentQueueRow() {
  * Module-level rather than part of setupQueuePanel's closure because
  * collapsing or closing the player has to be able to shut the panel too.
  */
+/**
+ * Wide enough that the panel sits beside the player instead of opening
+ * inside it. Must match the breakpoint in style.css — see the
+ * `min-width: 900px` block by .player-main.
+ */
+const pinnedPanel = window.matchMedia("(min-width: 900px)");
+
 function setQueueOpen(open) {
   const panel = document.getElementById("queue-panel");
   const toggle = document.getElementById("queue-toggle");
   const overlay = document.getElementById("player-overlay");
   if (!panel || !toggle || !overlay) return;
+  // On a wide screen there is nothing to close: the panel has its own half of
+  // the card and is open from the moment the player is. Forced here rather
+  // than at each call site so that collapsing the player, closing it, or
+  // dragging on it can all keep asking for a close and simply not get one —
+  // and so that "is-open" still means "this panel is showing", which is what
+  // the load and refresh paths below both test.
+  if (pinnedPanel.matches) open = true;
   panel.classList.toggle("is-open", open);
   overlay.classList.toggle("is-queue-open", open);
   toggle.classList.toggle("is-on", open);
@@ -458,9 +472,17 @@ function setupQueuePanel() {
   // a sheet everywhere else. Bound to the card so it can skip the queue
   // itself (which scrolls) and the controls, whose own drags already mean
   // something: pulling down on the seek slider must not close anything.
+  // Guarded like the toggle and panel above. This used to be dereferenced
+  // bare, so a template change that dropped the element didn't degrade the
+  // player — it threw here at boot and took every later setup call in
+  // pages/index.js down with it, leaving a blank app rather than a broken
+  // drag gesture.
   const card = document.getElementById("player-root");
+  if (!card) return;
   let dragFrom = null;
   card.addEventListener("pointerdown", (event) => {
+    // Nothing to dismiss where the panel isn't a drawer.
+    if (pinnedPanel.matches) return;
     if (!panel.classList.contains("is-open")) return;
     if (event.target.closest("#queue-panel, input, button, a")) return;
     dragFrom = event.clientY;
@@ -490,6 +512,18 @@ function setupQueuePanel() {
     }
     load();
   });
+
+  // Pinned open from the start on a wide screen, and across a resize that
+  // crosses the breakpoint either way. Loading here rather than when the
+  // player opens costs one request for an empty queue: from then on the
+  // QUEUE_CHANGED handler above keeps the panel current, because the panel
+  // counts as open the whole time.
+  const syncPinned = () => {
+    setQueueOpen(pinnedPanel.matches);
+    if (pinnedPanel.matches) load();
+  };
+  pinnedPanel.addEventListener("change", syncPinned);
+  if (pinnedPanel.matches) syncPinned();
 }
 
 function syncQueueControls() {

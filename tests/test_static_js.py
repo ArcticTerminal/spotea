@@ -482,3 +482,43 @@ def test_every_module_import_resolves() -> None:
                     broken.append(f"{path.name} imports {name}, which {target.name} does not export")
 
     assert not broken, "\n".join(broken)
+
+
+def test_the_lyrics_panel_only_listens_to_the_audio_element() -> None:
+    """Following along is a timeupdate consumer and nothing more. The
+    player's iOS behaviour is load-bearing and easy to break from outside —
+    an unrelated module calling pause() is exactly the bug that cost days
+    (see player.js's notes on background playback)."""
+    source = (JS_DIR / "home" / "lyrics.js").read_text()
+
+    for forbidden in (".play()", ".pause()", ".src =", ".load()", "new Audio"):
+        assert forbidden not in source, f"lyrics.js touches the audio element: {forbidden}"
+    assert 'onPlayerEvent("timeupdate"' in source
+
+
+def test_lyrics_are_not_fetched_until_the_tab_is_opened() -> None:
+    """A miss is two live YouTube requests and most tracks have none, so
+    fetching on play would spend the request budget on answers nobody asked
+    for. The only paths that may call load() are selecting the tab and, once
+    selected, the track changing underneath it."""
+    source = (JS_DIR / "home" / "lyrics.js").read_text()
+
+    # Every call site of load() sits after a check that the lyrics tab is the
+    # selected one.
+    for match in re.finditer(r"^\s*(?:else )?(?:if \([^)]*\) )?load\(", source, re.M):
+        before = source[: match.start()]
+        assert 'selected !== "lyrics"' in before or "isLyrics" in before, (
+            "load() is reachable without the Lyrics tab being selected"
+        )
+
+
+def test_the_pinned_panel_breakpoint_matches_the_stylesheet() -> None:
+    """The panel counts as open on a wide screen so the existing load and
+    refresh paths keep working (see overlay.js's setQueueOpen). If the two
+    breakpoints drift, the panel is either invisible-but-loading or
+    visible-but-empty."""
+    overlay = (JS_DIR / "home" / "overlay.js").read_text()
+    css = (JS_DIR.parent / "css" / "style.css").read_text()
+
+    assert 'matchMedia("(min-width: 900px)")' in overlay
+    assert "@media (min-width: 900px)" in css

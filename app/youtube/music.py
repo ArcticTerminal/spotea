@@ -784,3 +784,64 @@ def fetch_release(browse_id: str) -> ReleaseDetail | None:
         artist_names=", ".join(artists) or None,
         tracks=tracks,
     )
+
+
+@dataclass
+class LyricLine:
+    """One line of timed lyrics, in milliseconds from the start of the track."""
+
+    text: str
+    start_ms: int
+    end_ms: int
+
+
+@dataclass
+class TimedLyrics:
+    lines: list[LyricLine]
+    source: str | None
+
+
+def fetch_timed_lyrics(video_id: str) -> TimedLyrics | None:
+    """This track's lyrics with timestamps, or None if it hasn't got any.
+
+    Two requests, not one, and there is no cheaper route: get_lyrics needs an
+    "MPLYt…" browse id, and the only place that id is published is the watch
+    playlist for the video. `limit=1` keeps the second half of that response
+    (a radio queue nobody here wants) from being built.
+
+    Measured over 21 tracks before this was written, because the numbers
+    decide how it should be used:
+
+      * timestamps: 6/21. Plain untimed lyrics: **0/21**. Where YouTube Music
+        has lyrics at all it appears to have timed ones, so there is no
+        "timed, else plain" ladder to climb — a track either has this or has
+        nothing, which is why this returns one type and None.
+      * coverage splits by what the row is. Proper song entries (what a
+        followed artist's sync produces) came back 4/9; "(Official Music
+        Video)"-style uploads 2/12. Lyrics attach to the song in YouTube
+        Music's catalogue, not to a video of it.
+
+    So roughly two thirds of a mixed library has none, which is why callers
+    cache the None as hard as they cache a hit (see services/lyrics.py) and
+    why nothing fetches this until someone asks to read it.
+    """
+    watch = _call("watch playlist (for lyrics)", "get_watch_playlist", videoId=video_id, limit=1)
+    browse_id = (watch or {}).get("lyrics")
+    if not browse_id:
+        return None
+
+    result = _call("lyrics", "get_lyrics", browse_id, timestamps=True)
+    if not result or not result.get("hasTimestamps"):
+        # Untimed lyrics are treated as no lyrics rather than rendered as a
+        # block of text: the panel exists to follow along, and a static wall
+        # that never moves while the track plays reads as broken. It also
+        # never actually happened in the sample above.
+        return None
+
+    lines = [
+        LyricLine(text=line.text, start_ms=line.start_time, end_ms=line.end_time)
+        for line in result["lyrics"]
+    ]
+    if not lines:
+        return None
+    return TimedLyrics(lines=lines, source=result.get("source"))

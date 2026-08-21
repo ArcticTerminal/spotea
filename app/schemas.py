@@ -112,6 +112,23 @@ class FavoriteOut(BaseModel):
     is_favorite: bool
 
 
+class LyricLineOut(BaseModel):
+    text: str
+    # Milliseconds from the start of the track, which is what the player's
+    # own currentTime is converted to rather than the other way round —
+    # integers compare exactly and a float second doesn't.
+    start_ms: int
+    end_ms: int
+
+
+class LyricsOut(BaseModel):
+    """`lines: None` means this track has no lyrics, which is the majority
+    answer and not an error — see services/lyrics.py."""
+
+    lines: list[LyricLineOut] | None
+    source: str | None = None
+
+
 class ChannelSearchResultOut(BaseModel):
     channel_id: str
     title: str
