@@ -12,6 +12,7 @@ from app.page_context import (
     library_context,
     queue_thumbnail_caching,
 )
+from app.services.refresh import queue_due_refresh
 from app.templating import templates
 
 router = APIRouter(dependencies=[Depends(require_login)])
@@ -34,6 +35,11 @@ def home(
     disagree about what it contains."""
     home = home_context(db, user.id)
     queue_thumbnail_caching(background_tasks, home_shelf_items(home))
+    # Opening the app is what triggers a look for new releases now, rather
+    # than a background loop running whether or not anyone is here (see
+    # services/refresh.py). Queued behind this response, so this render still
+    # shows what was already stored and the next one shows what arrived.
+    queue_due_refresh(background_tasks, user)
     interests = parse_interests(user.interests)
 
     return templates.TemplateResponse(

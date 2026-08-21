@@ -293,12 +293,30 @@ def cache_thumbnail(video_id: str, thumbnail_url: str) -> None:
     a FastAPI BackgroundTask, after the response that triggered it has
     already gone out with the original (still remote) URL — this call only
     ever affects the *next* render of this content, never the one that
-    queued it."""
-    local_url = download_thumbnail(video_id, thumbnail_url)
-    if local_url and local_url != thumbnail_url:
-        with SessionLocal() as db:
-            db.query(Content).filter(
-                Content.video_id == video_id,
-                ~Content.thumbnail_url.like("/thumbnails/%"),
-            ).update({"thumbnail_url": local_url}, synchronize_session=False)
-            db.commit()
+    queued it.
+
+    Nothing here is allowed to raise. FastAPI runs a response's background
+    tasks **in sequence**, and one that raises stops every task queued behind
+    it — so a failure in this, the least important work the app does, can
+    silently cancel work that matters. That is not hypothetical: this raised
+    ValueError("unknown url type") on every cover stored as a relative
+    /image-proxy path, which is nearly all of them, and it meant the
+    refresh-on-open queued after it in pages.py never ran at all. The page
+    looked fine and the library simply stopped checking for new releases.
+
+    The specific cause is fixed at its source (see
+    images.needs_thumbnail_caching, which now asks whether a URL is fetchable
+    rather than whether it is merely remote). This is the other half: the
+    next background task to have a bad day should take only itself down.
+    """
+    try:
+        local_url = download_thumbnail(video_id, thumbnail_url)
+        if local_url and local_url != thumbnail_url:
+            with SessionLocal() as db:
+                db.query(Content).filter(
+                    Content.video_id == video_id,
+                    ~Content.thumbnail_url.like("/thumbnails/%"),
+                ).update({"thumbnail_url": local_url}, synchronize_session=False)
+                db.commit()
+    except Exception:
+        logger.exception("Could not cache the thumbnail for %s", video_id)

@@ -1,7 +1,7 @@
 # Spotea — Architecture
 
 A self-hosted music player over YouTube Music. One login owns one library of
-followed artists; a background sync notices what they release; yt-dlp turns a
+followed artists; opening the app notices what they release; yt-dlp turns a
 track into a file on disk; the browser plays it.
 
 This document is the map. The reasoning behind individual decisions lives in
@@ -52,7 +52,8 @@ app/
   auth.py            password hashing, session key
   config.py          env-backed settings
   middleware.py      selective gzip, security headers
-  scheduler.py       background loop: refresh due users, sweep disk
+  scheduler.py       background loop: sweep disk
+  services/refresh.py  when opening the app goes and looks for new releases
   storage.py         disk accounting, purge, orphan sweeps, export
   downloader.py      yt-dlp audio extraction — the only yt-dlp importer
   images.py          avatar/thumbnail fetch + cache, /image-proxy helpers (songs and releases too)
@@ -115,8 +116,8 @@ profiles); the profile model is gone.
 | `email`, `password_hash` | email lowercased at the router; unique |
 | `audio_quality` | `high` / `low`, both remux rather than re-encode |
 | `interests` | newline-separated free text; owned by `app/interests.py` |
-| `refresh_interval_minutes` | 15 / 30 / 60 / 120 |
-| `refreshed_at` | NULL means never, which the scheduler treats as overdue |
+| `refresh_interval_minutes` | 15 / 30 / 60 / 120 — a floor between checks, not a background clock |
+| `refreshed_at` | NULL means never, which counts as due |
 
 ### `artists`
 
@@ -202,7 +203,18 @@ against `GET /artists/syncing`).
 
 ### Noticing a release
 
-`services/artist_sync.py`, on the scheduler's tick and on the Refresh button.
+`services/artist_sync.py`, triggered two ways: opening the app when the
+library is due (`services/refresh.py`, queued behind the response so the page
+never waits — that render shows what was already stored, the next one shows
+what arrived), and the Refresh button, which ignores the interval and fetches
+straight away.
+
+There is no background refresh loop. There was one, ticking every five
+minutes whether or not anyone was using the app; with the feed gone there is
+nothing that goes stale while the tab is closed, so a 150-artist library was
+being fetched around the clock to keep a page nobody was looking at correct.
+`scheduler.py` still runs, for the disk and row sweeps that genuinely belong
+on a clock.
 For each followed artist: read their page, take albums + singles, diff the
 release ids against `release_snapshot`, open each genuinely new release for
 its tracks, insert them. The whole release — title, year, kind, cover — is
@@ -307,7 +319,7 @@ list. Picking a playlist from there opens it the ordinary
 | DELETE/GET | `/storage`, `/storage/export` | clear all, zip |
 | GET | `/avatars/*`, `/thumbnails/*`, `/image-proxy` | images |
 | POST | `/register`, `/login`, `/logout` | auth |
-| GET | `/health` | db + scheduler liveness |
+| GET | `/health` | db + sweep-loop liveness |
 
 Everything except auth and `/health` requires a session.
 

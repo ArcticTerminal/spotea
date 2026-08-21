@@ -1,28 +1,25 @@
-"""The background refresh loop's per-user scheduling (app/scheduler.py).
+"""What still runs on a clock, and what moved off one.
 
-The refresh interval used to be one AppSettings row shared by the whole
-deployment, then per-Account across the profiles under it. It's now
-User.refresh_interval_minutes, so the loop has to decide *which* users
-are due on each tick rather than refreshing everyone on one shared clock.
-These tests cover that decision and the followed_artists(user_id=...) scoping
-it depends on — the loop-survives-a-failure regression test lives in
-test_health.py, which already covers the try/except shape.
+Artist refreshing used to be a background loop here, ticking every five
+minutes whether or not anyone was using the app. It now happens when someone
+opens it (app/services/refresh.py, covered in test_refresh_on_open.py). All
+that is left on the clock is the disk and row sweeps — the
+loop-survives-a-failure regression test lives in test_health.py, which
+already covers the try/except shape.
 """
 
 import asyncio
-from datetime import timedelta
+from pathlib import Path
 
 from app.auth import hash_password
 from app.content_query import followed_artists
 from app.models import Artist, User
-from app.scheduler import _due_users, _refresh_due_users
-from app.timeutil import utcnow
 
 DEFAULT_USER_ID = 1
 
 
 def _second_user(db_session, **user_kwargs) -> User:
-    """A whole second login, with one followed artist — for the scoping tests
+    """A whole second login, with one followed artist — for the scoping test
     below. A real User row rather than a bare user_id: foreign keys are
     enforced now (see app/database.py)."""
     defaults = {"email": "second@example.com", "password_hash": hash_password("x")}
@@ -39,50 +36,6 @@ def _second_user(db_session, **user_kwargs) -> User:
     return user
 
 
-def test_a_never_refreshed_user_is_always_due(db_session):
-    user = db_session.get(User, DEFAULT_USER_ID)
-    user.refreshed_at = None
-    db_session.commit()
-
-    assert user in _due_users(db_session)
-
-
-def test_a_user_past_their_own_interval_is_due(db_session):
-    user = db_session.get(User, DEFAULT_USER_ID)
-    user.refresh_interval_minutes = 30
-    user.refreshed_at = utcnow() - timedelta(minutes=31)
-    db_session.commit()
-
-    assert user in _due_users(db_session)
-
-
-def test_a_user_inside_their_own_interval_is_not_due(db_session):
-    user = db_session.get(User, DEFAULT_USER_ID)
-    user.refresh_interval_minutes = 30
-    user.refreshed_at = utcnow() - timedelta(minutes=10)
-    db_session.commit()
-
-    assert user not in _due_users(db_session)
-
-
-def test_two_users_are_judged_by_their_own_interval_independently(db_session):
-    """The whole point of moving this off a single shared AppSettings row —
-    one user picking a short interval must not drag another's refresh
-    forward, and vice versa."""
-    short = db_session.get(User, DEFAULT_USER_ID)
-    short.refresh_interval_minutes = 15
-    short.refreshed_at = utcnow() - timedelta(minutes=20)
-    db_session.commit()
-
-    long = _second_user(db_session, refresh_interval_minutes=120)
-    long.refreshed_at = utcnow() - timedelta(minutes=20)
-    db_session.commit()
-
-    due = _due_users(db_session)
-    assert short in due
-    assert long not in due
-
-
 def test_followed_feeds_scoped_to_a_user_excludes_everyone_elses(db_session):
     artist = Artist(user_id=DEFAULT_USER_ID, channel_id="https://example.com/mine", name="Mine")
     db_session.add(artist)
@@ -97,29 +50,14 @@ def test_followed_feeds_scoped_to_a_user_excludes_everyone_elses(db_session):
     assert feed_ids.isdisjoint(other_ids)
 
 
-def test_refresh_due_users_stamps_feeds_refreshed_at(db_session, monkeypatch):
-    import app.scheduler as scheduler_module
-
-    user = db_session.get(User, DEFAULT_USER_ID)
-    user.refreshed_at = None
-    db_session.commit()
-
-    monkeypatch.setattr(scheduler_module, "refresh_feeds", lambda db, artists: 0)
-
-    _refresh_due_users()
-
-    db_session.expire_all()
-    assert db_session.get(User, DEFAULT_USER_ID).refreshed_at is not None
-
-
 def test_run_scheduler_sweeps_disk_every_tick(monkeypatch):
     """The disk/DB sweeps (storage.sweep_orphans, sweep_stale_previews — see
-    scheduler._sweep_disk) have to run every tick regardless of which, if
-    any, users were due — they're not user-scoped at all."""
+    scheduler._sweep_disk) are the whole of a tick now. They are not
+    user-scoped at all, which is exactly why they stayed behind when
+    refreshing left."""
     import app.scheduler as scheduler_module
 
     calls = []
-    monkeypatch.setattr(scheduler_module, "_refresh_due_users", lambda: None)
     monkeypatch.setattr(scheduler_module, "_sweep_disk", lambda: calls.append(1))
 
     async def drive():
@@ -137,22 +75,14 @@ def test_run_scheduler_sweeps_disk_every_tick(monkeypatch):
     assert calls, "the scheduler tick never called _sweep_disk"
 
 
-def test_refresh_due_users_skips_a_user_that_is_not_due(db_session, monkeypatch):
+def test_the_scheduler_no_longer_refreshes_anyone():
+    """Not a style point: leaving the loop in beside the on-open check would
+    mean a library of 150 artists is still being fetched around the clock,
+    which is the entire thing this change removes. Asserted on the module's
+    own surface, because the loop failing silently is precisely how it went
+    unnoticed before (see run_scheduler's docstring)."""
     import app.scheduler as scheduler_module
 
-    user = db_session.get(User, DEFAULT_USER_ID)
-    user.refresh_interval_minutes = 120
-    stamp = utcnow() - timedelta(minutes=5)
-    user.refreshed_at = stamp
-    db_session.commit()
-
-    calls = []
-    monkeypatch.setattr(
-        scheduler_module, "refresh_feeds", lambda db, artists: calls.append(1) or 0
-    )
-
-    _refresh_due_users()
-
-    assert calls == []
-    db_session.expire_all()
-    assert db_session.get(User, DEFAULT_USER_ID).refreshed_at == stamp
+    assert not hasattr(scheduler_module, "_refresh_due_users")
+    assert not hasattr(scheduler_module, "_due_users")
+    assert "refresh_feeds" not in Path(scheduler_module.__file__).read_text()

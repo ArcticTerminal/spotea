@@ -237,13 +237,18 @@
           <div class="settings-row">
             <div class="settings-row-info">
               <span class="settings-row-label">Check for new releases</span>
-              <span class="settings-row-desc">How often followed artists are checked for new releases in the background.</span>
+              {# A floor, not a clock. Nothing runs in the background waiting
+                 for this to elapse any more (see services/refresh.py) — the
+                 check happens when you open the app, and this is how long it
+                 waits before bothering to look again. The Refresh button
+                 ignores it entirely, which is what that button is for. #}
+              <span class="settings-row-desc">Followed artists are checked when you open the app, at most this often. Refresh checks straight away.</span>
             </div>
             <select id="refresh-interval-select" class="settings-select" aria-label="Check for new releases">
-              <option value="15" {{ 'selected' if refresh_interval_minutes == 15 }}>Every 15 minutes</option>
-              <option value="30" {{ 'selected' if refresh_interval_minutes == 30 }}>Every 30 minutes</option>
-              <option value="60" {{ 'selected' if refresh_interval_minutes == 60 }}>Every hour</option>
-              <option value="120" {{ 'selected' if refresh_interval_minutes == 120 }}>Every 2 hours</option>
+              <option value="15" {{ 'selected' if refresh_interval_minutes == 15 }}>At most every 15 minutes</option>
+              <option value="30" {{ 'selected' if refresh_interval_minutes == 30 }}>At most every 30 minutes</option>
+              <option value="60" {{ 'selected' if refresh_interval_minutes == 60 }}>At most hourly</option>
+              <option value="120" {{ 'selected' if refresh_interval_minutes == 120 }}>At most every 2 hours</option>
             </select>
           </div>
         </section>
