@@ -1786,10 +1786,6 @@ button.track-link {
   background: var(--favorite);
 }
 
-.channel-card-icon.is-saved {
-  background: var(--accent);
-}
-
 .channel-card-icon.is-new-uploads {
   background: var(--new-upload);
 }
@@ -2078,11 +2074,11 @@ button.track-link {
 
 .track-duration {
   flex: 0 0 auto;
-  /* Pins duration (and .btn-save after it) to the row's right edge
-     regardless of .track-link's own width — .track-link no longer caps
-     itself to stop a short title from leaving a dead gap here; this margin
-     does that job instead, so the row still fills .layout's full width on
-     a wide viewport. */
+  /* Pins the duration to the row's right edge regardless of
+     .track-link's own width — .track-link no longer caps itself to stop a
+     short title from leaving a dead gap here; this margin does that job
+     instead, so the row still fills .layout's full width on a wide
+     viewport. */
   margin-left: auto;
   display: flex;
   align-items: center;
@@ -2096,10 +2092,6 @@ button.track-link {
   width: 13px;
   height: 13px;
   color: var(--accent);
-}
-
-.track-row .btn-save {
-  flex: 0 0 auto;
 }
 
 @media (max-width: 480px) {
@@ -2329,34 +2321,6 @@ button.track-link {
     transition: none;
     transform: none;
   }
-}
-
-/* Save-for-later toggle, pinned to the right end of the card's action row so
-   it sits with the other actions instead of floating over the artwork. */
-.btn-save {
-  flex-shrink: 0;
-  background: none;
-  border: none;
-  color: var(--text-muted);
-  cursor: pointer;
-  min-width: 44px;
-  min-height: 44px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.btn-save svg {
-  width: 16px;
-  height: 16px;
-}
-
-.btn-save:hover {
-  color: var(--white);
-}
-
-.btn-save.is-on {
-  color: var(--accent);
 }
 
 .card-body {

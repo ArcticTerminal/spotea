@@ -2,7 +2,6 @@
   class="track-row"
   data-content-id="{{ item.id }}"
   data-status="{{ item.status }}"
-  data-saved="{{ 'true' if item.is_saved else 'false' }}"
 >
   <a class="track-link" href="/#player/{{ item.id }}" aria-label="Play {{ item.title }}">
     <span class="track-index">{{ index }}</span>
@@ -30,21 +29,4 @@
     {% endif %}
     {{ item.duration_seconds | duration if item.duration_seconds else '' }}
   </span>
-  {# Left out where the row is already inside a list the user assembled on
-     purpose — the queue. Bookmarking something out of the queue you are
-     listening to right now saves it into a second list to listen to later,
-     which is a distinction without a difference, and it put a second tap
-     target on every row of a panel whose rows exist to be tapped. #}
-  {% if show_save | default(true) %}
-  <button
-    type="button"
-    class="btn-save{{ ' is-on' if item.is_saved else '' }}"
-    data-content-id="{{ item.id }}"
-    aria-pressed="{{ 'true' if item.is_saved else 'false' }}"
-    title="{{ 'Saved for later' if item.is_saved else 'Save for later' }}"
-    aria-label="Save for later"
-  >
-    <svg viewBox="0 0 24 24" fill="{{ 'currentColor' if item.is_saved else 'none' }}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-bookmark" /></svg>
-  </button>
-  {% endif %}
 </div>

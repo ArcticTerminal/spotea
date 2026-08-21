@@ -55,7 +55,6 @@ class ContentOut(BaseModel):
     status: str
     added_at: datetime
     is_favorite: bool
-    is_saved: bool
     is_played: bool
     # See Content.is_unavailable — openPlayer reads it off this payload to
     # decide whether to even attempt a download.
@@ -85,7 +84,6 @@ class ContentOut(BaseModel):
             status=content.status,
             added_at=content.added_at,
             is_favorite=content.is_favorite,
-            is_saved=content.is_saved,
             is_played=content.last_played_at is not None,
             is_unavailable=content.is_unavailable,
         )
@@ -112,11 +110,6 @@ class StatusOut(BaseModel):
 class FavoriteOut(BaseModel):
     id: int
     is_favorite: bool
-
-
-class SavedOut(BaseModel):
-    id: int
-    is_saved: bool
 
 
 class ChannelSearchResultOut(BaseModel):

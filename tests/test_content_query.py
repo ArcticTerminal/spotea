@@ -28,7 +28,6 @@ def _seed(db_session, *, channels=("Alpha Channel", "Beta Channel"), count=25):
             title=f"Title {count - i:03d}",
             published_at=now - timedelta(days=i),
             is_favorite=(i % 5 == 0),
-            is_saved=(i % 4 == 0),
             status="ready" if i < 3 else "not_downloaded",
         )
         items.append(item)
@@ -94,15 +93,6 @@ def test_filter_favorites(db_session):
     assert total_pages == 1
     assert items  # at least one favorite (i % 5 == 0 in the seed)
     assert all(i.is_favorite for i in items)
-
-
-def test_filter_saved(db_session):
-    _seed(db_session, count=25)
-
-    items, page, total_pages = query_content_page(db_session, USER_ID, filter="__saved__", page_size=100)
-
-    assert items
-    assert all(i.is_saved for i in items)
 
 
 def test_filter_by_channel_title(db_session):

@@ -76,8 +76,8 @@ def _seed(db_session):
                 status="ready", file_path="/nonexistent.m4a", file_size_bytes=3 * 1024 * 1024,
             ),
             Content(
-                artist_id=artist.id, user_id=USER_ID, video_id="partsave001", title="Saved And Played",
-                published_at=datetime(2025, 12, 1), is_saved=True, last_played_at=now,
+                artist_id=artist.id, user_id=USER_ID, video_id="partplay001", title="Played Recently",
+                published_at=datetime(2025, 12, 1), last_played_at=now,
             ),
         ]
     )
@@ -129,20 +129,20 @@ def _shelf_row(html, row_id):
 
 
 def test_home_fragment_reflects_a_change_without_a_page_reload(client, db_session):
-    """A save has to show up in the next fragment render — this is the
+    """Favoriting has to show up in the next fragment render — this is the
     behaviour that replaced hand-patching the shelf."""
     _seed(db_session)
     content = db_session.query(Content).filter(Content.video_id == "partnew0001").first()
     marker = f'data-content-id="{content.id}"'
 
     before = _fragment_body(client.get("/partials/home").text, "home-shelves")
-    assert marker not in _shelf_row(before, "home-saved-row")
+    assert marker not in _shelf_row(before, "home-favorites-row")
 
-    res = client.post(f"/content/{content.id}/save")
+    res = client.post(f"/content/{content.id}/favorite")
     assert res.status_code == 200
 
     after = _fragment_body(client.get("/partials/home").text, "home-shelves")
-    assert marker in _shelf_row(after, "home-saved-row")
+    assert marker in _shelf_row(after, "home-favorites-row")
 
 
 def test_library_fragment_counts_follow_the_data(client, db_session):
@@ -150,9 +150,9 @@ def test_library_fragment_counts_follow_the_data(client, db_session):
     content = db_session.query(Content).filter(Content.video_id == "partnew0001").first()
 
     before = _fragment_body(client.get("/partials/library").text, "library-grid")
-    assert "1 song</span>" in before  # one saved item
+    assert "1 song</span>" in before  # one favorite
 
-    client.post(f"/content/{content.id}/save")
+    client.post(f"/content/{content.id}/favorite")
 
     after = _fragment_body(client.get("/partials/library").text, "library-grid")
     assert "2 songs</span>" in after
@@ -292,9 +292,8 @@ def test_playlist_detail_fragments(client, db_session):
 
     for kind, expected, unexpected in [
         ("favorites", "A Favorite", "Fresh Upload"),
-        ("saved", "Saved And Played", "A Favorite"),
         ("new-uploads", "Fresh Upload", "A Favorite"),
-        ("recently-played", "Saved And Played", "Fresh Upload"),
+        ("recently-played", "Played Recently", "Fresh Upload"),
     ]:
         res = client.get(f"/partials/detail/playlist/{kind}")
         assert res.status_code == 200, kind
@@ -319,7 +318,6 @@ def test_empty_playlist_detail_fragments_render_their_empty_state(client):
     rather than re-spelling every sentence."""
     for kind, title in [
         ("favorites", "Songs you like live here"),
-        ("saved", "Nothing saved yet"),
         ("new-uploads", "No new releases yet"),
         ("recently-played", "Nothing played yet"),
     ]:
@@ -339,7 +337,7 @@ def test_queue_fragment_renders_the_ids_in_the_order_it_was_given(client, db_ses
     in exactly the order asked for rather than in any query order."""
     _seed(db_session)
     rows = {c.video_id: c.id for c in db_session.query(Content).all()}
-    wanted = [rows["partsave001"], rows["partnew0001"], rows["partfav0001"]]
+    wanted = [rows["partplay001"], rows["partnew0001"], rows["partfav0001"]]
 
     body = _fragment_body(
         client.get(f"/partials/queue?ids={','.join(str(i) for i in wanted)}").text,
@@ -354,11 +352,6 @@ def test_queue_fragment_renders_the_ids_in_the_order_it_was_given(client, db_ses
     # marked in the browser now, so nothing here says so.
     assert body.count('class="track-row"') == len(wanted)
     assert "is-current" not in body
-    # A queue row is for playing, and nothing else: bookmarking a track out of
-    # the list you are already listening to saves it to listen to later. The
-    # same template still renders the button everywhere else, which is what
-    # makes this worth pinning.
-    assert "btn-save" not in body
 
 
 def test_queue_fragment_ignores_ids_that_arent_the_users(client, db_session):
@@ -505,7 +498,6 @@ def test_fragments_are_scoped_to_the_current_profile(client, db_session):
             video_id="otherprof01",
             title="Not Yours",
             is_favorite=True,
-            is_saved=True,
             last_played_at=utcnow(),
         )
     )

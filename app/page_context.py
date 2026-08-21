@@ -55,10 +55,10 @@ def queue_thumbnail_caching(background_tasks: BackgroundTasks, items: Iterable[C
 
 
 def _shelf_query(db: Session, user_id: int):
-    # is_preview excludes Explore videos not yet favorited/saved — see
+    # is_preview excludes Explore videos not yet favorited — see
     # routers/explore.py's add_single_video and routers/content.py's
-    # add_favorite/add_saved. Listening to one shouldn't look like it's
-    # already saved.
+    # add_favorite. Listening to one shouldn't look like it's already in
+    # the library.
     return (
         db.query(Content)
         .options(joinedload(Content.artist))
@@ -93,10 +93,10 @@ def home_context(db: Session, user_id: int) -> dict:
         ),
         # Not built on _shelf_query: an Explore preview that's actually been
         # played earns a spot here even though it's still is_preview (never
-        # favorited/saved) — otherwise playing something from Explore and
+        # favorited) — otherwise playing something from Explore and
         # coming back to Home would make it look like nothing happened. New
-        # uploads/Favorites/Saved have no such case, since none of those imply
-        # the user ever listened.
+        # uploads/Favorites have no such case, since neither implies the user
+        # ever listened.
         "home_recently_played": (
             db.query(Content)
             .options(joinedload(Content.artist))
@@ -112,17 +112,10 @@ def home_context(db: Session, user_id: int) -> dict:
             .limit(HOME_SHELF_LIMIT)
             .all()
         ),
-        "home_saved": (
-            _shelf_query(db, user_id)
-            .filter(Content.is_saved.is_(True))
-            .order_by(Content.published_at.desc())
-            .limit(HOME_SHELF_LIMIT)
-            .all()
-        ),
     }
 
 
-HOME_SHELF_KEYS = ("home_new_uploads", "home_recently_played", "home_favorites", "home_saved")
+HOME_SHELF_KEYS = ("home_new_uploads", "home_recently_played", "home_favorites")
 
 
 def home_shelf_items(context: dict) -> list[Content]:
@@ -149,7 +142,7 @@ def _artist_release_count(artist: Artist) -> int:
 
 
 def library_context(db: Session, user_id: int) -> dict:
-    """Library's channel grid: per-channel counts plus the four pinned
+    """Library's channel grid: per-channel counts plus the three pinned
     virtual-playlist tiles.
 
     Each count matches its page's own filter exactly (see content_query.py's
@@ -173,7 +166,7 @@ def library_context(db: Session, user_id: int) -> dict:
         # per-artist query each — count_content can't be reused directly here
         # for that reason (it's one artist_id at a time), but the filter has to
         # match it anyway: is_preview excludes Explore videos not yet
-        # favorited/saved, same as content_query._content_query, or a tile
+        # favorited, same as content_query._content_query, or a tile
         # can read a higher count than the channel page it opens onto lists
         # (measured live: 156 vs 154).
         #
@@ -191,11 +184,6 @@ def library_context(db: Session, user_id: int) -> dict:
         "favorites_count": (
             db.query(func.count(Content.id))
             .filter(Content.user_id == user_id, Content.is_favorite.is_(True))
-            .scalar()
-        ),
-        "saved_count": (
-            db.query(func.count(Content.id))
-            .filter(Content.user_id == user_id, Content.is_saved.is_(True))
             .scalar()
         ),
         "new_uploads_count": (
@@ -266,13 +254,6 @@ PLAYLIST_KINDS: dict[str, PinnedPlaylist] = {
         "Songs you like live here",
         "Tap the heart on any song and it lands in this list.",
         "Find something to play",
-    ),
-    "saved": PinnedPlaylist(
-        "__saved__",
-        "Saved for later",
-        "Nothing saved yet",
-        "Tap the bookmark on a song to come back to it later.",
-        "Find something to save",
     ),
     "new-uploads": PinnedPlaylist(
         "__new_uploads__",

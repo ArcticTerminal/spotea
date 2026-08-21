@@ -40,7 +40,7 @@ def new_upload_filter() -> ColumnElement[bool]:
     All three conditions are load-bearing and none is implied by the others.
     is_new_upload alone never expires (see NEW_UPLOAD_MAX_AGE). The
     Artist.followed check covers two separate cases: Explore-added content
-    keeps a live artist_id even after being favorited/saved, but that artist is
+    keeps a live artist_id even after being favorited, but that artist is
     only a placeholder (see routers/explore.py's _get_or_create_placeholder);
     and a channel that was unfollowed while some of its content was kept
     (see routers/artists.py's delete_feed) leaves is_new_upload=True rows
@@ -89,11 +89,10 @@ def _content_query(
     to prevent — a "Play all" that quietly played a different set than the
     list it was launched from would be indistinguishable from a shuffle bug.
     """
-    # is_preview excludes Explore videos not yet favorited/saved — see
+    # is_preview excludes Explore videos not yet favorited — see
     # routers/explore.py's add_single_video and routers/content.py's
-    # add_favorite/add_saved. Favorites/Saved never actually hit this in
-    # practice (favoriting/saving already clears is_preview as a side
-    # effect), but the channel-detail page (artist_id) could otherwise be
+    # add_favorite. Favorites never actually hits this in practice
+    # (favoriting already clears is_preview as a side effect), but the channel-detail page (artist_id) could otherwise be
     # reached directly for a placeholder artist, so it's filtered here for
     # every caller, not just some — except __played__ (Recently Played),
     # where a preview that's actually been listened to still belongs on the
@@ -112,7 +111,6 @@ def _content_query(
     needs_feed_join = filter not in (
         "",
         "__favorites__",
-        "__saved__",
         "__played__",
         "__new_uploads__",
     )
@@ -121,8 +119,6 @@ def _content_query(
 
     if filter == "__favorites__":
         query = query.filter(Content.is_favorite.is_(True))
-    elif filter == "__saved__":
-        query = query.filter(Content.is_saved.is_(True))
     elif filter == "__played__":
         query = query.filter(Content.last_played_at.isnot(None))
     elif filter == "__new_uploads__":

@@ -2,7 +2,6 @@
   class="card"
   data-content-id="{{ item.id }}"
   data-status="{{ item.status }}"
-  data-saved="{{ 'true' if item.is_saved else 'false' }}"
 >
   <a class="thumb" href="/#player/{{ item.id }}" aria-label="Play {{ item.title }}">
     {% if item.thumbnail_url %}
@@ -31,16 +30,6 @@
           <a class="card-link" href="/#player/{{ item.id }}">{{ item.artist.name }}</a>
         </p>
       </div>
-      <button
-        type="button"
-        class="btn-save{{ ' is-on' if item.is_saved else '' }}"
-        data-content-id="{{ item.id }}"
-        aria-pressed="{{ 'true' if item.is_saved else 'false' }}"
-        title="{{ 'Saved for later' if item.is_saved else 'Save for later' }}"
-        aria-label="Save for later"
-      >
-        <svg viewBox="0 0 24 24" fill="{{ 'currentColor' if item.is_saved else 'none' }}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-bookmark" /></svg>
-      </button>
     </div>
   </div>
 </article>

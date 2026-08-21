@@ -14,7 +14,7 @@
 
    That matters: the outer element is what CSS sizes, what JS toggles
    `hidden` on (see the `X svg[hidden] { display: none }` rules in
-   style.css), and what JS rewrites `fill` on for the favorite/save toggles.
+   style.css), and what JS rewrites `fill` on for the favorite toggle.
    None of that would work if those attributes moved onto the symbol, so the
    symbols carry geometry only. Every <svg> in the app already shared
    viewBox="0 0 24 24", so the symbols deliberately have no viewBox of their
@@ -34,7 +34,6 @@
   <symbol id="i-search"><circle cx="11" cy="11" r="7"></circle><line x1="20.5" y1="20.5" x2="16" y2="16"></line></symbol>
   <symbol id="i-settings"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></symbol>
   <symbol id="i-check"><polyline points="20 6 9 17 4 12"></polyline></symbol>
-  <symbol id="i-bookmark"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></symbol>
   <symbol id="i-arrow-left"><path d="M19 12H5"></path><path d="M12 19l-7-7 7-7"></path></symbol>
   <symbol id="i-play"><path d="M8 5v14l11-7z"></path></symbol>
   <symbol id="i-pause"><path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z"></path></symbol>

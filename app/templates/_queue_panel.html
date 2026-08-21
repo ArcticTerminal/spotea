@@ -1,12 +1,10 @@
 {# What's in the queue, in play order, inside the player overlay.
 
    Rows come from _content_row.html — the same template a playlist's track
-   list uses — so a queue row has the same artwork, duration and download
-   mark as the row it was queued from (but no save button; see there), and
-   clicking one plays it without any extra wiring: the href is the ordinary
-   /#player/<id> route,
-   and queue.js's noteCurrent moves the pointer to whatever opens (see its
-   docstring).
+   list uses — so a queue row is identical to the row it was queued from,
+   and clicking one plays it without any extra wiring: the href is the
+   ordinary /#player/<id> route, and queue.js's noteCurrent moves the
+   pointer to whatever opens (see its docstring).
 
    The whole queue, including what's already played, and with nothing here
    saying which row is current — home/overlay.js's markCurrentQueueRow puts
@@ -19,7 +17,7 @@
 <h2 class="queue-heading">Queue</h2>
 {% if queue_items %}
 {% for item in queue_items %}
-{% with index = loop.index, show_channel = true, show_save = false %}
+{% with index = loop.index, show_channel = true %}
 {% include "_content_row.html" %}
 {% endwith %}
 {% endfor %}

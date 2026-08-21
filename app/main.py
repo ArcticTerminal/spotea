@@ -69,10 +69,55 @@ def _assert_single_worker() -> None:
         )
 
 
+def _drop_removed_saved_column() -> None:
+    """Drops `content.is_saved` and its index from a database that predates
+    save-for-later's removal.
+
+    ARCHITECTURE.md says there is no migration framework and a schema change
+    means a fresh database, and that stays true — this is not one, and
+    nothing here generalizes to the next change. It exists because this
+    particular change cannot be left to the user. `is_saved` is NOT NULL with
+    no default, and nothing writes it any more, so on an old database every
+    INSERT into `content` fails: no track added from Explore, no release
+    picked up by a sync. An app that silently can't add music is worse than
+    one that spends a few milliseconds at startup checking a PRAGMA.
+
+    Not a script, because a script has nowhere to run in this deployment: the
+    image carries no sqlite3 CLI and no scripts/ directory, and on the host
+    the database file belongs to the container's user, not the operator's.
+    Here it runs as the right user, inside the container, exactly once.
+
+    A no-op on every start after the first, and on any database `create_all`
+    just built.
+    """
+    with engine.begin() as conn:
+        columns = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(content)")}
+        if "is_saved" not in columns:
+            return
+
+        # DROP COLUMN refuses while an index still references the column, so
+        # the partial index goes first. Both inside engine.begin()'s
+        # transaction: the app expects either shape, never a half-applied one.
+        try:
+            conn.exec_driver_sql("DROP INDEX IF EXISTS ix_content_user_saved")
+            conn.exec_driver_sql("ALTER TABLE content DROP COLUMN is_saved")
+        except Exception as exc:  # pragma: no cover - depends on the SQLite build
+            raise RuntimeError(
+                "Could not drop the obsolete content.is_saved column, which "
+                "this version of Spotea needs gone before it can add a track "
+                "(DROP COLUMN needs SQLite 3.35 or newer). Back up "
+                "./data/spotea.db, then either upgrade SQLite or start from a "
+                "fresh database."
+            ) from exc
+
+    logger.info("Dropped the obsolete content.is_saved column and its index")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _assert_single_worker()
     Base.metadata.create_all(bind=engine)
+    _drop_removed_saved_column()
 
     # Exactly once, here, before anything else in the process has had a
     # chance to start a download — see storage.sweep_startup_leftovers for

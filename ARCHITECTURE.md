@@ -139,13 +139,13 @@ instead of discarded. See "Explore & recommendations" below.
 
 One track. `artist_id` + `user_id`, `video_id` unique per user, plus the
 download state (`status`, `file_path`, `file_size_bytes`, `is_unavailable`),
-the engagement flags (`is_favorite`, `is_saved`, `last_played_at`) and two
-that decide where a row shows up:
+the engagement flags (`is_favorite`, `last_played_at`) and two that decide
+where a row shows up:
 
 - `is_new_upload` — the sync inserted it, meaning it was released after the
   follow. That is what Home's **New releases** shelf means.
-- `is_preview` — added from Explore and not favorited or saved yet. Plays
-  normally, stays out of Library, swept after 7 days.
+- `is_preview` — added from Explore and not favorited yet. Plays normally,
+  stays out of Library, swept after 7 days.
 
 Indexes are not cosmetic: measured on a 30k-row library they took the ten
 hottest queries from 81.7ms of SQLite time to 3.8ms. See the comments on

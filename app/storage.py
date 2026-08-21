@@ -296,7 +296,7 @@ def sweep_stale_previews(db: Session) -> int:
     """Removes Explore previews nobody ever did anything with, once they're
     older than PREVIEW_RETENTION — same "did the user do anything with this"
     test routers/artists.py's delete_feed uses when deciding what an unfollow
-    may remove (played, favorited, saved, or actually downloaded keeps a row
+    may remove (played, favorited, or actually downloaded keeps a row
     forever, however old). Also removes any placeholder artist (followed=False)
     a swept preview leaves with no content at all — the same cleanup
     delete_feed does on the unfollow path, needed here too for a placeholder
@@ -311,7 +311,6 @@ def sweep_stale_previews(db: Session) -> int:
             Content.status != "ready",
             Content.last_played_at.is_(None),
             Content.is_favorite.is_(False),
-            Content.is_saved.is_(False),
         )
         .all()
     )

@@ -82,16 +82,4 @@
       </div>
     </div>
 
-    <div class="shelf" id="home-shelf-saved" {% if not home_saved %}hidden{% endif %}>
-      <div class="shelf-header">
-        <h2 class="shelf-title">Saved for later</h2>
-        <a class="shelf-see-more" href="/#saved" data-detail-kind="saved" hidden>See more ›</a>
-      </div>
-      <div class="shelf-row" id="home-saved-row" data-queue-kind="saved">
-        {% for item in home_saved %}
-        {% include "_content_card.html" %}
-        {% endfor %}
-      </div>
-    </div>
-
     {% endif %}

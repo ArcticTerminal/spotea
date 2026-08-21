@@ -61,6 +61,12 @@ docker compose up -d --build
 
 Your `./data` volume is untouched by rebuilds.
 
+Save-for-later was removed, and its column goes with it: the first start
+after the update drops `content.is_saved` automatically, because leaving it
+would stop the app adding any track at all. Nothing you had saved is carried
+over anywhere — the feature is gone, not moved. Run `./scripts/backup.sh`
+first if you want a copy of the old shape.
+
 Upgrading across the music-only rewrite needs a fresh database: the schema
 changed shape (feeds became artists, profiles were folded into the account)
 and no migration path was written for it. Move `./data/spotea.db` aside,
