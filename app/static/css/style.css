@@ -3772,6 +3772,22 @@ body.has-mini-player .layout {
 
 /* "Released this year" and nothing finer — YouTube Music reports only a year
    on the artist page (see music.ArtistRelease). */
+/* What kind of release a card is — Album, Single, EP. Muted rather than
+   accent, unlike .badge-new below: it is on every card, and a colour that
+   loud repeated twenty times down a grid stops meaning anything. It also
+   has to lose to "New" when both are on the same line. */
+.badge-kind {
+  margin-right: 0.35rem;
+  padding: 0.05rem 0.35rem;
+  border-radius: 4px;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
 .badge-new {
   margin-left: 0.4rem;
   padding: 0.05rem 0.35rem;

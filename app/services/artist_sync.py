@@ -246,7 +246,6 @@ def apply_artist_data(db: Session, artist: Artist, result: ArtistFetchResult) ->
                     # answer — and on a refresh interval measured in minutes
                     # it is close enough to be the right one.
                     published_at=utcnow(),
-                    is_new_upload=True,
                 )
             )
             new_count += 1

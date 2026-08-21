@@ -2,7 +2,6 @@ from datetime import datetime, timedelta
 
 from app.content_query import query_content_page
 from app.models import Artist, Content
-from app.timeutil import utcnow
 
 USER_ID = 1
 
@@ -120,36 +119,6 @@ def test_only_returns_the_requesting_users_content(db_session):
     items, page, total_pages = query_content_page(db_session, USER_ID + 999)
 
     assert items == []
-
-
-def test_filter_new_uploads(db_session):
-    artist = Artist(user_id=USER_ID, channel_id="https://example.com/new-uploads-artist", name="C")
-    db_session.add(artist)
-    db_session.commit()
-    db_session.refresh(artist)
-
-    # Relative to "now" rather than a fixed literal — new_upload_cutoff()
-    # (content_query.py) is a rolling window off the real current time, so a
-    # hardcoded past date eventually ages out of it and starts failing on its
-    # own regardless of anything this test is actually checking.
-    now = utcnow()
-    db_session.add_all(
-        [
-            Content(
-                artist_id=artist.id, user_id=USER_ID, video_id="rssvid0001", title="From RSS",
-                published_at=now, is_new_upload=True,
-            ),
-            Content(
-                artist_id=artist.id, user_id=USER_ID, video_id="backfvid01", title="From backfill",
-                published_at=now, is_new_upload=False,
-            ),
-        ]
-    )
-    db_session.commit()
-
-    items, _, _ = query_content_page(db_session, USER_ID, filter="__new_uploads__", page_size=100)
-
-    assert [i.title for i in items] == ["From RSS"]
 
 
 def test_filter_played_orders_by_last_played_at_not_published_at(db_session):

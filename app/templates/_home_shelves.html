@@ -74,28 +74,22 @@
     {# Releases, not Content rows: these are albums and singles to open, and
        the cards carry data-release-id rather than a content id, so they go
        through home/detail.js's release handler exactly like the ones on an
-       artist profile do. No "See more" — there is no page that lists these,
-       and the artist's own profile is where the rest of them live.
+       artist profile do. "See more" opens Library's tile of the same name,
+       which is the same releases without the twelve-card cap.
 
-       No data-queue-kind either, for the same reason: there is nothing here
-       to queue. A one-track single plays on click (see the release handler);
-       anything longer opens. #}
+       No data-queue-kind: there is nothing here to queue. A one-track single
+       plays on click (see the release handler); anything longer opens. #}
     <div class="shelf">
       <div class="shelf-header">
         <h2 class="shelf-title">New releases</h2>
+        <a class="shelf-see-more" href="/#new-uploads" data-detail-kind="new-uploads" hidden>See more ›</a>
       </div>
       {% if home_new_releases %}
       <div class="shelf-row" id="home-new-releases-row">
         {% for release in home_new_releases %}
-        <article class="card release-card" data-release-id="{{ release.browse_id }}" data-title="{{ release.title }}">
-          <button type="button" class="thumb" aria-label="Open {{ release.title }}">
-            {% if release.cover_url %}<img src="{{ release.cover_url }}" alt="" loading="lazy" />{% endif %}
-          </button>
-          <div class="card-body">
-            <h3 class="card-title" title="{{ release.title }}">{{ release.title }}</h3>
-            <p class="card-channel" title="{{ release.artist_name }}">{{ release.artist_name }}</p>
-          </div>
-        </article>
+        {% with release_subtitle = release.artist_name %}
+        {% include "_release_card.html" %}
+        {% endwith %}
         {% endfor %}
       </div>
       {% else %}

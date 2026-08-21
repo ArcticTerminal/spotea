@@ -138,7 +138,11 @@ def test_favorites_playlist_count_excludes_previews(db_session):
 # --------------------------------------------------------------------------
 
 
-def _release_entry(browse_id, title, year="2026"):
+THIS_YEAR = str(utcnow().year)
+
+
+def _release_entry(browse_id, title, year=THIS_YEAR):
+    """Defaults to this year, because that is the only year the shelf shows."""
     return {
         "browse_id": browse_id,
         "title": title,
@@ -172,17 +176,27 @@ def test_the_shelf_reads_releases_off_the_snapshot(db_session):
     assert shelf[0]["artist_name"] == "Alpha"
 
 
-def test_the_shelf_is_newest_year_first(db_session):
+def test_only_this_years_releases_are_shown(db_session):
+    """The year is the only date YouTube Music publishes anywhere — measured
+    on both surfaces that could carry one — so "new" can mean nothing finer.
+    Without the filter the pool is each artist's last ~20 releases going back
+    a decade."""
     _followed_with_releases(
         db_session,
         "Alpha",
         _release_entry("MPREb_old", "Old One", year="2019"),
-        _release_entry("MPREb_new", "New One", year="2026"),
+        _release_entry("MPREb_new", "New One"),
     )
 
     shelf = home_context(db_session, USER_ID)["home_new_releases"]
 
-    assert [r["title"] for r in shelf] == ["New One", "Old One"]
+    assert [r["title"] for r in shelf] == ["New One"]
+
+
+def test_a_release_with_no_year_is_not_guessed_at(db_session):
+    _followed_with_releases(db_session, "Alpha", _release_entry("MPREb_a1", "Undated", year=None))
+
+    assert home_context(db_session, USER_ID)["home_new_releases"] == []
 
 
 def test_one_prolific_artist_does_not_fill_the_shelf(db_session):

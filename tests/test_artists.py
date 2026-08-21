@@ -402,7 +402,6 @@ def test_a_later_sync_imports_only_what_appeared_since(db_session, monkeypatch):
     row = db_session.query(Content).one()
     assert row.video_id == "newtrack001"
     assert row.duration_seconds == 200, "the duration has to survive — RSS never carried one"
-    assert row.is_new_upload is True
     assert row.published_at is not None
 
 

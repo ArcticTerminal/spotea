@@ -56,20 +56,13 @@
   <div class="shelf-header"><h3 class="shelf-title">{{ heading }}</h3></div>
   <div class="shelf-row">
     {% for release in releases %}
-    <article class="card release-card" data-release-id="{{ release.browse_id }}" data-title="{{ release.title }}">
-      <button type="button" class="thumb" aria-label="Open {{ release.title }}">
-        {% if release.cover_url %}<img src="{{ release.cover_url }}" alt="" loading="lazy" />{% endif %}
-      </button>
-      <div class="card-body">
-        <h3 class="card-title" title="{{ release.title }}">{{ release.title }}</h3>
-        <p class="card-date">
-          {{ release.year or release.kind }}
-          {# The only date this surface reports is the year, so "New" can
-             mean nothing finer than "released this year". #}
-          {% if release.year and release.year == current_year %}<span class="badge-new">New</span>{% endif %}
-        </p>
-      </div>
-    </article>
+    {# The year as the subtitle: this is the artist's own page, so repeating
+       their name on every card would say nothing. "New" means released this
+       year and nothing finer — YouTube Music publishes no month or day
+       anywhere, measured. #}
+    {% with release_subtitle = release.year %}
+    {% include "_release_card.html" %}
+    {% endwith %}
     {% endfor %}
   </div>
 </div>

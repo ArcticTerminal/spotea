@@ -188,12 +188,6 @@ class Content(Base):
             "published_at",
             sqlite_where=text("is_favorite = 1"),
         ),
-        Index(
-            "ix_content_user_newupload",
-            "user_id",
-            "published_at",
-            sqlite_where=text("is_new_upload = 1"),
-        ),
         CheckConstraint(
             "status IN ('not_downloaded', 'downloading', 'ready', 'error')",
             name="ck_content_status",
@@ -250,12 +244,6 @@ class Content(Base):
     # nothing else — which is also what storage.sweep_stale_previews checks
     # before deleting one.
     is_preview: Mapped[bool] = mapped_column(default=False)
-    # True for a row the sync inserted — a release that appeared after the
-    # artist was followed (see artist_sync.apply_artist_data, the only place
-    # this is set). False for a track added deliberately from Explore. That
-    # is what "New releases" (Home shelf and Library's full playlist) means:
-    # what they put out since, not everything they have.
-    is_new_upload: Mapped[bool] = mapped_column(default=False)
 
     artist: Mapped["Artist"] = relationship(back_populates="content")
     user: Mapped["User"] = relationship(back_populates="content")

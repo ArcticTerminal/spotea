@@ -126,7 +126,7 @@ profiles); the profile model is gone.
 | `browse_id` | how YouTube Music addresses their page; opens their profile, and what the sync asks about. NULL only on placeholder rows |
 | `name`, `avatar_url` | display, filled in by the first sync |
 | `followed` | False for a placeholder created to hold one Explore track, and for an artist unfollowed while keeping some of their content |
-| `release_snapshot` | JSON array of every release the page listed last time — browse id, title, year, kind, cover. The change-detection mechanism *and* what Home's **New releases** shelf renders from. NULL means never synced. Tolerates the bare-id shape it used to hold; see `snapshot_release_ids` |
+| `release_snapshot` | JSON array of every release the page listed last time — browse id, title, year, kind, cover. The change-detection mechanism *and* what both **New releases** surfaces render from. NULL means never synced. Tolerates the bare-id shape it used to hold; see `snapshot_release_ids` |
 | `monthly_listeners` | YouTube Music's own count string ("1.91M"), refreshed every sync |
 | `related_artists` | JSON array of their "fans also like" artists, refreshed every sync — feeds Explore's **Artists you may like** shelf |
 | `top_tracks` | JSON array of their page-preview songs, refreshed every sync — feeds Explore's **Songs** shelf |
@@ -142,12 +142,14 @@ download state (`status`, `file_path`, `file_size_bytes`, `is_unavailable`),
 the engagement flags (`is_favorite`, `last_played_at`) and two that decide
 where a row shows up:
 
-- `is_new_upload` — the sync inserted it, meaning it was released after the
-  follow. That is what Library's **New releases** playlist means. Home's
-  shelf of the same name is something else — releases off `release_snapshot`
-  (see §7), not tracks.
 - `is_preview` — added from Explore and not favorited yet. Plays normally,
   stays out of Library, swept after 7 days.
+
+`is_new_upload` used to sit alongside it, flagging tracks the sync inserted
+so that a "New releases" shelf could show them. It is gone: that shelf only
+ever held releases from *after* the follow and expired them after fourteen
+days, so on a real library it was three tracks with a fortnight to live.
+Both surfaces of that name read `release_snapshot` now.
 
 Indexes are not cosmetic: measured on a 30k-row library they took the ten
 hottest queries from 81.7ms of SQLite time to 3.8ms. See the comments on
@@ -205,8 +207,20 @@ For each followed artist: read their page, take albums + singles, diff the
 release ids against `release_snapshot`, open each genuinely new release for
 its tracks, insert them. The whole release — title, year, kind, cover — is
 written back to the snapshot, not just its id: the page hands all of it over
-in this same response, and keeping it is what lets Home's shelf render
-without a request of its own.
+in this same response, and keeping it is what lets both **New releases**
+surfaces render without a request of their own.
+
+Those two surfaces are the same data at two sizes: Home's shelf shows twelve
+and links to Library's tile, which shows all of them. Both are **this
+calendar year only**, because the year is the only date YouTube Music
+publishes — measured across both responses that could carry one, there is no
+month, day, timestamp or ISO date anywhere. One caveat comes with that and
+cannot be worked around: `year` is the year of *this listing*, so a reissue
+of a 1969 album reports the current year.
+
+Neither has a Play all. A release carries no video ids until it is opened, so
+playing a page of them would be one live request each; open one and it has
+its own. A release holding exactly one track skips the panel and plays (§7).
 
 Measured live per artist per refresh: **0.38–0.76s** for the page, plus
 **0.09–0.20s** per new release — and usually there is no new release at all.
