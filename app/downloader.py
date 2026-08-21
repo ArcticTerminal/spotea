@@ -83,6 +83,36 @@ def is_permanent_failure(message: str | None) -> bool:
     return bool(message) and _PERMANENT_FAILURE_RE.search(message) is not None
 
 
+class _YtdlpLogger:
+    """Keeps yt-dlp's own output out of the container's stderr.
+
+    `quiet` and `no_warnings` silence yt-dlp's progress and warnings but not
+    its errors, which it writes straight to stderr regardless. So a rung
+    that failed and was immediately recovered from still printed a bare
+    `ERROR: unable to download video data: HTTP Error 403: Forbidden` with
+    no video id and no attempt number beside it — indistinguishable, in the
+    log, from a download that actually failed. Nothing was wrong; it just
+    read as though something was.
+
+    Nothing is lost by demoting these: the same message comes back on the
+    DownloadError this raises, and the loop below logs it at WARNING with
+    the video id and which rung it was. This is that message a second time,
+    without the context, which is exactly what made it misleading.
+    """
+
+    def debug(self, msg: str) -> None:
+        pass
+
+    def info(self, msg: str) -> None:
+        pass
+
+    def warning(self, msg: str) -> None:
+        pass
+
+    def error(self, msg: str) -> None:
+        logger.debug("yt-dlp: %s", msg)
+
+
 @dataclass(frozen=True)
 class Attempt:
     """One shot at fetching a video: which YouTube client to ask as."""
@@ -90,7 +120,7 @@ class Attempt:
     player_clients: tuple[str, ...]
 
 
-# The failure this ladder exists for is never extraction — it's YouTube
+# The failure this ladder exists for is rarely extraction — it's YouTube
 # resolving a media URL and then refusing to serve it
 # (`unable to download video data: HTTP Error 403`). Which client resolved
 # that URL is what decides whether it gets served, so the rungs are client
@@ -100,40 +130,49 @@ class Attempt:
 # 2-byte range GET on the URL it produced:
 #
 #   client        extract   usable mp4a URL             range GET
-#   android_vr    ~1.4s     yes, no PO token            206 (but 403s at random)
-#   tv_simply     ~2.9s     yes, PO-token-bound         206
+#   tv_simply     ~3.1s     yes, PO-token-bound         206
+#   android_vr    ~1.5s     NONE — no audio-only formats -
 #   web_safari    ~1.5s     NONE — SABR-forced, no URLs  -
 #   mweb          ~3.7s     yes, PO-token-bound         403
 #   web_embedded  ~3.3s     yes, no PO token            403
 #   ios           ~1.3s     NONE — needs a GVS token     -
 #
-# Two things that had been assumed here turned out to be false:
+# Three things that had been assumed here turned out to be false:
 #
 #   - web_safari was carried as android_vr's fallback. It has none to give:
 #     YouTube forces SABR on it (yt-dlp#12482), so every https format comes
 #     back without a URL and yt-dlp drops all of them. With `no_warnings`
-#     on, it said so silently. Every download this app has ever served came
-#     from android_vr alone, which is exactly why a 403 from android_vr had
-#     nothing to fall back to.
+#     on, it said so silently.
 #   - mweb was the "genuinely different client family" last rung. Its URL is
 #     PO-token-bound and still 403s, so it was costing 3.7s and a JS solver
 #     fetch to fail.
+#   - android_vr led this ladder for being "twice as fast when it works".
+#     It no longer works at all. Measured over ten tracks from the live
+#     library, it returned five formats each time and *zero* of them
+#     audio-only — so `bestaudio[...]` matched nothing and FORMAT_BY_QUALITY
+#     fell through to its `/best` rung, which is a muxed video stream.
+#     YouTube then refused to serve that, which is why the symptom read as
+#     `unable to download video data: HTTP Error 403` rather than as a
+#     missing format: the fallback turned "this client has no audio" into
+#     "this URL was rejected". Ten of ten, and the same ten all served 206
+#     on tv_simply.
 #
-# tv_simply replaces both. It is the only client measured whose media URL
-# carries a GVS PO token *and* gets served — which is the mechanism, not a
-# coincidence: the token is what YouTube checks. It needs a JS runtime for
-# nsig, but the image already has Deno, so no `remote_components` fetch.
+# So the ladder is tv_simply alone. It is the only client measured whose
+# media URL carries a GVS PO token *and* gets served — which is the
+# mechanism, not a coincidence: the token is what YouTube checks. It needs a
+# JS runtime for nsig, but the image already has Deno, so no
+# `remote_components` fetch.
 #
-# android_vr stays in front because it's twice as fast when it works, and it
-# works most of the time. When it doesn't, the cost of finding out is ~1.4s,
-# and tv_simply picks up immediately — the same format 140 at the same
-# bitrate, so nothing about the audio changes.
+# Three rungs of one client rather than two, keeping the retry budget the
+# ladder had while android_vr was burning the first one. That is not a
+# pointless repeat: the refusals this exists for are per-URL, and a fresh
+# extraction produces a fresh URL.
 #
-# There are no sleeps between rungs. The refusals are per-URL: a fresh
-# extraction produces a fresh URL, and waiting first doesn't make that URL
-# any more acceptable. The old 0s/2s/5s ladder spent its time proving that.
+# There are no sleeps between rungs, for the same reason — waiting does not
+# make an already-rejected URL any more acceptable. The old 0s/2s/5s ladder
+# spent its time proving that.
 _ATTEMPTS = (
-    Attempt(player_clients=("android_vr",)),
+    Attempt(player_clients=("tv_simply",)),
     Attempt(player_clients=("tv_simply",)),
     Attempt(player_clients=("tv_simply",)),
 )
@@ -169,15 +208,20 @@ def download_audio(video_id: str, quality: str = "high", on_progress: ProgressCa
             "noplaylist": True,
             "quiet": True,
             "no_warnings": True,
+            # Neither of the two above covers errors — see _YtdlpLogger.
+            "logger": _YtdlpLogger(),
             "socket_timeout": SOCKET_TIMEOUT_SECONDS,
             "postprocessors": [postprocessor],
             # YouTube requires a PO (Proof-of-Origin) token for several
             # clients' formats — pot-provider (see docker-compose.yml)
-            # generates these on request. Safe if pot-provider is unreachable
-            # (e.g. running outside compose): yt-dlp drops the formats that
-            # needed a token it couldn't get rather than failing outright.
-            # That degrades tv_simply to nothing, so android_vr — which uses
-            # no token at all — is what still works without the container.
+            # generates these on request. yt-dlp drops the formats that
+            # needed a token it couldn't get rather than failing outright,
+            # so an unreachable pot-provider (e.g. running outside compose)
+            # doesn't raise here — it just leaves tv_simply with nothing to
+            # download. This used to have android_vr, which needs no token,
+            # as the thing that still worked without the container; android_vr
+            # no longer serves audio at all (see _ATTEMPTS), so pot-provider
+            # is now a hard requirement rather than an optimisation.
             "extractor_args": {
                 "youtube": {"player_client": list(attempt.player_clients)},
                 "youtubepot-bgutilhttp": {"base_url": ["http://pot-provider:4416"]},
