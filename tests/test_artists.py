@@ -555,7 +555,7 @@ def test_unfollowing_keeps_recently_played_content(client, db_session):
     assert db_session.query(Content).filter(Content.id == content.id).first() is not None
 
 
-def test_unfollowing_keeps_favorited_and_saved_content(client, db_session):
+def test_unfollowing_keeps_favorited_content(client, db_session):
     artist, content = _seed_feed_with_content(db_session, is_favorite=True)
 
     res = client.delete(f"/artists/{artist.id}")

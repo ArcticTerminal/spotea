@@ -1,5 +1,5 @@
 /* Design tokens — every color in this file is one of these variables, never
-   a literal hex/rgb again. Change the look (e.g. swap the accent green) by
+   a literal hex/rgb again. Change the look (e.g. swap the accent color) by
    editing a value here once, instead of hunting down every place it's used.
    Values are unchanged from what they replaced — this block introduces the
    tokens without altering how anything renders.
@@ -44,10 +44,13 @@
   --text-faint-alt: #a7a7a7;
   --text-disabled: #444;
 
-  /* Accent (warm orange) */
-  --accent: #f97316;
-  --accent-hover: #fb923c;
-  --accent-tint: rgba(249, 115, 22, 0.08);
+  /* Accent (red). --accent-hover lifts rather than deepens, matching how
+     the orange it replaced behaved — a hover that darkens reads as the
+     control switching off on a #121212 page. It stops at a lightness that
+     still reads red; going lighter turns pink. */
+  --accent: #ff4343;
+  --accent-hover: #ff6161;
+  --accent-tint: rgba(255, 67, 67, 0.08);
 
   /* Danger / destructive actions */
   --danger: #f15e6c;
@@ -1783,10 +1786,6 @@ button.track-link {
   background: var(--favorite);
 }
 
-.channel-card-icon.is-saved {
-  background: var(--accent);
-}
-
 .channel-card-icon.is-new-uploads {
   background: var(--new-upload);
 }
@@ -2075,11 +2074,11 @@ button.track-link {
 
 .track-duration {
   flex: 0 0 auto;
-  /* Pins duration (and .btn-save after it) to the row's right edge
-     regardless of .track-link's own width — .track-link no longer caps
-     itself to stop a short title from leaving a dead gap here; this margin
-     does that job instead, so the row still fills .layout's full width on
-     a wide viewport. */
+  /* Pins the duration to the row's right edge regardless of
+     .track-link's own width — .track-link no longer caps itself to stop a
+     short title from leaving a dead gap here; this margin does that job
+     instead, so the row still fills .layout's full width on a wide
+     viewport. */
   margin-left: auto;
   display: flex;
   align-items: center;
@@ -2089,82 +2088,18 @@ button.track-link {
   font-variant-numeric: tabular-nums;
 }
 
-.track-downloaded {
-  width: 13px;
-  height: 13px;
-  color: var(--accent);
-}
+/* No mobile override for .track-row any more, and that is the fix for the
+   title running into the duration.
 
-.track-row .btn-save {
-  flex: 0 0 auto;
-}
-
-@media (max-width: 480px) {
-  /* At mobile width, duration + save button ate ~150px of the ~358px usable
-     row, leaving only ~155px for the title before it truncated. Fix: give
-     the title its own full line, and move duration down next to the date
-     on a second line.
-
-     .track-link and .track-info are only wrappers (an <a>/<button> and a
-     column layout) with no visual identity of their own here, so making
-     them `display: contents` lets their children (index/thumb/title/date)
-     become direct grid items of .track-row alongside .track-duration and
-     the save button — grid, unlike flex, can lay out items from different
-     nesting depths on a shared row/column grid. This only changes layout;
-     .track-link keeps intercepting clicks/taps normally since that's DOM-
-     based (closest() in home/detail.js), not box-based. Desktop is
-     untouched — the flex rules above still apply above this breakpoint. */
-  .track-row {
-    display: grid;
-    grid-template-columns: 1.5rem 44px 1fr auto auto;
-    grid-template-areas:
-      "index thumb title    title    save"
-      "index thumb meta duration save";
-    column-gap: 0.75rem;
-    row-gap: 0.15rem;
-  }
-
-  .track-link,
-  .track-info {
-    display: contents;
-  }
-
-  .track-index,
-  .track-thumb,
-  .track-row .btn-save {
-    align-self: center;
-  }
-
-  .track-index {
-    grid-area: index;
-  }
-
-  .track-thumb {
-    grid-area: thumb;
-  }
-
-  .track-title {
-    /* Grid items default to min-width: auto, i.e. never smaller than their
-       content — which for nowrap text is the full, untruncated string. That
-       would force the title's 1fr track to grow and blow out the row
-       instead of ellipsizing. min-width: 0 restores the truncation. */
-    grid-area: title;
-    min-width: 0;
-  }
-
-  .track-artist {
-    grid-area: meta;
-    min-width: 0;
-  }
-
-  .track-duration {
-    grid-area: duration;
-  }
-
-  .track-row .btn-save {
-    grid-area: save;
-  }
-}
+   There used to be one: at ≤480px the row became a grid whose title spanned
+   both the title *and* the duration column ("title title" on the first
+   line, "meta duration" on the second), so a long title ran right across
+   the column the duration lives in. That existed because the duration plus
+   a save button ate ~150px of a ~358px row and left the title almost
+   nothing. The save button is gone with save-for-later, the duration alone
+   costs ~35px, and the flex rules above already give the title everything
+   left over and ellipsize it — so the grid bought nothing and cost the
+   collision. One layout at every width now. */
 
 .card {
   background: var(--bg-base);
@@ -2222,38 +2157,13 @@ button.track-link {
   display: block;
 }
 
-/* Marks content that's already on disk and will start instantly. The one
-   badge left over the artwork — a duration badge used to sit in the opposite
-   corner, but stamping a runtime on cover art is a video convention, and the
-   duration is already in every track list. */
-.downloaded-badge {
-  position: absolute;
-  /* Bottom-left, the corner the duration badge used to hold. The right-hand
-     corner belongs to the play button that appears on hover. */
-  bottom: var(--space-2);
-  left: var(--space-2);
-  width: 18px;
-  height: 18px;
-  border-radius: var(--radius-circle);
-  background: var(--accent);
-  color: var(--black);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.downloaded-badge svg {
-  width: 11px;
-  height: 11px;
-}
-
 /* The play affordance on a card's artwork — the one gesture that most says
    "this is a music library". .thumb is already the play control (an <a> on a
    server-rendered card, a <button> on an Explore one), so this is purely a
    visual layer on top of it rather than another focusable element in the tab
    order, which is already four stops per card.
 
-   Hidden where there is no hover: on a phone it would be a permanent orange
+   Hidden where there is no hover: on a phone it would be a permanent accent
    disc covering the corner of every cover, and tapping the artwork plays the
    track there anyway. */
 .card .thumb::before,
@@ -2288,7 +2198,7 @@ button.track-link {
 /* The triangle, drawn rather than loaded: the app's CSP allows images only
    from 'self' and YouTube's hosts, so an inline data: URI for the glyph —
    background-image is governed by img-src — was blocked outright and left a
-   blank orange disc. clip-path has no such problem and keeps this to CSS,
+   blank accent disc. clip-path has no such problem and keeps this to CSS,
    which matters because Explore builds its cards in JS and would otherwise
    need the same markup added by hand.
 
@@ -2311,7 +2221,7 @@ button.track-link {
   transform: none;
 }
 
-/* On a touch screen this would be a permanent orange disc over the corner of
+/* On a touch screen this would be a permanent accent disc over the corner of
    every cover, and tapping the artwork already plays the track. */
 @media (hover: none) {
   .card .thumb::before,
@@ -2326,34 +2236,6 @@ button.track-link {
     transition: none;
     transform: none;
   }
-}
-
-/* Save-for-later toggle, pinned to the right end of the card's action row so
-   it sits with the other actions instead of floating over the artwork. */
-.btn-save {
-  flex-shrink: 0;
-  background: none;
-  border: none;
-  color: var(--text-muted);
-  cursor: pointer;
-  min-width: 44px;
-  min-height: 44px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.btn-save svg {
-  width: 16px;
-  height: 16px;
-}
-
-.btn-save:hover {
-  color: var(--white);
-}
-
-.btn-save.is-on {
-  color: var(--accent);
 }
 
 .card-body {
@@ -3019,8 +2901,9 @@ audio {
 }
 
 /* (hover: hover) excludes touch — without it, tapping this on mobile leaves
-   it visibly "stuck" orange, because touch browsers apply :hover on tap but
-   never send the mouseleave that would normally clear it on desktop. */
+   it visibly "stuck" on the hover color, because touch browsers apply :hover
+   on tap but never send the mouseleave that would normally clear it on
+   desktop. */
 @media (hover: hover) {
   .btn-play-main:hover {
     transform: scale(1.06);

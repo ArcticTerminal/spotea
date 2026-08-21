@@ -2,7 +2,6 @@
   class="track-row"
   data-content-id="{{ item.id }}"
   data-status="{{ item.status }}"
-  data-saved="{{ 'true' if item.is_saved else 'false' }}"
 >
   <a class="track-link" href="/#player/{{ item.id }}" aria-label="Play {{ item.title }}">
     <span class="track-index">{{ index }}</span>
@@ -24,27 +23,9 @@
       {% endif %}
     </span>
   </a>
-  <span class="track-duration">
-    {% if item.status == "ready" %}
-    <svg class="track-downloaded" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" title="Downloaded — plays instantly"><use href="#i-check" /></svg>
-    {% endif %}
-    {{ item.duration_seconds | duration if item.duration_seconds else '' }}
-  </span>
-  {# Left out where the row is already inside a list the user assembled on
-     purpose — the queue. Bookmarking something out of the queue you are
-     listening to right now saves it into a second list to listen to later,
-     which is a distinction without a difference, and it put a second tap
-     target on every row of a panel whose rows exist to be tapped. #}
-  {% if show_save | default(true) %}
-  <button
-    type="button"
-    class="btn-save{{ ' is-on' if item.is_saved else '' }}"
-    data-content-id="{{ item.id }}"
-    aria-pressed="{{ 'true' if item.is_saved else 'false' }}"
-    title="{{ 'Saved for later' if item.is_saved else 'Save for later' }}"
-    aria-label="Save for later"
-  >
-    <svg viewBox="0 0 24 24" fill="{{ 'currentColor' if item.is_saved else 'none' }}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-bookmark" /></svg>
-  </button>
-  {% endif %}
+  {# No "downloaded" tick next to the duration. The Downloads page is the
+     one place that question gets asked, and it answers it in full; a badge
+     on every row of every list was the same answer repeated where nobody
+     was asking. #}
+  <span class="track-duration">{{ item.duration_seconds | duration if item.duration_seconds else '' }}</span>
 </div>

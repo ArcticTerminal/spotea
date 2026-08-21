@@ -1,10 +1,9 @@
 {# One track of a remote playlist/channel — same row as _content_row.html and
    the same CSS, but for a video with no Content row behind it yet.
 
-   Everything that needs one is therefore absent: no save toggle (there's
-   nothing to save), no downloaded badge (nothing is on disk), and no
-   /#player/{id} href, since that id doesn't exist until the row is
-   materialized. The dataset below carries exactly the fields
+   Everything that needs one is therefore absent: no /#player/{id} href,
+   since that id doesn't exist until the row is materialized, and no
+   data-content-id. The dataset below carries exactly the fields
    POST /explore/tracks/batch needs to create it — which is why playing from
    one of these pages costs no YouTube request at all (see
    services/remote_detail.py).

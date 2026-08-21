@@ -53,7 +53,6 @@ def test_get_single_content_returns_full_shape(client, db_session):
         "status",
         "added_at",
         "is_favorite",
-        "is_saved",
         "is_played",
         "is_unavailable",
     }

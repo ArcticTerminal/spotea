@@ -73,9 +73,10 @@ def test_a_remote_row_carries_what_the_batch_endpoint_needs(client, fake_playlis
 
     assert 'data-video-id="aaaaaaaaaaa"' in text
     assert f'data-channel-id="{CHANNEL_ID}"' in text
-    # No local-only affordances: nothing here has a Content row yet.
-    assert "btn-save" not in text
+    # No local-only affordances: nothing here has a Content row yet, so there
+    # is no /#player/{id} to point at.
     assert "/#player/" not in text
+    assert "data-content-id" not in text
 
 
 def test_a_remote_playlist_has_no_pagination(client, fake_playlist):

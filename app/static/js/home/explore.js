@@ -254,7 +254,12 @@ function renderRecommendations(data) {
     // yet, and deliberately not seeded with anything else in that case.
     shelfHtml("Songs", data.videos, recVideoCardHtml),
     shelfHtml("Playlists", data.playlists, recPlaylistCardHtml),
-    shelfHtml("Similar artists", data.similar_artists, artistCardHtml),
+    // Labelled "Artists you may like" rather than "Similar artists": the
+    // shelf is a personal recommendation built from everyone followed, not
+    // a "similar to X" list for one artist. The artist page's own shelf
+    // keeps the "Similar artists" name, because there it really is one.
+    // The `similar_artists` payload key is unchanged — this is copy only.
+    shelfHtml("Artists you may like", data.similar_artists, artistCardHtml),
     // Then what everyone gets: this week's charts and every mood to browse.
     shelfHtml("Charts", data.charts, recPlaylistCardHtml),
     shelfHtml("Charting artists", data.chart_artists, artistCardHtml),

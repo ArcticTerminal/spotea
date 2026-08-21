@@ -1,4 +1,4 @@
-{# Library's channel grid: four pinned virtual-playlist tiles, then one card
+{# Library's channel grid: three pinned virtual-playlist tiles, then one card
    per followed artist.
 
    Rendered inside index.html and on its own by GET /partials/library. The
@@ -16,15 +16,6 @@
         <span class="channel-card-info">
           <span class="channel-card-title">Favorites</span>
           <span class="channel-card-count">{{ favorites_count }} song{{ '' if favorites_count == 1 else 's' }}</span>
-        </span>
-      </a>
-      <a class="channel-card" href="/#saved" data-detail-kind="saved">
-        <span class="channel-card-avatar channel-card-icon is-saved">
-          <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-bookmark" /></svg>
-        </span>
-        <span class="channel-card-info">
-          <span class="channel-card-title">Saved for later</span>
-          <span class="channel-card-count">{{ saved_count }} song{{ '' if saved_count == 1 else 's' }}</span>
         </span>
       </a>
       <a class="channel-card" href="/#new-uploads" data-detail-kind="new-uploads">

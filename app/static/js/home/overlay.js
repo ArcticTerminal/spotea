@@ -743,7 +743,6 @@ export function setupPlayerOverlay() {
     // tab on this same #player/{id} hash, which handleInitialRoute resolves
     // on boot) instead of hijacking them.
     if (event.ctrlKey || event.metaKey || event.shiftKey || event.button !== 0) return;
-    if (event.target.closest(".btn-save")) return; // content-actions.js owns this
 
     const link = event.target.closest("a");
     if (!link) return;

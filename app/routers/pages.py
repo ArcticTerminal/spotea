@@ -58,18 +58,13 @@ def home(
     )
 
 
-# Channel, the four pinned playlists, and the player all moved in-page (see
+# Channel, the pinned playlists, and the player all moved in-page (see
 # home/detail.js, home/overlay.js) — index.html's hash router handles them
 # now. These redirects exist only so a link or bookmark from before that
 # change still lands somewhere real.
 @router.get("/favorites")
 def favorites_redirect() -> RedirectResponse:
     return RedirectResponse("/#favorites")
-
-
-@router.get("/saved")
-def saved_redirect() -> RedirectResponse:
-    return RedirectResponse("/#saved")
 
 
 @router.get("/new-uploads")

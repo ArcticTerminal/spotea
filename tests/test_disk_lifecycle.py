@@ -280,15 +280,6 @@ def test_an_old_but_favorited_preview_is_kept(db_session):
     assert removed == 0
 
 
-def test_an_old_but_saved_preview_is_kept(db_session):
-    artist = _feed(db_session, "https://example.com/saved-preview", followed=False)
-    _preview(db_session, artist, "savedpreview1", age_days=PREVIEW_RETENTION.days + 1, is_saved=True)
-
-    removed = sweep_stale_previews(db_session)
-
-    assert removed == 0
-
-
 def test_an_old_but_downloaded_preview_is_kept(db_session, tmp_path):
     artist = _feed(db_session, "https://example.com/dl-preview", followed=False)
     audio = tmp_path / "dlpreview001.m4a"

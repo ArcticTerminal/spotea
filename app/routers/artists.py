@@ -110,7 +110,6 @@ def delete_feed(
             content.status == "ready"
             or content.last_played_at is not None
             or content.is_favorite
-            or content.is_saved
         )
         if not keep:
             purge_content(db, content)

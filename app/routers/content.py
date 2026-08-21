@@ -13,7 +13,7 @@ from app.images import needs_thumbnail_caching
 from app.models import Content, User
 from app.page_context import playlist_filter
 from app.progress import ProgressRegistry
-from app.schemas import ContentOut, FavoriteOut, QueueOut, SavedOut, StatusOut
+from app.schemas import ContentOut, FavoriteOut, QueueOut, StatusOut
 from app.services.artist_sync import cache_thumbnail
 from app.timeutil import utcnow
 from app.youtube.urls import VIDEO_ID_RE
@@ -264,28 +264,6 @@ def remove_favorite(
     content.is_favorite = False
     db.commit()
     return FavoriteOut(id=content.id, is_favorite=content.is_favorite)
-
-
-@router.post("/{content_id}/save", response_model=SavedOut)
-def add_saved(
-    content_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)
-) -> SavedOut:
-    content = _get_content_or_404(db, content_id, user.id)
-    content.is_saved = True
-    # Same auto-promote reasoning as add_favorite above.
-    content.is_preview = False
-    db.commit()
-    return SavedOut(id=content.id, is_saved=content.is_saved)
-
-
-@router.delete("/{content_id}/save", response_model=SavedOut)
-def remove_saved(
-    content_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)
-) -> SavedOut:
-    content = _get_content_or_404(db, content_id, user.id)
-    content.is_saved = False
-    db.commit()
-    return SavedOut(id=content.id, is_saved=content.is_saved)
 
 
 @router.get("/{content_id}/stream")

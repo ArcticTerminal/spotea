@@ -1,7 +1,6 @@
 // Entry point for index.html — Home, Library, Explore, Settings, and the
 // channel/playlist detail panel and player overlay drilled into from them.
 
-import { setupSaveButtons } from "../content-actions.js";
 import { handleInitialRoute, setupDetailPanel } from "../home/detail.js";
 import { refreshRecommendations, setupExploreSearch, setupRecommendations } from "../home/explore.js";
 import {
@@ -39,7 +38,6 @@ resumeOverlayIfNeeded();
 // session; a #channel/42 or #player/123 hash in the URL right now is a
 // separate, higher-priority thing to resolve on boot.
 handleInitialRoute();
-setupSaveButtons();
 setupExploreSearch();
 setupRecommendations();
 setupDownloadsOverlay();

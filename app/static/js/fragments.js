@@ -81,8 +81,8 @@ export function swapFragmentHtml(html) {
 }
 
 async function refreshOne({ name, targets }) {
-  // Skip regions this page doesn't have — content-actions.js runs while a
-  // detail panel is open too, where none of these exist.
+  // Skip regions this page doesn't have — callers refresh while a detail
+  // panel is open too, where none of these exist.
   const present = targets.filter((id) => document.getElementById(id));
   if (!present.length) return false;
 

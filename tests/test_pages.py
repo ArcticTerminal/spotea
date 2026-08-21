@@ -19,7 +19,7 @@ USER_ID = 1
 
 def _seed(db_session, *, followed=True):
     """One followed channel with three items, each hitting a different
-    Library surface: a new upload, a favorite, and a saved+downloaded one."""
+    Library surface: a new upload, a favorite, and a played+downloaded one."""
     artist = Artist(
         user_id=USER_ID,
         channel_id="UCpagetest00000000000000",
@@ -53,13 +53,12 @@ def _seed(db_session, *, followed=True):
         Content(
             artist_id=artist.id,
             user_id=USER_ID,
-            video_id="savedplay01",
-            title="Saved And Played",
+            video_id="playedone1",
+            title="Played And Downloaded",
             published_at=datetime(2025, 12, 1),
-            is_saved=True,
             last_played_at=now,
             status="ready",
-            file_path="/nonexistent/savedplay01.m4a",
+            file_path="/nonexistent/playedone1.m4a",
         ),
     ]
     db_session.add_all(items)
@@ -76,7 +75,7 @@ def test_home_renders_every_shelf_and_the_library_grid(client, db_session):
     body = res.text
     assert "Fresh Upload" in body  # New uploads shelf
     assert "A Favorite" in body  # Favorites shelf
-    assert "Saved And Played" in body  # Saved + Recently played shelves
+    assert "Played And Downloaded" in body  # Recently played shelf
     assert "Page Test Channel" in body  # Library channel card + Home chip
 
 
@@ -128,14 +127,13 @@ def test_the_duration_and_filesize_template_filters_are_registered(client, db_se
 
 
 def test_channel_and_playlist_pages_redirect_to_their_hash_route(client):
-    """Favorites/Saved/New releases/Recently Played/a track all moved
+    """Favorites/New releases/Recently Played/a track all moved
     in-page (see app/static/js/home/detail.js, home/overlay.js) — these
     routes exist only so an old link or bookmark still lands somewhere real.
     The actual rendering is now GET /partials/detail/... — see
     test_partials.py."""
     for path, expected_hash in [
         ("/favorites", "/#favorites"),
-        ("/saved", "/#saved"),
         ("/new-uploads", "/#new-uploads"),
         ("/recently-played", "/#recently-played"),
         ("/player/1", "/#player/1"),
@@ -154,7 +152,7 @@ def test_page_routes_require_login():
     from app.main import app
 
     with TestClient(app) as anonymous:
-        for path in ["/", "/favorites", "/saved", "/new-uploads", "/recently-played", "/player/1"]:
+        for path in ["/", "/favorites", "/new-uploads", "/recently-played", "/player/1"]:
             res = anonymous.get(path, follow_redirects=False)
             assert res.status_code == 303, path
             assert res.headers["location"] == "/login", path

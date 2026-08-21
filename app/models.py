@@ -129,7 +129,7 @@ class Artist(Base):
     # YouTube Music's own "fans also like" list for this artist, as a JSON
     # array of ChannelSearchResult dicts — same free-data reasoning as
     # monthly_listeners above, and refreshed the same way on every sync.
-    # What powers Explore's "Similar artists" shelf (see
+    # What powers Explore's "Artists you may like" shelf (see
     # services/recommendations.py._similar_to_followed): merged across every
     # artist this user follows, rather than fetched fresh at request time.
     related_artists: Mapped[str | None] = mapped_column(Text, default=None)
@@ -174,8 +174,8 @@ class Content(Base):
         # runs per rendered item. The (user_id, video_id) unique constraint
         # can't serve it: video_id is its second column.
         Index("ix_content_video_id", "video_id"),
-        # The three pinned-playlist shelves and their counts. Partial, because
-        # "played", "favorite" and "saved" are each a small slice of a library.
+        # The pinned-playlist shelves and their counts. Partial, because
+        # "played" and "favorite" are each a small slice of a library.
         Index(
             "ix_content_user_played",
             "user_id",
@@ -188,7 +188,6 @@ class Content(Base):
             "published_at",
             sqlite_where=text("is_favorite = 1"),
         ),
-        Index("ix_content_user_saved", "user_id", "published_at", sqlite_where=text("is_saved = 1")),
         Index(
             "ix_content_user_newupload",
             "user_id",
@@ -237,14 +236,19 @@ class Content(Base):
     added_at: Mapped[datetime] = mapped_column(default=utcnow)
     downloaded_at: Mapped[datetime | None] = mapped_column(default=None)
     is_favorite: Mapped[bool] = mapped_column(default=False)
-    is_saved: Mapped[bool] = mapped_column(default=False)
     last_played_at: Mapped[datetime | None] = mapped_column(default=None)
-    # True for a just-added Explore row that hasn't been favorited or saved
-    # yet (see routers/content.py's add_favorite/add_saved, which clear this
-    # as a side effect) — plays normally but stays out of Library and New
-    # Uploads until then. Still shows on the Recently Played shelf once
-    # played (see routers/pages.py's home_recently_played). No automatic
-    # cleanup — it stays around indefinitely otherwise.
+    # True for a just-added Explore row that hasn't been favorited yet (see
+    # routers/content.py's add_favorite, which clears this as a side effect)
+    # — plays normally but stays out of Library and New Uploads until then.
+    # Still shows on the Recently Played shelf once played (see
+    # routers/pages.py's home_recently_played). No automatic cleanup — it
+    # stays around indefinitely otherwise.
+    #
+    # Favoriting used to be one of two writers here; save-for-later was the
+    # other, and it was removed along with its column. So the ways an Explore
+    # row escapes preview status are now favoriting it or playing it, and
+    # nothing else — which is also what storage.sweep_stale_previews checks
+    # before deleting one.
     is_preview: Mapped[bool] = mapped_column(default=False)
     # True for a row the sync inserted — a release that appeared after the
     # artist was followed (see artist_sync.apply_artist_data, the only place
