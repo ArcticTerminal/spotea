@@ -527,6 +527,44 @@ def test_the_pinned_panel_breakpoint_matches_the_stylesheet() -> None:
     assert "@media (min-width: 900px)" in css
 
 
+def test_the_desktop_panel_does_not_decide_how_tall_the_card_is() -> None:
+    """The tab strip has to sit level with the player's Collapse link, and it
+    only does while the card's height comes from the player column alone. So
+    the panel's list is taken out of flow and the panel's own in-flow content
+    is just the tabs.
+
+    The rule this replaced was `max-height: min(680px, 100%)`, which quietly
+    stopped capping anything once the card no longer had a definite height —
+    a percentage max-height against an auto-height parent computes to none.
+    Measured before the fix: a 40-track queue stretched the card to 1211px
+    and pushed Collapse 272px below the tabs."""
+    css = (JS_DIR.parent / "css" / "style.css").read_text()
+
+    desktop = css[css.index("@media (min-width: 900px) {") :]
+    start = desktop.index(".queue-panel-inner {")
+    inner = desktop[start : desktop.index("}", start)]
+
+    assert "position: relative" in inner
+    assert "overflow: hidden" in inner
+    # The cap that cannot work here must not come back.
+    panel_start = desktop.index(".queue-panel {")
+    assert "max-height" not in desktop[panel_start : desktop.index("}", panel_start)]
+    # And the list itself has to be the thing that scrolls.
+    assert '.queue-panel-inner > [role="tabpanel"] {' in desktop
+
+
+def test_the_overlay_centres_the_card_safely() -> None:
+    """`safe center`, never plain `center`: a centred flex item taller than
+    its scroll container overflows in both directions and its top becomes
+    unreachable at any scroll position — which is why the base rule says
+    stretch. `safe` falls back to start exactly then."""
+    css = (JS_DIR.parent / "css" / "style.css").read_text()
+
+    assert "align-items: safe center" in css
+    overlay = css[css.index(".player-overlay {") :]
+    assert "align-items: center;" not in overlay[: overlay.index("}")]
+
+
 def test_a_remote_track_row_says_it_is_clickable() -> None:
     """.track-link is an <a href> in _content_row.html but a <button> in
     _remote_track_row.html, and a button's default cursor is an arrow. Every

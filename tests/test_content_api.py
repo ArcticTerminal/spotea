@@ -60,6 +60,38 @@ def test_get_single_content_returns_full_shape(client, db_session):
     assert body["channel_title"] == "Test Channel"
 
 
+def test_the_payload_carries_a_cover_even_when_the_row_has_none(client, db_session):
+    """The player overlay and the mini player set their artwork straight from
+    this payload (home/overlay.js), never from a template — so the fallback
+    has to live in the serializer, not only in the Jinja filter.
+
+    It did not, at first. A track stored without a cover then showed one in
+    its row and its card and a blank square in the player it opened, which is
+    how this was reported the second time: an album opened from an artist's
+    profile, a track played, still no image. See images.track_cover.
+    """
+    artist, items = _seed(db_session, count=1)
+    track = items[0]
+    track.thumbnail_url = None
+    db_session.commit()
+
+    body = client.get(f"/content/{track.id}").json()
+
+    assert body["thumbnail_url"], "the player would render a blank square"
+    assert f"{track.video_id}%2Fmqdefault.jpg" in body["thumbnail_url"]
+
+
+def test_a_tracks_own_cover_reaches_the_payload_unchanged(client, db_session):
+    """The fallback is a fallback — a row that has artwork is served exactly
+    that, with nothing derived or rewritten."""
+    artist, items = _seed(db_session, count=1)
+    track = items[0]
+    track.thumbnail_url = "/thumbnails/kept.jpg"
+    db_session.commit()
+
+    assert client.get(f"/content/{track.id}").json()["thumbnail_url"] == "/thumbnails/kept.jpg"
+
+
 def test_get_single_content_404_for_nonexistent_id(client, db_session):
     res = client.get("/content/999999")
     assert res.status_code == 404

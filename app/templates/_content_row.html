@@ -6,7 +6,7 @@
   <a class="track-link" href="/#player/{{ item.id }}" aria-label="Play {{ item.title }}">
     <span class="track-index">{{ index }}</span>
     {# `| cover` rather than item.thumbnail_url: a track stored without one
-       falls back to its video still (see templating.track_cover). Kept
+       falls back to its video still (see images.track_cover). Kept
        conditional anyway — the filter has nothing to derive from either if a
        row somehow has no video_id. #}
     <span class="track-thumb">
