@@ -85,11 +85,30 @@ MOOD_PLAYLIST_LIMIT = 24
 # The chart's artist list runs to 40. Same reasoning.
 CHART_ARTIST_LIMIT = 12
 
-# And the same cap on the chart playlists, which only matters once several
-# countries are blended: one country's chart carries three or four of them,
-# so four countries would otherwise be fourteen tiles in a shelf sized for
-# twelve.
+# And the same cap on the chart playlists. It no longer binds now that only
+# one playlist per country survives the filter below, but it is cheap
+# insurance against a country that starts reporting several.
 CHART_PLAYLIST_LIMIT = 12
+
+# The only chart playlist worth a tile. Measured 2026-08-21 across US, GB and
+# AU, a country's chart carries three or four:
+#
+#   "Trending 20 <Country>"
+#   "Daily Top Music Videos - <Country>"
+#   "Top 100 Music Videos <Country>"
+#   "Top 100 Live Performances - <Country>"   (US and GB; absent in AU)
+#
+# The last three are *video* charts — the same songs ranked by their official
+# music video's view count, plus live sets — which is not what this app is
+# for. Trending is the one that answers "what is happening right now", and
+# it is also the only one whose id is an OLAK5uy_… playlist rather than the
+# PL4fGSI1pDJn… the video charts share.
+#
+# Matched on the title prefix, which is safe here only because this client is
+# never constructed with a `language` (see the module docstring for why it
+# must not be): YouTube Music answers in English regardless of the country
+# asked for, so "Trending 20 Australia" is not localised.
+CHART_TRENDING_PREFIX = "Trending"
 
 # How many tracks an artist page lists. Set above what YouTube Music will
 # ever hand over, so in practice it caps nothing and every artist fits on
@@ -412,10 +431,16 @@ def fetch_playlist(playlist_id: str, limit: int = PLAYLIST_ITEM_LIMIT) -> Playli
 
 @dataclass
 class Charts:
-    """What one country's chart page holds: the chart playlists themselves
-    ("Trending 20 Turkey", "Top 100 Songs Turkey" — ordinary playlists once
-    opened, so the existing remote-playlist panel renders them with no
-    special casing) and the artists currently charting there."""
+    """What one country's chart page holds: its Trending playlist (an
+    ordinary playlist once opened, so the existing remote-playlist panel
+    renders it with no special casing) and the artists currently charting
+    there.
+
+    `playlists` is a list rather than a single entry because fetch_charts_for
+    blends several countries into one shelf; per country it holds exactly one
+    (see CHART_TRENDING_PREFIX for what the other chart playlists were and
+    why they are dropped).
+    """
 
     playlists: list[PlaylistSearchResult]
     artists: list[ChannelSearchResult]
@@ -426,11 +451,19 @@ def fetch_charts(
 ) -> Charts:
     """One country's charts. Both shelves come out of a single request —
     YouTube Music returns them together, and asking twice would double the
-    cost of a shelf pair nobody edits."""
+    cost of a shelf pair nobody edits.
+
+    Only the country's Trending playlist is kept; the video charts alongside
+    it are dropped (see CHART_TRENDING_PREFIX).
+    """
     charts = _call(f"charts ({country})", "get_charts", country) or {}
     artists = (_artist_result(item) for item in charts.get("artists") or [])
     return Charts(
-        playlists=_playlist_results(charts.get("videos")),
+        playlists=[
+            playlist
+            for playlist in _playlist_results(charts.get("videos"))
+            if playlist.title.startswith(CHART_TRENDING_PREFIX)
+        ],
         artists=[artist for artist in artists if artist is not None][:artist_limit],
     )
 
@@ -465,13 +498,11 @@ def fetch_charts_for(
 
     per_country = [fetch_charts(country, artist_limit) for country in countries]
     return Charts(
-        # Interleaved like the artists, and for the same reason. A country
-        # chart carries three or four playlists, not the global chart's two
-        # ("Trending 20 Turkey", "Daily Top Music Videos - Turkey", "Top 100
-        # Music Videos Turkey", and in some countries "Top 100 Live
-        # Performances"), so four countries is fourteen tiles against a
-        # twelve-tile shelf — and taking them in country order meant the
-        # last country listed fell off the end entirely.
+        # One Trending playlist per country now (see CHART_TRENDING_PREFIX),
+        # so this is a concatenation in country order and the round-robin is
+        # doing nothing that a flat list wouldn't. Kept anyway: it is the
+        # same call as the artists below, it still dedupes, and it is what
+        # keeps the shelf honest if a country ever reports two.
         playlists=_round_robin(
             [charts.playlists for charts in per_country], "playlist_id"
         )[:CHART_PLAYLIST_LIMIT],

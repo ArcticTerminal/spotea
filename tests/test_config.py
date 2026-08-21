@@ -6,7 +6,9 @@ to keep honouring, and has to be impossible to reduce to nothing.
 
 import pytest
 
-from app.config import Settings
+from app.config import DEFAULT_CHART_COUNTRIES, Settings
+
+DEFAULT = DEFAULT_CHART_COUNTRIES.split(",")
 
 
 def _settings(**overrides):
@@ -25,8 +27,8 @@ def _settings(**overrides):
         # Whitespace and case are what someone actually types.
         (" tr , us ", ["TR", "US"]),
         # Never empty: an empty setting means "the default", not "no charts".
-        ("", ["ZZ"]),
-        (",,", ["ZZ"]),
+        ("", DEFAULT),
+        (",,", DEFAULT),
     ],
 )
 def test_chart_countries_parses_a_list(configured, expected):
@@ -49,7 +51,18 @@ def test_the_new_setting_wins_when_both_are_present():
     assert settings.chart_countries == ["US", "GB"]
 
 
-def test_the_default_is_the_global_chart():
-    """The only defensible answer for an app that doesn't know where it is
-    running — see the comment on the setting."""
-    assert _settings().chart_countries == ["ZZ"]
+def test_the_default_is_the_english_speaking_markets():
+    """A choice about what this app is for rather than a technical one. The
+    global chart is still reachable by asking for "ZZ"."""
+    assert _settings().chart_countries == ["US", "GB", "CA", "AU", "IE", "NZ"]
+    assert _settings(music_chart_countries="ZZ").chart_countries == ["ZZ"]
+
+
+def test_the_deprecated_setting_is_not_pinned_to_a_country_code():
+    """The check for "has the new setting been touched?" used to compare
+    against the literal "ZZ", which was the default at the time. That reads
+    as a working deprecation shim right up until the default changes, at
+    which point MUSIC_CHART_COUNTRY is silently ignored — no error, just the
+    wrong charts. Pinned here so the next default change cannot repeat it."""
+    assert _settings(music_chart_country="TR").chart_countries == ["TR"]
+    assert "ZZ" not in DEFAULT_CHART_COUNTRIES
