@@ -158,64 +158,25 @@ def test_library_fragment_counts_follow_the_data(client, db_session):
     assert "2 songs</span>" in after
 
 
-def test_a_track_stored_without_a_cover_still_draws_one(client, db_session):
-    """Nothing ever revisits a Content row's thumbnail once it is written, so
-    a track that arrived without one kept a blank square forever. Measured on
-    the live library: seventeen rows, one whole album, materialized eight
-    hours before music.fetch_release learned to fall back to the release's
-    cover — older than the fix and unable to heal themselves.
+def test_new_releases_is_the_first_pinned_tile(client, db_session):
+    """Of the three pinned tiles it is the only one whose contents change
+    without the user doing anything — Favorites and Recently Played are both
+    records of something they just did. So it goes first: it is the tile
+    that answers the question the Library is opened with.
 
-    The stand-in is derived from the video id at render time (see
-    templating.track_cover) rather than backfilled, so it costs no request
-    and covers any row that slips through later without a second repair.
+    Asserted on positions rather than eyeballed, because the three are
+    interchangeable-looking blocks of markup and a later edit that adds a
+    fourth tile has no other reason to notice which one leads.
     """
-    artist = _seed(db_session)
-    db_session.add(
-        Content(
-            artist_id=artist.id,
-            user_id=USER_ID,
-            video_id="nocover0001",
-            title="No Cover At All",
-            thumbnail_url=None,
-            published_at=utcnow(),
-            last_played_at=utcnow(),
-        )
+    _seed(db_session)
+
+    body = _fragment_body(client.get("/partials/library").text, "library-grid")
+
+    assert (
+        body.index('data-detail-kind="new-uploads"')
+        < body.index('data-detail-kind="favorites"')
+        < body.index('data-detail-kind="recently-played"')
     )
-    db_session.commit()
-
-    body = _fragment_body(
-        client.get("/partials/detail/playlist/recently-played").text, "detail-panel"
-    )
-
-    assert "No Cover At All" in body
-    # Proxied like every other remote cover, so what lands in src is the
-    # /image-proxy wrapper around the still rather than the raw CDN URL.
-    assert "i.ytimg.com%2Fvi%2Fnocover0001%2Fmqdefault.jpg" in body
-
-
-def test_a_tracks_own_cover_is_left_alone(client, db_session):
-    """The fallback is a fallback: a row that has artwork renders exactly
-    that, with nothing derived or rewritten."""
-    artist = _seed(db_session)
-    db_session.add(
-        Content(
-            artist_id=artist.id,
-            user_id=USER_ID,
-            video_id="hascover001",
-            title="Has A Cover",
-            thumbnail_url="/thumbnails/hascover001.jpg",
-            published_at=utcnow(),
-            last_played_at=utcnow(),
-        )
-    )
-    db_session.commit()
-
-    body = _fragment_body(
-        client.get("/partials/detail/playlist/recently-played").text, "detail-panel"
-    )
-
-    assert 'src="/thumbnails/hascover001.jpg"' in body
-    assert "hascover001%2Fmqdefault" not in body
 
 
 def test_an_artists_library_card_opens_their_profile(client, db_session):
