@@ -92,6 +92,43 @@ def test_sweep_orphans_keeps_audio_a_row_still_references(db_session):
     assert referenced.exists()
 
 
+def test_sweep_orphans_keeps_audio_inside_a_user_directory(db_session):
+    """The one that would hurt: audio now lives one level down, so a sweep
+    that only globbed the top level would see a referenced file as invisible
+    — and, worse, a sweep that recursed without checking references would
+    delete the whole library on the next scheduler tick."""
+    artist = _feed(db_session, "https://example.com/orphan-per-user-kept")
+    user_dir = settings.storage_dir / str(USER_ID)
+    user_dir.mkdir(parents=True, exist_ok=True)
+    referenced = user_dir / "peruser001.m4a"
+    referenced.write_bytes(b"x")
+    db_session.add(
+        Content(
+            artist_id=artist.id, user_id=USER_ID, video_id="peruser001", title="Kept",
+            status="ready", file_path=str(referenced),
+        )
+    )
+    db_session.commit()
+
+    sweep_orphans(db_session)
+
+    assert referenced.exists()
+
+
+def test_sweep_orphans_removes_a_stray_inside_a_user_directory(db_session):
+    """And it does still reach in there — a download whose row went away
+    leaves a file one level down like any other."""
+    user_dir = settings.storage_dir / "42"
+    user_dir.mkdir(parents=True, exist_ok=True)
+    stray = user_dir / "strayfile1.m4a"
+    stray.write_bytes(b"x")
+
+    sweep_orphans(db_session)
+
+    assert not stray.exists()
+    assert user_dir.exists(), "the directory itself is not a candidate"
+
+
 def test_sweep_orphans_keeps_audio_a_row_spells_differently(db_session):
     """The same file, named two ways.
 
@@ -354,3 +391,45 @@ def test_sweep_startup_leftovers_runs_during_app_startup(monkeypatch):
         pass
 
     assert calls == [1]
+
+
+# --- One directory per listener --------------------------------------------
+
+
+def test_audio_is_written_into_the_listeners_own_directory(monkeypatch, tmp_path):
+    """The file name is the video id and nothing else, so two accounts with
+    the same track used to be two rows over one file — and either of them
+    deleting it took the other's copy. Found on the live library: one
+    account's cleanup left another's row saying "ready" with nothing behind
+    it."""
+    from app import downloader
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "storage_dir", tmp_path)
+
+    assert downloader.user_storage_dir(7) == tmp_path / "7"
+    # None is the flat layout older rows still name in their file_path.
+    assert downloader.user_storage_dir(None) == tmp_path
+
+
+def test_two_listeners_do_not_share_a_file(monkeypatch, tmp_path):
+    from app import downloader
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "storage_dir", tmp_path)
+
+    assert downloader.user_storage_dir(1) != downloader.user_storage_dir(2)
+
+
+def test_the_startup_part_sweep_reaches_the_user_directories(monkeypatch, tmp_path):
+    """.part files land beside the download, which is now one level down."""
+    from app import storage
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "storage_dir", tmp_path)
+    (tmp_path / "3").mkdir()
+    (tmp_path / "3" / "abc.part").write_bytes(b"x")
+    (tmp_path / "flat.part").write_bytes(b"x")
+
+    assert storage.sweep_startup_leftovers() == 2
+    assert not list(tmp_path.rglob("*.part"))

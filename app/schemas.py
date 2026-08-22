@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.images import track_cover
+from app.images import is_music_video, track_cover
 
 if TYPE_CHECKING:  # import cycle otherwise — models has no reason to know about schemas
     from app.models import Content
@@ -49,6 +49,15 @@ class ContentOut(BaseModel):
     id: int
     artist_id: int
     channel_title: str | None
+    # How to open the artist behind this track — what the player's artist
+    # line links to. The browse id where there is one, the Topic channel it
+    # was created from otherwise: a track added from Explore hangs off a
+    # placeholder Artist row that was never resolved further (see
+    # routers/explore.py's _get_or_create_placeholder), and the yt-artist
+    # panel resolves a bare channel id the same way Explore's own artist
+    # links do (see services/remote_detail.py). None only when neither
+    # exists, which is when the line is drawn as plain text.
+    artist_page_id: str | None = None
     video_id: str
     title: str
     thumbnail_url: str | None
@@ -61,6 +70,10 @@ class ContentOut(BaseModel):
     # See Content.is_unavailable — openPlayer reads it off this payload to
     # decide whether to even attempt a download.
     is_unavailable: bool = False
+    # Whether this row is a music video rather than the song itself (see
+    # images.is_music_video). The player asks the server to swap in the song
+    # when it is — that is where the square cover and the lyrics are.
+    is_music_video: bool = False
 
     @classmethod
     def from_content(cls, content: "Content") -> "ContentOut":
@@ -83,6 +96,7 @@ class ContentOut(BaseModel):
             id=content.id,
             artist_id=content.artist_id,
             channel_title=content.artist.name,
+            artist_page_id=content.artist.browse_id or content.artist.channel_id,
             video_id=content.video_id,
             title=content.title,
             thumbnail_url=track_cover(content),
@@ -93,6 +107,7 @@ class ContentOut(BaseModel):
             is_favorite=content.is_favorite,
             is_played=content.last_played_at is not None,
             is_unavailable=content.is_unavailable,
+            is_music_video=is_music_video(content),
         )
 
 

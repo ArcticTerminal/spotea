@@ -1009,6 +1009,14 @@ html[data-active-tab="detail"] .tab-panel[data-tab-panel="detail"] {
   margin: 0;
 }
 
+/* `display: flex` above beats a bare [hidden], which is `display: none` from
+   the UA stylesheet and therefore loses to any rule that names display at
+   all. Explore's two result lists are shown one at a time (see index.html's
+   search tabs), and without this the hidden one simply stayed on screen. */
+.search-results[hidden] {
+  display: none;
+}
+
 .search-result {
   display: flex;
   align-items: center;
@@ -1186,11 +1194,12 @@ html[data-active-tab="detail"] .tab-panel[data-tab-panel="detail"] {
   flex: 0 0 auto;
 }
 
-/* Song and playlist cards are clickable as a whole, and a channel search
-   result previews the channel — the pointer has to say so, since neither is
-   a link. */
+/* Song and playlist cards are clickable as a whole, a channel search result
+   previews the channel, and a song search result plays — the pointer has to
+   say so, since none of them is a link. */
 .rec-card,
-.search-result-channel {
+.search-result-channel,
+.video-search-result {
   cursor: pointer;
 }
 
@@ -1635,9 +1644,14 @@ button.track-link {
   color: var(--text-disabled);
 }
 
+/* One card per row on the narrowest phones. Two 160px-wide cards left an
+   artist's name truncated after about a dozen characters, which on a grid
+   whose whole job is "which of these is the one I want" is the one thing it
+   must not do. Above 420px (see below) there is room for the auto-fit grid
+   and the cards go back to sharing rows. */
 .channel-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 0.6rem;
 }
 
@@ -1722,9 +1736,26 @@ button.track-link {
   background: var(--recently-played);
 }
 
+/* The three pinned playlists' hero badge, smaller than the avatar an artist
+   gets in the same slot.
+
+   They started at the same size and it was the wrong comparison: an artist's
+   hero is a photograph, and a photograph at 96px is a portrait, while a
+   single white glyph on a saturated disc at 96px is the loudest thing on the
+   page — louder than the playlist's own name beside it. At 64 the disc reads
+   as a label for the title rather than competing with it.
+
+   Scoped to .channel-hero-avatar, so the library grid's own 44px badge
+   (_library_grid.html) — which *is* sized to match the avatars beside it,
+   deliberately — is untouched. */
+.channel-hero-avatar.channel-card-icon {
+  width: 64px;
+  height: 64px;
+}
+
 .channel-hero-avatar.channel-card-icon svg {
-  width: 40px;
-  height: 40px;
+  width: 26px;
+  height: 26px;
 }
 
 .channel-card-info {
@@ -1880,9 +1911,16 @@ button.track-link {
     height: 84px;
   }
 
+  /* Same reasoning as the 64px rule above, one step down with the 84px
+     avatar this sits beside. */
+  .channel-hero-avatar.channel-card-icon {
+    width: 56px;
+    height: 56px;
+  }
+
   .channel-hero-avatar.channel-card-icon svg {
-    width: 34px;
-    height: 34px;
+    width: 24px;
+    height: 24px;
   }
 
   .channel-hero-title {
@@ -2718,7 +2756,19 @@ button.track-link {
      transition needs a length at both ends — from `none` there is nothing to
      interpolate — and 340px is the width cap above, so it changes nothing
      while the queue is shut. */
-  flex: 0 0 auto;
+  /* Shrinkable, and the only thing in the card that is. Everything else —
+     the title, the transport, the footer — is either a control or the label
+     for one, and there is no honest way to make those smaller; the artwork
+     is the one element that can give up height and still be itself, because
+     object-fit: cover already crops it from the centre. So on a phone too
+     short for the card at full size the cover quietly takes the difference
+     and the player fits, rather than the overlay growing a scrollbar and
+     putting the transport below the fold.
+     `min-height: 0` is what actually permits it: a flex item's automatic
+     minimum size is its content, and the square the aspect-ratio above
+     asks for counts as content. */
+  flex: 0 1 auto;
+  min-height: 0;
   max-height: 340px;
   transition: max-height 260ms ease;
 }
@@ -2741,10 +2791,28 @@ button.track-link {
   margin: 0 0 0.35rem;
 }
 
+/* The paragraph the artist button sits in, so the line keeps the block-level
+   spacing it had while it was the paragraph itself. */
+.player-channel-line {
+  margin: 0;
+}
+
 .player-channel {
   color: var(--text-secondary);
   font-size: 0.9rem;
   margin: 0;
+}
+
+/* A track whose artist has no page to open (a placeholder row created from a
+   track and never resolved — see ContentOut.artist_page_id) keeps the button
+   as the plain line it was: no pointer, no underline on hover. */
+.player-channel:disabled {
+  cursor: default;
+}
+
+.player-channel:disabled:hover {
+  color: var(--text-secondary);
+  text-decoration: none;
 }
 
 audio {
@@ -2949,9 +3017,20 @@ audio {
   height: 20px;
 }
 
-/* Both are toggles on the same row and both mean "this is on". */
-.btn-shuffle.is-on,
-.btn-repeat.is-on {
+/* Both are toggles on the same row and both mean "this is on".
+
+   Three classes deep, not two, and that is the whole point: a touch browser
+   applies :hover on tap and never sends the mouseleave that would clear it,
+   so the button stays hovered until something else is tapped. At two classes
+   this tied with .btn-transport:hover and lost outright to
+   .btn-quiet-icon:hover (which is further down the file) — so pressing
+   shuffle repainted it to the hover colour and the on-state was invisible on
+   a phone, on both of the buttons that carry it.
+
+   Any new hover rule on either button has to stay under this. */
+.btn-transport.btn-shuffle.is-on,
+.btn-transport.btn-repeat.is-on,
+.btn-quiet-icon.btn-shuffle.is-on {
   color: var(--accent);
 }
 
@@ -3258,6 +3337,53 @@ audio {
   border-bottom-color: var(--accent);
 }
 
+/* How many results are behind a tab you aren't looking at — the one thing a
+   tab strip costs over two stacked headings, handed back. */
+.panel-tab-count {
+  margin-left: 0.35rem;
+  color: var(--text-muted);
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.panel-tab-count[hidden] {
+  display: none;
+}
+
+/* Explore's search results carry the same tab strip as the player panel, but
+   none of the spacing that positions it inside a drawer: there is nothing
+   above it here to be divided from. */
+.search-tabs {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+  margin-bottom: var(--space-4);
+}
+
+.search-tabs[hidden] {
+  display: none;
+}
+
+/* The search field and its tab strip, pinned while the results scroll under
+   them. What you typed and which half of the results you're reading are both
+   still the question while you're reading the answer — and on a phone a long
+   list scrolled the field away entirely, so clearing or changing a search
+   meant scrolling back to the top first.
+
+   One sticky block rather than two stacked ones: the strip's offset would
+   otherwise have to be hardcoded to the field's rendered height. The
+   background is what keeps rows from showing through as they pass beneath;
+   the negative top margin plus matching padding is what stops a row being
+   visible in the gap that .layout's own top padding leaves above it. */
+.explore-search-head {
+  position: sticky;
+  top: 0;
+  z-index: 15;
+  background: var(--bg-page);
+  margin-top: calc(-1 * var(--space-3));
+  padding-top: var(--space-3);
+}
+
 .queue-empty {
   margin: 0;
   color: var(--text-muted);
@@ -3408,9 +3534,18 @@ audio {
   /* The bottom inset matters now that a queue can run past the fold: without
      it the last row ends under the home indicator. */
   padding: 1.5rem 1.5rem calc(1.5rem + env(safe-area-inset-bottom, 0px));
-  overflow-y: auto;
-  /* The overlay is the only scroller here (see .queue-panel); this keeps a
-     flick that runs off its end from scrolling the page underneath. */
+  /* Not a scroller. The player is one screen and it stays one screen: the
+     artwork above shrinks to whatever height is left over, so there is
+     nothing below the fold to scroll to, and a phone short enough to have
+     cut the transport off now gets a smaller cover instead. Restored to
+     `auto` on a wide screen (see the min-width: 900px block below), where
+     the card hugs its contents and a genuinely short window can still leave
+     them taller than the viewport.
+     The overlay was the only scroller here even then (see .queue-panel), so
+     nothing else has to change with it. */
+  overflow: hidden;
+  /* Keeps a flick that runs off the end of the queue from scrolling the page
+     underneath the overlay. */
   overscroll-behavior: contain;
   background: radial-gradient(circle at 50% 0%, var(--bg-page-glow) 0%, var(--bg-page) 60%);
 }
@@ -3419,28 +3554,50 @@ audio {
   display: none;
 }
 
-/* With the queue open the overlay is not a scroller at all: the queue is
-   (see .queue-panel), and the player above it has to stay exactly where it
-   is however hard the list is flicked. */
-.player-overlay.is-queue-open {
-  overflow: hidden;
-}
-
-/* Half the cover, so the queue has somewhere to go. Cropped rather than
+/* A strip of the cover, so the queue has somewhere to go. Cropped rather than
    scaled — object-fit keeps the artwork's proportions and takes the crop off
-   both edges, so it reads as the cover closing rather than squashing. */
+   both edges, so it reads as the cover closing rather than squashing.
+   80px, not the 150 this started at: measured on a 375x667 phone, the panel
+   was left about 77px once the card had taken what it needed, which is two
+   rows and no room to scroll them. What the cover gives up here goes
+   straight into the list — along with the tightened spacing below — and
+   takes it to roughly double that. Still a strip rather than nothing at all,
+   because what's playing is the reason the queue is open. */
 .player-overlay.is-queue-open .player-art {
-  max-height: 150px;
+  max-height: 80px;
 }
 
-/* The drag handle for "pull the player down to close the queue" (see
-   home/overlay.js). Without this the browser claims the downward swipe for
-   the page behind the overlay and cancels the gesture halfway through.
-   Scoped to these two elements rather than the card so that the seek and
-   volume sliders inside it keep their own touch behaviour — an ancestor
-   saying `none` would override theirs. */
+/* The card's own spacing, closed up for the same reason. Every one of these
+   is comfortable on a player showing one track and pure overhead on a player
+   showing a list — and together they are worth more to the panel than
+   another 40px off the cover would be. Only while the queue is open: the
+   full-size player keeps its original proportions. */
+.player-overlay.is-queue-open .back-link,
 .player-overlay.is-queue-open .player-art,
-.player-overlay.is-queue-open .player-meta {
+.player-overlay.is-queue-open .player-meta,
+.player-overlay.is-queue-open .progress-block {
+  margin-bottom: var(--space-3);
+}
+
+.player-overlay.is-queue-open .transport {
+  margin-bottom: var(--space-3);
+}
+
+/* The drag handle for "pull the queue closed" (see home/overlay.js). Without
+   this the browser claims the downward swipe for the page behind the overlay
+   and cancels the gesture halfway through.
+
+   The tab strip, not the artwork. The gesture used to be taken from the
+   cover and the title — the two elements furthest from the panel it
+   dismisses — and reaching over a track list to drag a cover downwards is
+   not something anyone arrives at unprompted. This is the sheet's top edge,
+   which is where every other sheet takes it, and it sits directly above what
+   moves.
+
+   Scoped to the strip rather than to the card so the seek and volume sliders
+   keep their own touch behaviour — an ancestor saying `none` would override
+   theirs. */
+.player-overlay.is-queue-open .panel-tabs {
   touch-action: none;
 }
 
@@ -3477,19 +3634,36 @@ audio {
    * comment above this block describes. */
   .player-overlay {
     align-items: safe center;
+    /* Scrolls again here, where the card hugs its contents rather than
+       filling the overlay: a short window can still leave them taller than
+       the viewport, and there is no phone-sized cover to absorb it. */
+    overflow-y: auto;
   }
 
   .player-overlay.is-queue-open .player-art {
     max-height: 340px;
   }
 
+  /* And the drawer's tightened spacing with it. `is-queue-open` is always
+     set on a wide screen — it is what "this panel is showing" means — so
+     without this the desktop player would sit permanently squeezed for the
+     benefit of a panel that has its own column and needs nothing. */
+  .player-overlay.is-queue-open .back-link,
   .player-overlay.is-queue-open .player-art,
   .player-overlay.is-queue-open .player-meta {
-    touch-action: auto;
+    margin-bottom: var(--space-5);
   }
 
-  .player-overlay.is-queue-open {
-    overflow-y: auto;
+  .player-overlay.is-queue-open .progress-block {
+    margin-bottom: 1.25rem;
+  }
+
+  .player-overlay.is-queue-open .transport {
+    margin-bottom: var(--space-6);
+  }
+
+  .player-overlay.is-queue-open .panel-tabs {
+    touch-action: auto;
   }
 }
 
@@ -3934,13 +4108,30 @@ body.has-mini-player .layout {
   --keyboard-inset: 0px;
 }
 
+/* Measured and published by js/viewport.js's installHeaderOffset. Only used
+   on a phone, where the app header is itself sticky and Explore's search
+   head has to pin below it rather than under it. Zero here so the sticky
+   offset resolves to something sane before the first measurement lands, and
+   on any browser without ResizeObserver. */
+:root {
+  --app-header-height: 0px;
+}
+
+@media (max-width: 480px) {
+  .explore-search-head {
+    top: var(--app-header-height);
+  }
+}
+
 @media (max-width: 480px) {
   /* Both are docked to an edge the keyboard has taken over. Hiding them is
      what every music app does while you type — the search field is the only
      thing being used, and a transport bar wedged between the results and the
      keys is in the way of both. They come straight back on blur. */
   body.is-keyboard-open .tabs,
-  body.is-keyboard-open .mini-player {
+  body.is-keyboard-open .mini-player,
+  body.is-typing .tabs,
+  body.is-typing .mini-player {
     display: none;
   }
 
@@ -3949,6 +4140,15 @@ body.has-mini-player .layout {
      begins and there is nothing left to scroll. */
   body.is-keyboard-open .layout,
   body.has-mini-player.is-keyboard-open .layout {
+    padding-bottom: calc(var(--keyboard-inset) + 1rem);
+  }
+
+  /* is-typing on its own carries no measurement — it says a keyboard is up,
+     not how tall it is (see js/viewport.js). The bars are gone either way;
+     this only keeps the page from ending flush against the keys in the
+     moment before the measurement lands, or on a browser that reports
+     nothing useful at all. */
+  body.is-typing .layout {
     padding-bottom: calc(var(--keyboard-inset) + 1rem);
   }
 }

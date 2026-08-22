@@ -14,7 +14,7 @@ from urllib.parse import quote
 import pytest
 
 from app.youtube import music
-from app.youtube.urls import cover_url_at_size, playlist_id_from_browse_id
+from app.youtube.urls import cover_url_at_size, is_video_still, playlist_id_from_browse_id
 
 
 def _proxied(remote_url: str) -> str:
@@ -686,6 +686,27 @@ def test_cover_url_at_size_handles_both_size_dialects(url, expected):
 
 
 @pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        # What YouTube Music reports as a music video's cover.
+        ("https://i.ytimg.com/vi/1lrFsXkT_rM/hqdefault.jpg?sqp=-oaymwEWCJAD&rs=AMzJ", True),
+        # No query, and the webp host variant.
+        ("https://i.ytimg.com/vi/1lrFsXkT_rM/mqdefault.jpg", True),
+        ("https://i.ytimg.com/vi_webp/1lrFsXkT_rM/hqdefault.webp", True),
+        # Square album art — what a *song* carries, and the whole point of
+        # telling the two apart (see images.is_music_video).
+        ("https://yt3.ggpht.com/abc=w544-h544-l90-rj", False),
+        ("https://lh3.googleusercontent.com/abc=w544-h544-l90-rj", False),
+        # A locally cached cover.
+        ("/thumbnails/1lrFsXkT_rM.jpg", False),
+        (None, False),
+    ],
+)
+def test_is_video_still_tells_a_video_frame_from_album_art(url, expected):
+    assert is_video_still(url) is expected
+
+
+@pytest.mark.parametrize(
     ("browse_id", "expected"),
     [
         ("VLPLcQNVKi2yvHREvYwLPBMWEAyuq4AERnrm", "PLcQNVKi2yvHREvYwLPBMWEAyuq4AERnrm"),
@@ -940,3 +961,165 @@ def test_the_same_chart_playlist_in_two_countries_appears_once(client):
     )
 
     assert len(music.fetch_charts_for(["TR", "US"]).playlists) == 1
+
+
+# --- find_song_version -----------------------------------------------------
+#
+# YouTube Music's curated and mood playlists are music-video playlists almost
+# end to end — measured across three of them, 3 of 200, 3 of 96 and 2 of 200
+# entries were songs. A video entry has a 16:9 still for a cover, no album
+# and usually no lyrics, so the player asks for the song instead.
+
+MUSIC_VIDEO = {
+    "title": "Biliyorsun",
+    "videoId": "abcdefghij1",
+    "videoType": "MUSIC_VIDEO_TYPE_OMV",
+    "duration_seconds": 352,
+    "album": None,
+    "artists": [{"name": "Sezen Aksu", "id": "UCNaGLJRPE3ohleIDM7RFtlQ"}],
+    "thumbnails": [{"url": "https://i.ytimg.com/vi/abcdefghij1/hqdefault.jpg?sqp=abc"}],
+}
+
+
+def test_a_music_video_resolves_to_its_song(client):
+    fake = client(search=[MUSIC_VIDEO, SONG])
+
+    result = music.find_song_version("Biliyorsun", "Sezen Aksu")
+
+    assert result is not None
+    assert result.video_id == "_efHZg9D9iE"
+    # Square album art, asked for at COVER_SIZE — the whole point of the swap.
+    assert "w544-h544" in result.thumbnail_url
+    (name, args, kwargs) = fake.calls[0]
+    assert name == "search" and kwargs["filter"] == "songs"
+    assert args[0] == "Biliyorsun Sezen Aksu"
+
+
+def test_a_music_video_result_is_never_the_answer(client):
+    """The first hit for a video's own title is often the video itself.
+    Taking it would swap a row for exactly what it already was."""
+    client(search=[MUSIC_VIDEO])
+
+    assert music.find_song_version("Biliyorsun", "Sezen Aksu") is None
+
+
+def test_a_different_song_is_not_close_enough(client):
+    """A search is a guess, and playing the wrong recording is worse than
+    playing a music video."""
+    other = {**SONG, "title": "Firuze"}
+    client(search=[other])
+
+    assert music.find_song_version("Biliyorsun", "Sezen Aksu") is None
+
+
+def test_a_different_artist_is_not_close_enough(client):
+    """Same title, someone else's recording — a cover, or a track that just
+    shares a name."""
+    other = {**SONG, "artists": [{"name": "Someone Else", "id": "UCotherotherother"}]}
+    client(search=[other])
+
+    assert music.find_song_version("Biliyorsun", "Sezen Aksu") is None
+
+
+def test_bracketed_asides_and_punctuation_do_not_block_a_match(client):
+    """Measured on ten real video entries: the song's title differs from the
+    video's by exactly this kind of noise — "(feat. …)", "(Cardi B Version)",
+    "(Official Video)" — and all ten were the right track."""
+    versioned = {**SONG, "title": "Biliyorsun (feat. Someone) [Remastered]"}
+    client(search=[versioned])
+
+    result = music.find_song_version("Biliyorsun!", "Sezen Aksu")
+
+    assert result is not None
+    assert result.video_id == "_efHZg9D9iE"
+
+
+def test_duration_is_deliberately_not_part_of_the_match(client):
+    """A music video with a long intro runs 35 seconds past its song and is
+    still the same track — one of the ten measured. Requiring the durations
+    to agree would have thrown it away."""
+    client(search=[SONG])
+
+    assert music.find_song_version("Biliyorsun", "Sezen Aksu") is not None
+
+
+def test_a_track_with_no_artist_matches_on_title_alone(client):
+    """Weaker, and still stronger than taking the first hit."""
+    client(search=[SONG])
+
+    result = music.find_song_version("Biliyorsun", None)
+
+    assert result is not None
+
+
+COLLAB_SONG = {
+    **SONG,
+    "title": "Biliyorsun",
+    "videoId": "collabsong1",
+    "artists": [
+        {"name": "Sezen Aksu", "id": "UCNaGLJRPE3ohleIDM7RFtlQ"},
+        {"name": "Sertab Erener", "id": "UCotherotherotherother"},
+    ],
+}
+
+
+def test_a_collaboration_matches_on_the_lead_artist(client):
+    """The row names one artist ("ROSÉ"); the song credits several ("ROSÉ,
+    Bruno Mars"). This used to compare the row's single name against every
+    credit joined into one string, so every feat. missed — which is a large
+    share of exactly the chart pop these playlists are made of. Measured
+    before the fix: 3 of 5 sampled tracks resolved, both misses collaborations;
+    after, 5 of 5, and 13 of 14 across a real playlist.
+    """
+    client(search=[COLLAB_SONG])
+
+    result = music.find_song_version("Biliyorsun", "Sezen Aksu")
+
+    assert result is not None
+    assert result.video_id == "collabsong1"
+
+
+def test_a_credited_artist_further_down_the_list_still_counts(client):
+    """"feat." credits aren't always second, and the row's name isn't always
+    the first one YouTube Music lists."""
+    client(search=[COLLAB_SONG])
+
+    assert music.find_song_version("Biliyorsun", "Sertab Erener") is not None
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Biliyorsun (Live)",
+        "Biliyorsun (Acoustic)",
+        "Biliyorsun (Instrumental)",
+        "Biliyorsun [Karaoke]",
+        "Biliyorsun (Alison Wonderland Remix)",
+        "Biliyorsun (Sped Up)",
+    ],
+)
+def test_a_different_recording_is_not_the_song(client, title):
+    """_match_key throws brackets away, which is what lets "Sunflower
+    (Spider-Man: Into the Spider-Verse)" match "Sunflower" — and the same
+    rule makes an instrumental look like an equally good answer. Swapping a
+    track for its karaoke version is worse than leaving the music video."""
+    client(search=[{**SONG, "title": title}])
+
+    assert music.find_song_version("Biliyorsun", "Sezen Aksu") is None
+
+
+def test_asking_for_a_live_version_still_finds_one(client):
+    """The rule is "not a *different* recording", not "never bracketed" — a
+    row that is itself a live take should resolve to the live song."""
+    client(search=[{**SONG, "title": "Biliyorsun (Live)"}])
+
+    assert music.find_song_version("Biliyorsun (Live in Istanbul)", "Sezen Aksu") is not None
+
+
+def test_a_version_that_is_still_the_song_is_accepted(client):
+    """"(Cardi B Version)", "(Taylor's Version)" — the song, released under a
+    qualifier. Measured: one of ten sampled tracks resolved this way and it
+    was correct."""
+    client(search=[{**SONG, "title": "Biliyorsun (Sertab Version)"}])
+
+    assert music.find_song_version("Biliyorsun", "Sezen Aksu") is not None

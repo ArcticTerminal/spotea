@@ -158,9 +158,21 @@ def purge_content(db: Session, content: Content) -> None:
 
     Both unlinks used to run a "is any other row still pointing at this?"
     query first, because two profiles under one account could hold separate
-    rows for the same video and share the file on disk. With one library per
-    login there is no second row to protect, so the check went away with the
-    profiles that made it necessary.
+    rows for the same video and share the file on disk. That check was
+    removed with profiles — on the reasoning that one library per login
+    meant no second row to protect. Which was wrong the moment a second
+    *account* existed: the audio file is named for the video id alone, so
+    two accounts listening to the same track were still two rows over one
+    file, and either one deleting it took the other's copy. Found on the
+    live library, where one account's cleanup left another's row saying
+    "ready" with nothing behind it.
+
+    Audio is written per user now (see downloader.user_storage_dir), so
+    there is genuinely nothing shared to protect any more — the unlink below
+    can only ever remove this user's own copy. Thumbnails are still shared,
+    and are deliberately left alone here: they are a few KB, they cost no
+    YouTube request to rebuild, and sweep_orphans collects the ones nothing
+    references at all.
 
     Deliberately does not commit: the unfollow path (routers/artists.py's
     delete_feed) purges many rows and commits once, and doing it per row
@@ -172,7 +184,6 @@ def purge_content(db: Session, content: Content) -> None:
     """
     if content.file_path:
         Path(content.file_path).unlink(missing_ok=True)
-    (settings.thumbnails_dir / f"{content.video_id}.jpg").unlink(missing_ok=True)
     db.delete(content)
 
 
@@ -206,7 +217,10 @@ def sweep_startup_leftovers() -> int:
     count removed.
     """
     removed = 0
-    for part_file in settings.storage_dir.glob("*.part"):
+    # rglob, not glob: audio is written into a directory per user (see
+    # downloader.user_storage_dir), so a .part file is one level down. The
+    # pattern still matches the flat layout older installs are on.
+    for part_file in settings.storage_dir.rglob("*.part"):
         part_file.unlink(missing_ok=True)
         removed += 1
     return removed
@@ -254,8 +268,10 @@ def sweep_orphans(db: Session) -> None:
         Path(path).resolve()
         for (path,) in db.query(Content.file_path).filter(Content.file_path.isnot(None))
     }
-    for leftover in settings.storage_dir.glob(f"*.{settings.audio_format}"):
-        if leftover.resolve() not in referenced_audio:
+    # rglob for the same reason as above. Files only — a per-user directory
+    # is never itself a candidate, and an empty one costs nothing to leave.
+    for leftover in settings.storage_dir.rglob(f"*.{settings.audio_format}"):
+        if leftover.is_file() and leftover.resolve() not in referenced_audio:
             leftover.unlink(missing_ok=True)
 
     referenced_video_ids = {video_id for (video_id,) in db.query(Content.video_id)}
@@ -274,7 +290,7 @@ def sweep_orphans(db: Session) -> None:
             avatar.unlink(missing_ok=True)
 
     cutoff = time.time() - STALE_EXPORT_AGE.total_seconds()
-    for export_temp in settings.storage_dir.glob(f"*{EXPORT_TEMP_SUFFIX}"):
+    for export_temp in settings.storage_dir.rglob(f"*{EXPORT_TEMP_SUFFIX}"):
         try:
             if export_temp.stat().st_mtime < cutoff:
                 export_temp.unlink(missing_ok=True)

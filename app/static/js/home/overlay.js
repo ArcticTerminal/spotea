@@ -93,6 +93,19 @@ let consecutiveAutoSkipFailures = 0;
 const MAX_CONSECUTIVE_UNAVAILABLE_SKIPS = 10;
 let consecutiveUnavailableSkips = 0;
 
+/**
+ * "Open this artist's page", announced rather than called.
+ *
+ * home/detail.js is what owns openDetail, and it already imports this module
+ * for openPlayer — importing it back would be a cycle. Same one-way
+ * arrangement home/remote.js uses for ARTIST_FOLLOWED and home/queue.js for
+ * QUEUE_CHANGED: the module that knows *that* something should open says so,
+ * and the module that knows *how* listens.
+ *
+ * detail is `{ pageId }` — see ContentOut.artist_page_id.
+ */
+export const OPEN_ARTIST = "spotea:open-artist";
+
 function expandPlayer() {
   document.getElementById("player-overlay").hidden = false;
 }
@@ -189,10 +202,17 @@ export async function openPlayer(contentId, { expanded = true, requireVisible = 
       return;
     }
     data = res.data;
+    data = await songVersionOf(data);
   }
 
   document.querySelector(".player-title").textContent = data.title;
-  document.querySelector(".player-channel").textContent = data.channel_title || "";
+  const channelBtn = document.querySelector(".player-channel");
+  channelBtn.textContent = data.channel_title || "";
+  channelBtn.dataset.artistPageId = data.artist_page_id || "";
+  // Disabled rather than left as a dead control: a track whose artist row was
+  // never resolved past the placeholder it was created from has no page to
+  // open, and the line styles itself back into plain text (see style.css).
+  channelBtn.disabled = !data.artist_page_id;
   const artImg = document.getElementById("player-art-img");
   if (data.thumbnail_url) {
     artImg.src = data.thumbnail_url;
@@ -313,6 +333,30 @@ export async function openPlayer(contentId, { expanded = true, requireVisible = 
 }
 
 /**
+ * Swaps a music-video row for the song it is a video of, if it is one.
+ *
+ * Explore's playlists are video playlists almost end to end, and a video
+ * entry is the worse copy of the track in every way that shows: a 16:9 still
+ * where the rest of the app draws square album art, no lyrics, and a
+ * recording with an intro on it. See routers/content.py's
+ * swap_in_song_version for what the server does and why it rewrites the row
+ * rather than adding one.
+ *
+ * One request, and only for the track actually being played — a playlist is
+ * fifty of these and resolving all of them on open would be fifty live
+ * searches for a list most of which nobody will hear. The row is rewritten,
+ * so the second play of the same track costs nothing.
+ *
+ * Best effort in both directions: a failed call, or a track with no song
+ * version, hands back exactly what it was given.
+ */
+async function songVersionOf(data) {
+  if (!data.is_music_video) return data;
+  const { ok, data: resolved } = await api(`/content/${data.id}/song-version`, { method: "POST" });
+  return ok && resolved ? resolved : data;
+}
+
+/**
  * Pulls the next track down ahead of time and caches its metadata in
  * `upcomingTrack`, so the handoff to it doesn't have to wait on either.
  *
@@ -329,15 +373,25 @@ export async function openPlayer(contentId, { expanded = true, requireVisible = 
  */
 async function cacheUpcoming(contentId) {
   const id = String(contentId);
-  const [download, meta] = await Promise.all([
-    api(`/content/${id}/download`, { method: "POST" }),
-    api(`/content/${id}`),
-  ]);
+  // The song swap runs *before* the download, not beside it: the row's
+  // video_id is what gets fetched, and the server refuses to rewrite it once
+  // a file exists (see swap_in_song_version). Resolving first means the
+  // prefetch pulls down the song rather than the video, and the handoff
+  // finds it already on disk.
+  const meta = await api(`/content/${id}`);
   if (!meta.ok) return;
+  const resolved = await songVersionOf(meta.data);
+
+  // The metadata and the swap used to run beside the download in one
+  // Promise.all. They can't any more: the download fetches whatever
+  // video_id the row currently names, so the swap has to have landed first
+  // or the prefetch pulls down the music video and the handoff arrives to
+  // find the wrong file already on disk.
+  const download = await api(`/content/${id}/download`, { method: "POST" });
 
   // The POST's answer is the more recent of the two, and the only one that
   // can say "already on disk" for a track that needed no download at all.
-  const data = { ...meta.data };
+  const data = { ...resolved };
   if (download.ok && download.data) {
     data.status = download.data.status;
     data.is_unavailable = download.data.is_unavailable === true;
@@ -468,35 +522,68 @@ function setupQueuePanel() {
     if (opening) load();
   });
 
-  // Grab the player, pull down, the queue closes — the gesture that dismisses
-  // a sheet everywhere else. Bound to the card so it can skip the queue
-  // itself (which scrolls) and the controls, whose own drags already mean
-  // something: pulling down on the seek slider must not close anything.
+  // Pull the panel's own top edge down and it closes — the gesture that
+  // dismisses a sheet everywhere else, taken from the same place everywhere
+  // else takes it.
+  //
+  // It used to be the whole card, minus the queue and the controls, which in
+  // practice meant the artwork and the title: the two things furthest from
+  // the panel being dismissed. Reaching over a track list to drag a cover
+  // downwards is not a gesture anyone arrives at on their own. The tab strip
+  // is the sheet's top edge and sits directly above what moves.
+  //
   // Guarded like the toggle and panel above. This used to be dereferenced
   // bare, so a template change that dropped the element didn't degrade the
   // player — it threw here at boot and took every later setup call in
   // pages/index.js down with it, leaving a blank app rather than a broken
   // drag gesture.
-  const card = document.getElementById("player-root");
-  if (!card) return;
+  const handle = panel.querySelector(".panel-tabs");
+  if (!handle) return;
   let dragFrom = null;
-  card.addEventListener("pointerdown", (event) => {
+  // When the drag last closed the panel. A drag that started on a tab must
+  // not also count as a tap on it, and the click for that tap arrives after
+  // the panel has already gone.
+  //
+  // A timestamp rather than a "swallow the next click" flag, which is what
+  // this was first: a touch drag doesn't always produce a click at all, and
+  // the flag then sat armed until the *next* tap — a real one — was eaten
+  // instead. Caught in a browser test, where the tab tapped after a
+  // pull-to-close silently didn't switch. A window can only ever be wrong
+  // about a click within a few hundred milliseconds of a real drag.
+  let closedByDragAt = 0;
+  const CLICK_AFTER_DRAG_MS = 400;
+
+  handle.addEventListener("pointerdown", (event) => {
     // Nothing to dismiss where the panel isn't a drawer.
     if (pinnedPanel.matches) return;
     if (!panel.classList.contains("is-open")) return;
-    if (event.target.closest("#queue-panel, input, button, a")) return;
     dragFrom = event.clientY;
   });
-  card.addEventListener("pointermove", (event) => {
+  handle.addEventListener("pointermove", (event) => {
     if (dragFrom === null || event.clientY - dragFrom < QUEUE_DRAG_CLOSE_PX) return;
     dragFrom = null;
+    closedByDragAt = Date.now();
     setQueueOpen(false);
   });
   const endDrag = () => {
     dragFrom = null;
   };
-  card.addEventListener("pointerup", endDrag);
-  card.addEventListener("pointercancel", endDrag);
+  handle.addEventListener("pointerup", endDrag);
+  handle.addEventListener("pointercancel", endDrag);
+  // Capture, so it runs on the strip before the click reaches the tab button
+  // itself — home/lyrics.js's handlers are bound to those buttons, and
+  // stopping it here is what keeps a drag from also switching the tab it
+  // happened to start on.
+  handle.addEventListener(
+    "click",
+    (event) => {
+      if (Date.now() - closedByDragAt > CLICK_AFTER_DRAG_MS) return;
+      closedByDragAt = 0;
+      event.stopPropagation();
+      event.preventDefault();
+    },
+    true
+  );
 
   // Everything that changes the queue lands here. Two different jobs: when
   // only the pointer moved — a track ended, or one of these very rows was
@@ -757,6 +844,16 @@ export function setupPlayerOverlay() {
   // and is taken, which is why the buttons appear for the rest of the session
   // and only the first track is ever wrong.
   onPlayerEvent("playing", syncQueueControls);
+
+  // Collapsed rather than closed: leaving the overlay up would put the
+  // artist's page behind it with no sign anything had happened, and closing
+  // it outright stops the music. The mini bar is one tap back.
+  document.querySelector(".player-channel").addEventListener("click", (event) => {
+    const pageId = event.currentTarget.dataset.artistPageId;
+    if (!pageId) return;
+    collapsePlayer();
+    document.dispatchEvent(new CustomEvent(OPEN_ARTIST, { detail: { pageId } }));
+  });
 
   document.getElementById("mini-player-expand").addEventListener("click", expandPlayer);
   document.getElementById("overlay-collapse-btn").addEventListener("click", (event) => {

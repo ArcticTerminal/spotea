@@ -180,6 +180,12 @@ function peekIndex(offset) {
   const index = state.position + offset;
   if (index >= 0 && index < state.order.length) return index;
   if (state.repeat !== "all") return null;
+  // A queue of one has no other end to join up with. Without this the modulo
+  // below wrapped it onto itself — `1 % 1` is 0 — so turning repeat on with a
+  // single track open lit both skip buttons, and pressing either one
+  // restarted the track that was already playing. "Repeat the queue" on a
+  // one-track queue is what repeat "one" already means.
+  if (state.order.length < 2) return null;
   return ((index % state.order.length) + state.order.length) % state.order.length;
 }
 

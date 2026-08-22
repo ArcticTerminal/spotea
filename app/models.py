@@ -249,6 +249,44 @@ class Content(Base):
     user: Mapped["User"] = relationship(back_populates="content")
 
 
+class SwappedVideo(Base):
+    """A video id a Content row *used* to have, and the row it became.
+
+    When a music-video entry is swapped for the song it is a video of (see
+    routers/content.py's swap_in_song_version), the row's `video_id` changes.
+    That is what makes the cover square and the lyrics arrive — and it also
+    makes the row unfindable by the id the playlist it came from still shows.
+
+    The consequence was a duplicate per tap. POST /explore/tracks/batch looks
+    up "which of these do I already have" by video id; after a swap the answer
+    for that playlist row is "none", so it created a second row, which then
+    couldn't be swapped (the song is already taken by the first) and so played
+    the music video's audio from the start. Measured on the live library: 205
+    rows in an hour, one track stored three times, and the reported symptom —
+    tapping the playing track again starts a different recording over.
+
+    So the old id is kept here and the batch lookup consults it. Keyed by
+    (user_id, video_id) because a Content row is per user, and the same
+    playlist can be started by two of them.
+
+    A new table rather than a column on `content`, for the reason spelled out
+    in TrackLyrics below: `create_all` adds a missing table to an existing
+    database but never a missing column.
+    """
+
+    __tablename__ = "swapped_videos"
+    __table_args__ = (
+        UniqueConstraint("user_id", "video_id", name="uq_swapped_user_video_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    # The id the row carried before the swap — what a playlist listing shows.
+    video_id: Mapped[str] = mapped_column(String(20), index=True)
+    content_id: Mapped[int] = mapped_column(ForeignKey("content.id", ondelete="CASCADE"))
+    swapped_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
 class TrackLyrics(Base):
     """One track's timed lyrics, or the fact that it hasn't got any.
 

@@ -9,14 +9,15 @@ from app.database import SessionLocal
 from app.deps import get_current_user, get_db, require_login
 from app.downloader import DownloadError, VideoUnavailableError, download_audio
 from app.formatting import safe_filename
-from app.images import needs_thumbnail_caching
-from app.models import Content, User
+from app.images import is_music_video, needs_thumbnail_caching
+from app.models import Content, SwappedVideo, User
 from app.page_context import playlist_filter
 from app.progress import ProgressRegistry
 from app.schemas import ContentOut, FavoriteOut, LyricsOut, QueueOut, StatusOut
 from app.services.artist_sync import cache_thumbnail
 from app.services.lyrics import lyrics_for
 from app.timeutil import utcnow
+from app.youtube.music import find_song_version
 from app.youtube.urls import VIDEO_ID_RE
 
 router = APIRouter(prefix="/content", tags=["content"], dependencies=[Depends(require_login)])
@@ -69,12 +70,14 @@ def _set_download_outcome(content_id: int, **fields) -> None:
         db.commit()
 
 
-def _run_download(content_id: int, video_id: str, quality: str) -> None:
+def _run_download(content_id: int, video_id: str, quality: str, user_id: int) -> None:
     def on_progress(phase: str, percent: int | None) -> None:
         _download_progress.set(content_id, (phase, percent))
 
     try:
-        file_path = download_audio(video_id, quality=quality, on_progress=on_progress)
+        file_path = download_audio(
+            video_id, quality=quality, on_progress=on_progress, user_id=user_id
+        )
     except VideoUnavailableError as exc:
         # Settled, not provisional — start_download won't attempt it again
         # and the player skips it without waiting. See Content.is_unavailable.
@@ -156,6 +159,78 @@ def get_content(
     return ContentOut.from_content(content)
 
 
+@router.post("/{content_id}/song-version", response_model=ContentOut)
+def swap_in_song_version(
+    content_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ContentOut:
+    """Turns a music-video row into the song it is a video of.
+
+    Explore's playlists are video playlists almost end to end (see
+    music.find_song_version for the measurements), and a video entry is the
+    worse copy of the track in every way that shows: a 16:9 still where the
+    rest of the app draws square album art, no lyrics, and a recording with
+    an intro on it. The song version has all three.
+
+    Updated **in place** rather than inserted alongside. The client is
+    holding this row's id — it is in the queue, it is what the player is
+    opening — so a second row would mean the id being played and the id in
+    the queue disagreeing, and queue.js drops a queue the playing track
+    isn't in. Rewriting the row keeps every id valid and fixes the cover
+    everywhere it is already rendered, not just in the player.
+
+    Answers with the row either way: no match, an unresolvable title, or a
+    row that isn't a video at all are all "nothing to do here", not errors.
+    The caller plays what it gets back.
+    """
+    content = (
+        db.query(Content)
+        .options(joinedload(Content.artist))
+        .filter(Content.id == content_id, Content.user_id == user.id)
+        .first()
+    )
+    if content is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Content not found")
+
+    if not is_music_video(content) or content.status != "not_downloaded":
+        # Already the song, or already downloaded — rewriting video_id under
+        # a file that has been fetched would orphan it and leave the row
+        # pointing at audio it no longer names.
+        return ContentOut.from_content(content)
+
+    song = find_song_version(content.title, content.artist.name if content.artist else None)
+    if song is None:
+        return ContentOut.from_content(content)
+
+    # The unique constraint is on (user_id, video_id): this same song may
+    # already be in the library from a search. Left alone in that case —
+    # swapping would collide, and handing back the *other* row's id would
+    # take the playing track out of the queue it came from.
+    taken = (
+        db.query(Content.id)
+        .filter(Content.user_id == user.id, Content.video_id == song.video_id)
+        .first()
+    )
+    if taken is not None:
+        return ContentOut.from_content(content)
+
+    # Recorded before it's overwritten. The playlist this row came from still
+    # lists the video's id, and POST /explore/tracks/batch looks rows up by
+    # exactly that — so without this the next tap on the same row finds
+    # nothing, creates a second row, and plays the music video's audio from
+    # the start. See SwappedVideo for the measurements.
+    db.add(SwappedVideo(user_id=user.id, video_id=content.video_id, content_id=content.id))
+
+    content.video_id = song.video_id
+    content.thumbnail_url = song.thumbnail_url
+    if song.duration_seconds:
+        content.duration_seconds = song.duration_seconds
+    db.commit()
+    db.refresh(content)
+    return ContentOut.from_content(content)
+
+
 # Registered ahead of the /{content_id}/... routes below — a literal segment
 # placed after them would otherwise be swallowed by /{content_id} (Starlette
 # matches path structure first and only fails int conversion once the
@@ -223,7 +298,9 @@ def start_download(
     content.error_message = None
     db.commit()
 
-    background_tasks.add_task(_run_download, content.id, content.video_id, user.audio_quality)
+    background_tasks.add_task(
+        _run_download, content.id, content.video_id, user.audio_quality, user.id
+    )
 
     return StatusOut(id=content.id, status=content.status, error_message=content.error_message)
 

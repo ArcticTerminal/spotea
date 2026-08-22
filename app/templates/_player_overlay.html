@@ -23,9 +23,17 @@
         <img id="player-art-img" alt="" hidden />
       </div>
 
+      <!-- The artist line is a button, not a label: it is the one place in
+           the app where you are looking straight at an artist's name with no
+           way to reach them. Filled and enabled by home/overlay.js, which
+           knows whether the track's artist has a page to open at all (see
+           ContentOut.artist_page_id) — disabled it styles and behaves as the
+           plain text it used to be. -->
       <div class="player-meta">
         <h1 class="player-title"></h1>
-        <p class="player-channel"></p>
+        <p class="player-channel-line">
+          <button type="button" class="player-channel artist-link" data-artist-page-id="" disabled></button>
+        </p>
       </div>
 {% with duration_label = '0:00', favorite_content_id = '', favorite_is_on = False %}
 {% include "_player_controls.html" %}

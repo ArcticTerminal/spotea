@@ -21,7 +21,7 @@
 import { unfollowArtist } from "../content-actions.js";
 import { classifyHash, showToast } from "../core.js";
 import { refreshFragments, swapFragmentHtml } from "../fragments.js";
-import { openPlayer } from "./overlay.js";
+import { OPEN_ARTIST, openPlayer } from "./overlay.js";
 import { QUEUE_CHANGED, isShuffled, loadQueue, queueSource, toggleShuffle } from "./queue.js";
 import { wireScrollers } from "./scrollers.js";
 import { ARTIST_FOLLOWED, followArtist, playRemoteList, playRemoteVideo } from "./remote.js";
@@ -476,10 +476,19 @@ export function setupDetailPanel() {
     // the browse id its cache entry is keyed on, so dropping the whole cache
     // is simpler than tracking that mapping for an action this infrequent.
     remoteFragmentCache.clear();
-    // Straight back to their profile, which is the page their library card
-    // opens too (see _library_grid.html) — following someone and then
-    // clicking them a minute later must not show two different pages.
-    if (event.detail.browseId) openDetail("yt-artist", event.detail.browseId);
+    // Deliberately does not open their page. Following used to jump straight
+    // to the profile, which meant a search result's Follow button and the
+    // result row itself did the same thing — and the one you press when you
+    // already know who you're adding is precisely the one you don't want
+    // taken anywhere. The row still opens the profile; this only follows.
+    // The button says "Following" either way (see home/remote.js), so the
+    // press is still acknowledged where it happened.
+  });
+
+  // The player's artist line was tapped. It has already collapsed itself to
+  // the mini bar; all that's left is the page it asked for.
+  document.addEventListener(OPEN_ARTIST, (event) => {
+    openDetail("yt-artist", event.detail.pageId);
   });
 
   window.addEventListener("popstate", () => {

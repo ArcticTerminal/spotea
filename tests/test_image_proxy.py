@@ -117,3 +117,47 @@ def test_image_proxy_requires_login():
         res = anonymous.get("/image-proxy", params={"u": "https://yt3.ggpht.com/abc"}, follow_redirects=False)
 
     assert res.status_code == 303
+
+
+def test_a_video_still_is_fetched_exactly_as_asked_for(client, monkeypatch):
+    """The proxy used to try `maxresdefault` first and fall back, to sharpen
+    the 400x225 cover a music-video playlist entry carries.
+
+    Gone with the reason for it: a video row is swapped for its song before it
+    plays (see routers/content.py's swap_in_song_version), and the song's
+    cover is square album art — so the player, the one surface that drew a
+    still large enough for 400px to look soft, no longer draws one. What was
+    left was a list of 200px cards paying for 1280x720 frames: measured over
+    24 real covers, 496 KB became 2151 KB.
+    """
+    original = "https://i.ytimg.com/vi/1lrFsXkT_rM/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQ"
+    fetched = []
+
+    def fake_fetch(url):
+        fetched.append(url)
+        return b"\xff\xd8\xff", "image/jpeg"
+
+    monkeypatch.setattr(main, "fetch_image_bytes", fake_fetch)
+
+    res = client.get("/image-proxy", params={"u": original})
+
+    assert res.status_code == 200
+    assert fetched == [original], "one fetch, and the URL the caller named"
+
+
+def test_a_square_cover_is_fetched_once_and_unchanged(client, monkeypatch):
+    """Only video stills have a larger variant to try. YouTube Music's own
+    square art is already asked for at COVER_SIZE where the URL is built, so
+    a second speculative fetch here would be pure waste."""
+    fetched = []
+
+    def fake_fetch(url):
+        fetched.append(url)
+        return b"\xff\xd8\xff", "image/jpeg"
+
+    monkeypatch.setattr(main, "fetch_image_bytes", fake_fetch)
+
+    res = client.get("/image-proxy", params={"u": "https://yt3.ggpht.com/abc=w544-h544-l90-rj"})
+
+    assert res.status_code == 200
+    assert fetched == ["https://yt3.ggpht.com/abc=w544-h544-l90-rj"]

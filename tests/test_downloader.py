@@ -309,3 +309,31 @@ def test_quality_selects_the_capped_format(fake_ydl, tmp_path):
     downloader.download_audio("vid00000001", quality="low")
 
     assert "abr<=64" in fake_ydl.calls[0]["format"]
+
+
+def test_the_file_is_looked_for_where_it_was_written(fake_ydl, tmp_path):
+    """Audio goes into a directory per user, and the "did it land?" check has
+    to follow it there.
+
+    It didn't, at first: out_template moved and the final path stayed derived
+    from storage_dir, so every download raised "Download completed but output
+    file was not found" with the file sitting one level down. It reached the
+    running app — three tracks in a row failed that way before it was caught.
+    """
+    fake_ydl.outcomes = [None]
+    written = tmp_path / "7" / "vid00000001.m4a"
+    written.parent.mkdir()
+    written.write_bytes(b"audio")
+
+    assert downloader.download_audio("vid00000001", user_id=7) == written
+
+    # And the template yt-dlp was handed names the same place.
+    assert str(tmp_path / "7") in fake_ydl.calls[0]["outtmpl"]
+
+
+def test_a_download_with_no_user_keeps_the_flat_layout(fake_ydl, tmp_path):
+    """Older rows name their file at the top level and still have to resolve."""
+    fake_ydl.outcomes = [None]
+    (tmp_path / "vid00000001.m4a").write_bytes(b"audio")
+
+    assert downloader.download_audio("vid00000001") == tmp_path / "vid00000001.m4a"

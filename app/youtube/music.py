@@ -42,6 +42,7 @@ a 500.
 """
 
 import logging
+import re
 import threading
 from dataclasses import dataclass, field, replace
 
@@ -365,6 +366,126 @@ def search_songs(query: str, limit: int = SEARCH_RESULT_LIMIT) -> list[VideoSear
     """Explore's song search. The counterpart of search.py's search_videos,
     and the reason this module exists — see its docstring."""
     return _song_results(_search(query, "songs", limit))
+
+
+# YouTube Music labels every entry with what kind of recording it is.
+# "ATV" is the audio track — the song as it appears on its album, with square
+# cover art and, usually, timed lyrics. "OMV" is the official music video:
+# a different recording of the same song, with a 16:9 video still for a cover
+# and no album to hang it off.
+SONG_VIDEO_TYPE = "MUSIC_VIDEO_TYPE_ATV"
+
+# How many candidates find_song_version looks at. The song version is
+# normally the first result; the extra four are there for the case where a
+# live take or a sped-up upload outranks it.
+SONG_MATCH_CANDIDATES = 5
+
+# Punctuation, and the bracketed asides a music video's title carries that
+# its song's doesn't (and the other way round): "(Official Video)",
+# "(feat. …)", "[Explicit]".
+_TITLE_NOISE_RE = re.compile(r"\(.*?\)|\[.*?\]")
+_NON_WORD_RE = re.compile(r"[^\w]+", re.UNICODE)
+
+
+def _match_key(text: str | None) -> str:
+    """A title or artist name reduced to what two spellings of the same thing
+    have in common — lowercase words, no punctuation, no bracketed aside."""
+    if not text:
+        return ""
+    return " ".join(_NON_WORD_RE.sub(" ", _TITLE_NOISE_RE.sub(" ", text.lower())).split())
+
+
+# Words that, inside a title's bracketed aside, mean this is a *different
+# recording* of the song rather than a different spelling of it. _match_key
+# throws brackets away — which is what lets "Sunflower (Spider-Man: Into the
+# Spider-Verse)" match "Sunflower" — and that same rule makes "Die With A
+# Smile (Instrumental)" look like an equally good answer for "Die With A
+# Smile". It isn't: swapping a track for its karaoke version is a worse
+# outcome than leaving the music video alone.
+#
+# Deliberately not exhaustive and deliberately not applied to the whole
+# title: "(Cardi B Version)" and "(Taylor's Version)" are the song, and
+# guessing at every possible qualifier would start rejecting those.
+_OTHER_RECORDING_WORDS = frozenset(
+    {
+        "live",
+        "acoustic",
+        "instrumental",
+        "karaoke",
+        "remix",
+        "cover",
+        "demo",
+        "sped",
+        "slowed",
+        "reverb",
+        "8d",
+    }
+)
+
+
+def _is_other_recording(title: str | None) -> bool:
+    """True when a title's brackets mark it as a different take."""
+    for aside in re.findall(r"\((.*?)\)|\[(.*?)\]", title or ""):
+        words = set(_match_key(" ".join(part for part in aside if part)).split())
+        if words & _OTHER_RECORDING_WORDS:
+            return True
+    return False
+
+
+def find_song_version(title: str, artist_name: str | None) -> VideoSearchResult | None:
+    """The album version of a track that arrived as a music video, or None.
+
+    YouTube Music's curated and mood playlists are *video* playlists almost
+    end to end — measured across three of them: 3 of 200, 3 of 96 and 2 of
+    200 entries were songs, the rest music videos. A video entry has no album
+    behind it, so it carries a 16:9 video still where every other cover in
+    this app is square album art, and it usually has no lyrics either. That
+    is the whole of "why do playlist covers look wrong".
+
+    There is no counterpart field to follow: get_watch_playlist and get_song
+    both hand the same video straight back (checked). Searching for the song
+    is what works — measured on ten video entries, all ten resolved to the
+    right song, title and artist matching exactly once punctuation and
+    bracketed asides are dropped.
+
+    That last part is the guard. A search is a guess, and playing the wrong
+    recording is worse than playing a music video: a title or artist that
+    doesn't match is a miss, not a near-enough. Duration is deliberately not
+    part of it — a music video with a long intro is 35 seconds longer than
+    its song and still the same track (one of the ten).
+    """
+    query = f"{title} {artist_name}".strip() if artist_name else title
+    if not query:
+        return None
+
+    wanted_title = _match_key(title)
+    wanted_artist = _match_key(artist_name)
+    for item in _search(query, "songs", SONG_MATCH_CANDIDATES):
+        if item.get("videoType") != SONG_VIDEO_TYPE:
+            continue
+        result = _song_result(item)
+        if result is None:
+            continue
+        if _match_key(result.title) != wanted_title:
+            continue
+        if _is_other_recording(result.title) and not _is_other_recording(title):
+            continue
+        # Matched against the entry's artist *list*, not against
+        # VideoSearchResult.channel_title, which is every credited artist
+        # joined into one string. A playlist row names the lead artist alone
+        # ("ROSÉ"), so comparing it to the joined form ("ROSÉ, Bruno Mars")
+        # failed for every collaboration — which is a large share of exactly
+        # the chart-pop these playlists are made of. Measured before the fix:
+        # 3 of 5 sampled tracks resolved, and both misses were feat. credits.
+        #
+        # Only when the caller had an artist to match on. A track stored
+        # without one can still be resolved on its title alone — that is the
+        # weaker check, and it is still stronger than taking the first hit.
+        credited = {_match_key(a.get("name")) for a in (item.get("artists") or []) if a.get("name")}
+        if wanted_artist and wanted_artist not in credited:
+            continue
+        return result
+    return None
 
 
 def search_playlists(query: str, limit: int = SEARCH_RESULT_LIMIT) -> list[PlaylistSearchResult]:

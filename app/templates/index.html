@@ -133,7 +133,7 @@
 
     <section id="tab-library" class="tab-panel" data-tab-panel="library">
       <div class="content-header">
-        <h2>Your artists</h2>
+        <h2>Your Library</h2>
         {% if artists %}
         <div class="search-input-wrap">
           <input
@@ -159,19 +159,44 @@
 
     <section id="tab-explore" class="tab-panel" data-tab-panel="explore" hidden>
       <div class="channels-panel-inner">
-        <div class="channel-search search-input-wrap">
-          <input type="text" id="explore-search-input" placeholder="Search a song or artist…" autocomplete="off" autocapitalize="off" autocorrect="off" />
-          <button type="button" id="explore-search-clear" class="search-clear-btn" aria-label="Clear search" hidden>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-close" /></svg>
-          </button>
+        {# The field and the tab strip sit in one sticky block so that
+           scrolling a long result list doesn't take the search box with it —
+           what you typed and which half of the results you're looking at are
+           both still the question while you're reading the answer. One
+           wrapper rather than two sticky elements: stacking them would mean
+           hardcoding the strip's offset to the field's rendered height.
+
+           Two headings became two tabs. Both lists are fetched together and
+           only one is on screen, which is what a phone has room for — the
+           songs used to push the artists so far down that finding one meant
+           scrolling past twenty tracks.
+
+           Deliberately the player panel's own .panel-tabs/.panel-tab (see
+           _player_overlay.html) rather than a second tab style: one app, one
+           way a tab strip looks. .search-tabs only drops the drawer's top
+           border and spacing, which belong to where that strip sits, not to
+           what it is. #}
+        <div class="explore-search-head">
+          <div class="channel-search search-input-wrap">
+            <input type="text" id="explore-search-input" placeholder="Search a song or artist…" autocomplete="off" autocapitalize="off" autocorrect="off" />
+            <button type="button" id="explore-search-clear" class="search-clear-btn" aria-label="Clear search" hidden>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#i-close" /></svg>
+            </button>
+          </div>
+
+          <div id="explore-search-tabs" class="panel-tabs search-tabs" role="tablist" aria-label="Search results" hidden>
+            <button type="button" class="panel-tab is-selected" id="search-tab-songs" role="tab" aria-selected="true" aria-controls="video-search-results">
+              Songs<span class="panel-tab-count" id="search-tab-songs-count" hidden></span>
+            </button>
+            <button type="button" class="panel-tab" id="search-tab-artists" role="tab" aria-selected="false" aria-controls="channel-search-results">
+              Artists<span class="panel-tab-count" id="search-tab-artists-count" hidden></span>
+            </button>
+          </div>
         </div>
 
         <div id="explore-results-panel" hidden>
-          <h2>Songs</h2>
-          <ul id="video-search-results" class="search-results video-search-results"></ul>
-
-          <h2>Artists</h2>
-          <ul id="channel-search-results" class="search-results"></ul>
+          <ul id="video-search-results" class="search-results video-search-results" role="tabpanel" aria-labelledby="search-tab-songs"></ul>
+          <ul id="channel-search-results" class="search-results" role="tabpanel" aria-labelledby="search-tab-artists" hidden></ul>
         </div>
 
         <div id="explore-browse-panel">

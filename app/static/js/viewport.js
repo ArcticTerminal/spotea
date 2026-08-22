@@ -25,14 +25,72 @@
 // the class would flicker on every scroll.
 const KEYBOARD_MIN_HEIGHT = 120;
 
+// Anything focusable that summons a keyboard. Ranges, checkboxes and buttons
+// don't, and treating them as if they did would hide the bottom bar every
+// time the volume slider was touched.
+const TYPING_SELECTOR = 'input:not([type="range"]):not([type="checkbox"]):not([type="radio"]), textarea';
+
+/**
+ * Publishes the app header's rendered height as --app-header-height.
+ *
+ * On a phone the header is `position: sticky; top: 0`, so anything else that
+ * wants to pin below it (Explore's search field and its tab strip) needs to
+ * know how tall it is — and it isn't a constant: the logo row's height comes
+ * from its own padding and font size, both of which a browser's text-size
+ * setting can change under us.
+ *
+ * Measured rather than hardcoded for exactly that reason, and re-measured on
+ * resize through a ResizeObserver rather than a window listener, so a change
+ * in the header itself is caught too.
+ */
+export function installHeaderOffset() {
+  const header = document.querySelector(".app-header-sticky");
+  if (!header) return;
+
+  const publish = () => {
+    document.documentElement.style.setProperty(
+      "--app-header-height",
+      `${Math.round(header.getBoundingClientRect().height)}px`
+    );
+  };
+
+  publish();
+  if (!("ResizeObserver" in window)) return;
+  new ResizeObserver(publish).observe(header);
+}
+
 export function installKeyboardInset() {
+  // The second, independent signal that a keyboard is up. The measurement
+  // below is the one that says *how tall* it is, and it has to be — nothing
+  // reports that — but on iOS it is not reliable as a yes/no: the moment the
+  // page is scrolled with the keyboard open the numbers stop describing a
+  // keyboard at all (see update). Focus does not have that problem. On a
+  // phone, a text field with focus means a keyboard, full stop.
+  //
+  // Bound whether or not visualViewport exists, since this half needs
+  // nothing from it.
+  const setTyping = (on) => document.body.classList.toggle("is-typing", on);
+  document.addEventListener("focusin", (event) => {
+    if (event.target.matches?.(TYPING_SELECTOR)) setTyping(true);
+  });
+  document.addEventListener("focusout", (event) => {
+    if (event.target.matches?.(TYPING_SELECTOR)) setTyping(false);
+  });
+
   const viewport = window.visualViewport;
   if (!viewport) return;
 
   function update() {
-    // offsetTop counts the part scrolled off the top of the visual viewport,
-    // which is how much of the gap is *not* the keyboard.
-    const covered = window.innerHeight - viewport.height - viewport.offsetTop;
+    // `innerHeight - height`, and nothing else. This used to subtract
+    // viewport.offsetTop as well, on the reasoning that the offset is the
+    // part of the gap scrolled off the top rather than covered by keys — but
+    // the keyboard is still there while the offset grows, so scrolling the
+    // page with it open walked the answer down towards zero. Past
+    // KEYBOARD_MIN_HEIGHT the class came off and the bottom bar and mini
+    // player reappeared, dragged by iOS into the middle of the screen right
+    // above the keys: exactly the failure this file exists to prevent, only
+    // now triggered by scrolling instead of by typing.
+    const covered = window.innerHeight - viewport.height;
     const inset = Math.max(0, Math.round(covered));
     document.documentElement.style.setProperty("--keyboard-inset", `${inset}px`);
     document.body.classList.toggle("is-keyboard-open", inset >= KEYBOARD_MIN_HEIGHT);
