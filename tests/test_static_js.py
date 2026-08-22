@@ -427,13 +427,17 @@ def test_playing_a_standalone_track_sets_a_one_track_queue() -> None:
     assert set_queue < open_player
 
 
-def test_a_new_follow_lands_on_the_artists_profile() -> None:
-    """The landing page has to match the one the library card opens for the
-    very same artist — following someone and clicking them a minute later
-    must not show two different pages."""
+def test_following_someone_does_not_navigate_anywhere() -> None:
+    """Follow follows, and that is all it does.
+
+    It used to jump straight to the artist's profile, which made a search
+    result's Follow button and the result row itself do the same thing — and
+    the button you press when you already know who you're adding is exactly
+    the one that must not take you anywhere. The row still opens the profile.
+    """
     source = (JS_DIR / "home" / "detail.js").read_text()
 
-    assert 'openDetail("yt-artist", event.detail.browseId)' in source
+    assert "event.detail.browseId" not in source
 
 
 def test_the_follow_event_carries_what_the_server_decided() -> None:
@@ -693,3 +697,180 @@ def test_the_first_run_is_fullscreen_and_the_settings_one_is_not() -> None:
     assert "height: 100%" in fullscreen
     assert "max-width: none" in fullscreen
     assert "modal-overlay-full" not in css, "the class this replaced applied to both modes"
+
+
+def test_lyrics_ignores_its_own_smooth_scroll() -> None:
+    """Following along stalled for six seconds after every line change.
+
+    The panel leaves the list alone for MANUAL_SCROLL_GRACE_MS after a manual
+    scroll, and the automatic scroll fires the very same `scroll` event as it
+    animates — dozens of times — so each line change armed the grace period
+    against the next one. On a phone that was long enough for the current
+    line to slide off the bottom of a short panel before the list caught up.
+    """
+    source = (JS_DIR / "home" / "lyrics.js").read_text()
+
+    assert "autoScrolling = true" in source
+    assert "!autoScrolling" in source, "the scroll listener has to check it"
+    assert "scrollend" in source, "and hand the list back as soon as it settles"
+
+
+def test_opening_the_lyrics_tab_jumps_to_the_line_being_sung() -> None:
+    """The tab switch resets the scroll to the top, and the only thing that
+    moves it afterwards reacts to the line *changing* — so opening this tab
+    mid-verse left the reader at the start of the song until the next line
+    came round."""
+    source = (JS_DIR / "home" / "lyrics.js").read_text()
+
+    assert "syncActiveLine({ force: true })" in source
+
+
+def test_the_keyboard_is_measured_without_the_scroll_offset() -> None:
+    """`innerHeight - height`, and nothing else.
+
+    Subtracting visualViewport.offsetTop as well walked the answer towards
+    zero as the page was scrolled with the keyboard open; past
+    KEYBOARD_MIN_HEIGHT the class came off and iOS dragged the bottom bar and
+    mini player into the middle of the screen, right above the keys.
+    """
+    source = (JS_DIR / "viewport.js").read_text()
+
+    assert "const covered = window.innerHeight - viewport.height;" in source
+    # In the note explaining why, not in the arithmetic.
+    code = "\n".join(line for line in source.splitlines() if not line.lstrip().startswith("//"))
+    assert "viewport.offsetTop" not in code
+
+
+def test_a_focused_text_field_hides_the_bottom_furniture_on_its_own() -> None:
+    """The second, independent signal. The measurement says how tall the
+    keyboard is — nothing else reports that — but focus is what says one is
+    up at all, and unlike the geometry it can't be talked out of it by a
+    scroll."""
+    source = (JS_DIR / "viewport.js").read_text()
+    css = (JS_DIR.parent / "css" / "style.css").read_text()
+
+    assert '"focusin"' in source and '"focusout"' in source
+    assert 'classList.toggle("is-typing"' in source
+    assert "body.is-typing .tabs" in css
+    assert "body.is-typing .mini-player" in css
+
+
+def test_a_toggle_that_is_on_outranks_a_stuck_hover() -> None:
+    """A touch browser applies :hover on tap and never sends the mouseleave
+    that clears it, so shuffle stayed hovered after being pressed. At two
+    classes the on-state tied with .btn-transport:hover and lost outright to
+    .btn-quiet-icon:hover, which is further down the file — so pressing
+    shuffle repainted it to the hover colour on both buttons that carry it.
+    """
+    css = (JS_DIR.parent / "css" / "style.css").read_text()
+
+    assert ".btn-transport.btn-shuffle.is-on" in css
+    assert ".btn-quiet-icon.btn-shuffle.is-on" in css
+    assert "\n.btn-shuffle.is-on," not in css, "two classes is not enough — see the docstring"
+
+
+def test_the_pinned_playlists_hero_badge_is_smaller_than_an_artists() -> None:
+    """Both fill the same slot in _detail_hero.html, and they started at the
+    same size. An artist's hero is a photograph and a photograph at 96px is a
+    portrait; a single white glyph on a saturated disc at 96px is louder than
+    the playlist's own name beside it.
+
+    Scoped to .channel-hero-avatar so the library grid's 44px badge, which is
+    deliberately sized to match the avatars beside it, is left alone.
+    """
+    css = (JS_DIR.parent / "css" / "style.css").read_text()
+
+    assert ".channel-hero-avatar.channel-card-icon {" in css
+    assert ".channel-card-avatar.channel-card-icon" not in css, (
+        "the grid badge matches the artist avatars beside it on purpose"
+    )
+
+
+def test_the_players_artist_line_opens_the_artist() -> None:
+    """The one place in the app where you look straight at an artist's name
+    with no way to reach them. Announced rather than called: home/detail.js
+    owns openDetail and already imports the overlay, so importing it back
+    would be a cycle."""
+    overlay = (JS_DIR / "home" / "overlay.js").read_text()
+    detail = (JS_DIR / "home" / "detail.js").read_text()
+
+    assert "OPEN_ARTIST" in overlay and "OPEN_ARTIST" in detail
+    # Collapsed, not closed: closing stops the music.
+    assert "collapsePlayer();" in overlay[overlay.index("artistPageId") :]
+
+
+def test_a_song_search_result_plays_from_anywhere_on_the_row() -> None:
+    """A track in a list is something you tap. The play button stays for
+    keyboard and screen-reader use, and the artist link inside the row is
+    still checked first so it isn't swallowed."""
+    source = (JS_DIR / "home" / "explore.js").read_text()
+
+    handler = source[source.index('videoResults.addEventListener("click"') :][:900]
+    assert handler.index(".artist-link") < handler.index(".video-search-result")
+    assert "playRemoteVideo(row.dataset" in handler
+
+
+def test_repeat_all_does_not_wrap_a_single_track_queue() -> None:
+    """`1 % 1` is 0, so the wrap-around modulo turned a one-track queue's
+    next and previous into the track already playing — turning repeat on lit
+    both skip buttons up and pressing either restarted it."""
+    source = (JS_DIR / "home" / "queue.js").read_text()
+
+    assert "if (state.order.length < 2) return null;" in source
+
+
+def test_the_queue_is_dragged_closed_by_its_own_top_edge() -> None:
+    """It used to be the artwork and the title — the two elements furthest
+    from the panel being dismissed. The tab strip is the sheet's top edge and
+    sits directly above what moves."""
+    js = (JS_DIR / "home" / "overlay.js").read_text()
+    css = (JS_DIR.parent / "css" / "style.css").read_text()
+
+    assert 'panel.querySelector(".panel-tabs")' in js
+    assert ".player-overlay.is-queue-open .panel-tabs {\n  touch-action: none;" in css
+    assert ".player-overlay.is-queue-open .player-art,\n.player-overlay.is-queue-open .player-meta {\n  touch-action: none;" not in css
+
+
+def test_a_drag_does_not_also_switch_the_tab_it_started_on() -> None:
+    """Pointer events fire first and the click lands after the panel has
+    already closed, so without this a pull-to-close that began on LYRICS also
+    selected it.
+
+    A time window, not a "swallow the next click" flag. A touch drag doesn't
+    always produce a click, and the flag then stayed armed until the next tap
+    — a real one — was eaten instead. Caught in a browser test: the tab
+    tapped after a pull-to-close silently didn't switch.
+    """
+    source = (JS_DIR / "home" / "overlay.js").read_text()
+
+    assert "closedByDragAt" in source
+    assert "CLICK_AFTER_DRAG_MS" in source
+    assert "dataset.dragged" not in source, "the flag this replaced ate real taps"
+
+
+def test_explores_search_field_and_tabs_are_one_sticky_block() -> None:
+    """Two stacked sticky elements would mean hardcoding the strip's offset to
+    the field's rendered height. On a phone the app header is sticky too, so
+    this pins below it — measured, not assumed (see installHeaderOffset)."""
+    css = (JS_DIR.parent / "css" / "style.css").read_text()
+    viewport = (JS_DIR / "viewport.js").read_text()
+
+    head = css[css.index(".explore-search-head {") :][:260]
+    assert "position: sticky" in head
+    assert "top: var(--app-header-height);" in css
+    assert "--app-header-height" in viewport
+    assert "ResizeObserver" in viewport
+
+
+def test_a_music_video_row_is_swapped_for_the_song_before_it_plays() -> None:
+    """Explore's playlists are video playlists almost end to end, and a video
+    entry has a 16:9 still for a cover, no lyrics and a different recording.
+    Resolved for the track actually being played — and for the one prefetched
+    behind it, before its download, since the download fetches whatever
+    video_id the row names."""
+    source = (JS_DIR / "home" / "overlay.js").read_text()
+
+    assert "songVersionOf" in source
+    assert "is_music_video" in source
+    prefetch = source[source.index("async function cacheUpcoming") :][:1400]
+    assert prefetch.index("songVersionOf") < prefetch.index("/download")

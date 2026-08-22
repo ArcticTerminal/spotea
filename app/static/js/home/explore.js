@@ -455,6 +455,42 @@ function showExplorePanel(visibleId) {
     const panel = document.getElementById(panelId);
     if (panel) panel.hidden = panelId !== visibleId;
   }
+  // The tab strip lives in the sticky head above both panels rather than
+  // inside the results one (see index.html — one sticky block, so the strip's
+  // offset doesn't have to be hardcoded to the field's height), so it has to
+  // be shown and hidden explicitly with them.
+  const tabs = document.getElementById("explore-search-tabs");
+  if (tabs) tabs.hidden = visibleId !== "explore-results-panel";
+}
+
+// The two halves of a search result, one at a time. Both are still fetched
+// together (see runSearch) — the tabs decide what is on screen, not what is
+// asked for, so switching between them costs nothing and never waits.
+const SEARCH_TABS = [
+  ["search-tab-songs", "video-search-results"],
+  ["search-tab-artists", "channel-search-results"],
+];
+
+function showSearchTab(selectedTabId) {
+  for (const [tabId, listId] of SEARCH_TABS) {
+    const on = tabId === selectedTabId;
+    const tab = document.getElementById(tabId);
+    const list = document.getElementById(listId);
+    if (tab) {
+      tab.classList.toggle("is-selected", on);
+      tab.setAttribute("aria-selected", String(on));
+    }
+    if (list) list.hidden = !on;
+  }
+}
+
+/** The count beside a tab's label — hidden rather than "0" while a search is
+ *  still running, so the strip doesn't claim an answer it hasn't got. */
+function setSearchTabCount(tabId, count) {
+  const el = document.getElementById(`${tabId}-count`);
+  if (!el) return;
+  el.textContent = count == null ? "" : String(count);
+  el.hidden = count == null;
 }
 
 // One input drives both endpoints in parallel, instead of two permanently
@@ -483,7 +519,15 @@ export function setupExploreSearch() {
     input.dispatchEvent(new Event("input", { bubbles: true }));
     videoResults.innerHTML = "";
     channelResults.innerHTML = "";
+    // Back to Songs with the results themselves: the next search is a new
+    // question, and answering it on whichever tab the last one ended on is
+    // how someone finds themselves looking at an empty Artists list.
+    showSearchTab("search-tab-songs");
     showExplorePanel("explore-browse-panel");
+  }
+
+  for (const [tabId] of SEARCH_TABS) {
+    document.getElementById(tabId)?.addEventListener("click", () => showSearchTab(tabId));
   }
 
   onTabActivated((tab) => {
@@ -500,13 +544,15 @@ export function setupExploreSearch() {
 
     showExplorePanel("explore-results-panel");
     // Shown immediately, before either fetch resolves — without this, the
-    // Songs/Channels headings pop into view over empty lists the instant the
-    // debounce fires, which reads as broken results rather than a pending
-    // search. The two searches run in parallel and don't necessarily resolve
-    // together, so each section clears its own placeholder.
+    // tab strip pops into view over empty lists the instant the debounce
+    // fires, which reads as broken results rather than a pending search. The
+    // two searches run in parallel and don't necessarily resolve together,
+    // so each section clears its own placeholder.
     const loadingHtml = `<li class="search-loading"><span class="spinner"></span>Searching…</li>`;
     videoResults.innerHTML = loadingHtml;
     channelResults.innerHTML = loadingHtml;
+    setSearchTabCount("search-tab-songs", null);
+    setSearchTabCount("search-tab-artists", null);
 
     const [videos, channels] = await Promise.all([
       api(`/explore/songs?q=${encodeURIComponent(query)}`),
@@ -516,8 +562,12 @@ export function setupExploreSearch() {
     if (videos.ok) {
       videoResults.innerHTML =
         videoRowsHtml(videos.data) || `<li class="search-empty">No songs found</li>`;
+      setSearchTabCount("search-tab-songs", videos.data.length);
     }
-    if (channels.ok) renderChannelResults(channels.data);
+    if (channels.ok) {
+      renderChannelResults(channels.data);
+      setSearchTabCount("search-tab-artists", channels.data.length);
+    }
   }, 400);
 
   input.addEventListener("input", () => runSearch(input.value.trim()));
@@ -543,14 +593,21 @@ export function setupExploreSearch() {
   });
 
   videoResults.addEventListener("click", (event) => {
+    // Before the row, which is now clickable all the way across: the artist's
+    // name sits inside it, and the row would otherwise swallow it and start
+    // playing the song instead. Same order as the shelves above.
     const artistLink = event.target.closest(".artist-link");
     if (artistLink) {
       openDetail("yt-artist", artistLink.dataset.channelId);
       return;
     }
 
-    const button = event.target.closest(".video-search-play");
-    if (!button) return;
-    playRemoteVideo(button.closest(".video-search-result").dataset, button);
+    // The whole row plays, not just the play button — a track in a list is
+    // something you tap, and every other track list in this app already
+    // behaves that way. The button stays for keyboard and screen-reader use
+    // and is what gets disabled while the request is in flight.
+    const row = event.target.closest(".video-search-result");
+    if (!row) return;
+    playRemoteVideo(row.dataset, row.querySelector(".video-search-play"));
   });
 }

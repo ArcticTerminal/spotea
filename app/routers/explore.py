@@ -10,10 +10,11 @@ both "listen" endpoints attach their rows to placeholder artists.
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.deps import get_current_user, get_db, require_login
-from app.models import Artist, Content, User
+from app.models import Artist, Content, SwappedVideo, User
 from app.schemas import (
     ChannelSearchResultOut,
     VideoAddCreate,
@@ -113,6 +114,21 @@ def add_single_video(
         .filter(Content.user_id == user.id, Content.video_id == payload.video_id)
         .first()
     )
+    if existing_content is None:
+        # It may answer to a different id now: playing a music video swaps the
+        # row for the song it is a video of, and this search result still
+        # names the video. Same lookup add_video_batch does, and for the same
+        # reason — see SwappedVideo.
+        existing_content = (
+            db.query(Content)
+            .join(SwappedVideo, SwappedVideo.content_id == Content.id)
+            .filter(
+                SwappedVideo.user_id == user.id,
+                SwappedVideo.video_id == payload.video_id,
+                Content.user_id == user.id,
+            )
+            .first()
+        )
     if existing_content:
         return VideoAddResult(content_id=existing_content.id)
 
@@ -179,26 +195,84 @@ def add_video_batch(
     upload from a followed channel) are reused rather than duplicated, the
     same way add_single_video treats them. Order in equals order out: the
     caller uses it directly as the play queue.
+
+    Retried once on a collision, because two of these can be in flight at the
+    same time: clicking a row calls it without a button to disable, so a
+    double tap sends two. Each one reads "which of these already exist",
+    both get the same empty answer, and both insert — which is a UNIQUE
+    violation on the second to commit, a 500, and a plain-text body the
+    client can't read a `detail` out of. That is the whole of the "Could not
+    start this list" toast: the message is api()'s fallback, not anything the
+    server said. Reproduced locally with three concurrent calls: 201, 500,
+    500.
+
+    The retry is enough on its own because the losing request's second pass
+    re-reads a database that now *does* contain the other's rows, so it
+    inserts nothing and simply reports their ids.
     """
     items = [item for item in payload.items if CHANNEL_ID_RE.match(item.channel_id)]
     if not items:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No playable videos given")
 
+    for attempt in range(BATCH_INSERT_ATTEMPTS):
+        try:
+            return _insert_batch(db, user.id, items)
+        except IntegrityError as err:
+            # Someone else inserted a row this pass had decided was missing.
+            # Rolling back is what makes the re-read see it.
+            db.rollback()
+            if attempt == BATCH_INSERT_ATTEMPTS - 1:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="This list is already being started — try again",
+                ) from err
+    raise AssertionError("unreachable")
+
+
+# Two concurrent calls need one retry between them; the third covers a third
+# tab, and past that "try again" is the honest answer.
+BATCH_INSERT_ATTEMPTS = 3
+
+
+def _insert_batch(db: Session, user_id: int, items: list) -> VideoBatchResult:
+    """One attempt at add_video_batch's insert. Separate so the retry above
+    re-runs the *reads* too — re-running only the writes would keep acting on
+    the stale answer that lost the race."""
     # Three bulk lookups instead of two queries per track — this runs over a
     # whole playlist, and the per-item version of it was the only thing that
     # made a fifty-track "Play all" slow.
+    wanted_video_ids = [item.video_id for item in items]
     existing_content = {
         content.video_id: content
         for content in db.query(Content).filter(
-            Content.user_id == user.id,
-            Content.video_id.in_([item.video_id for item in items]),
+            Content.user_id == user_id,
+            Content.video_id.in_(wanted_video_ids),
         )
     }
+    # Rows that no longer answer to the id this listing shows, because playing
+    # them swapped the music video for the song (see SwappedVideo). Without
+    # this lookup every one of them reads as missing and gets a duplicate —
+    # measured on the live library, 205 rows in an hour.
+    #
+    # Joined rather than looked up in two steps so a stale mapping (the row it
+    # points at deleted since) simply doesn't come back.
+    swapped = (
+        db.query(SwappedVideo.video_id, Content)
+        .join(Content, Content.id == SwappedVideo.content_id)
+        .filter(
+            SwappedVideo.user_id == user_id,
+            SwappedVideo.video_id.in_(wanted_video_ids),
+            Content.user_id == user_id,
+        )
+    )
+    for original_video_id, content in swapped:
+        existing_content.setdefault(original_video_id, content)
+
     wanted_channel_ids = {item.channel_id for item in items}
     artists_by_channel = {
         artist.channel_id: artist
         for artist in db.query(Artist).filter(
-            Artist.user_id == user.id, Artist.channel_id.in_(wanted_channel_ids)
+            Artist.user_id == user_id, Artist.channel_id.in_(wanted_channel_ids)
         )
     }
 
@@ -207,7 +281,7 @@ def add_video_batch(
             # Same placeholder contract as _get_or_create_placeholder above;
             # built inline here so the whole batch is one flush.
             artist = Artist(
-                user_id=user.id,
+                user_id=user_id,
                 channel_id=item.channel_id,
                 name=item.channel_title,
                 followed=False,
@@ -221,7 +295,7 @@ def add_video_batch(
         if item.video_id in existing_content or item.video_id in created:
             continue
         artist = artists_by_channel[item.channel_id]
-        content = _preview_content(artist.id, user.id, item)
+        content = _preview_content(artist.id, user_id, item)
         db.add(content)
         created[item.video_id] = content
 

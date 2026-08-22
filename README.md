@@ -112,7 +112,7 @@ All configuration is via environment variables (see `.env.example`):
 |---|---|---|---|
 | `SECRET_KEY` | yes | — | Random key used to sign session cookies |
 | `DATABASE_URL` | no | `sqlite:////app/data/spotea.db` | SQLAlchemy database URL |
-| `STORAGE_DIR` | no | `/app/data/storage` | Where downloaded audio files are stored |
+| `STORAGE_DIR` | no | `/app/data/storage` | Where downloaded audio files are stored, in a subdirectory per account — the file name is the video id alone, so two accounts with the same track need two copies rather than one file either of them could delete out from under the other |
 | `AVATARS_DIR` | no | `/app/data/avatars` | Where fetched artist avatars are stored |
 | `THUMBNAILS_DIR` | no | `/app/data/thumbnails` | Where cached song/album thumbnails are stored |
 | `AUDIO_FORMAT` | no | `m4a` | Audio format yt-dlp extracts to |

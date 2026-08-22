@@ -354,3 +354,197 @@ def test_a_release_id_is_validated_before_anything_is_fetched(client, fake_relea
 
     assert res.status_code == 404
     assert calls == []
+
+
+# --- Two of these at once --------------------------------------------------
+#
+# Clicking a remote row calls playRemoteList with no button to disable (see
+# home/detail.js), so a double tap sends two of these. Both read "none of
+# these exist yet", both insert, and whichever commits second hit a UNIQUE
+# violation — a 500, whose body isn't JSON, so the client fell back to its own
+# message: "Could not start this list". Reproduced against a running instance
+# with three concurrent calls: 201, 500, 500.
+
+
+def test_a_second_batch_racing_the_first_reuses_its_rows(client, db_session, monkeypatch):
+    """The losing request's retry re-reads a database that now *does* contain
+    the other's rows, so it inserts nothing and reports their ids.
+
+    Simulated by inserting the competing rows in the gap the real race opens:
+    between this request reading "which of these exist" and committing its own
+    inserts. That is exactly the window, and it needs no threads to hit.
+    """
+    from app.routers import explore as explore_router
+
+    real_insert = explore_router._insert_batch
+    calls = []
+
+    def racing_insert(db, user_id, items):
+        calls.append(1)
+        if len(calls) == 1:
+            # The other request commits its rows in the gap between this one
+            # reading "which of these exist" and committing its own inserts —
+            # which is the real window — and this one's insert then collides.
+            from sqlalchemy.exc import IntegrityError
+
+            from app.database import SessionLocal
+
+            other = SessionLocal()
+            try:
+                other.add(
+                    Artist(user_id=user_id, channel_id=CHANNEL_ID, name="Some Channel", followed=False)
+                )
+                other.commit()
+            finally:
+                other.close()
+            raise IntegrityError("INSERT", {}, Exception("UNIQUE constraint failed: artists"))
+        return real_insert(db, user_id, items)
+
+    monkeypatch.setattr(explore_router, "_insert_batch", racing_insert)
+
+    res = client.post(
+        "/explore/tracks/batch",
+        json={"items": [_batch_item("aaaaaaaaaaa"), _batch_item("bbbbbbbbbbb")]},
+    )
+
+    assert res.status_code == 201
+    assert len(calls) == 2, "the first attempt has to have collided and been retried"
+    # One artist, not two — the retry found the one the other request made.
+    assert db_session.query(Artist).filter(Artist.channel_id == CHANNEL_ID).count() == 1
+    assert len(res.json()["content_ids"]) == 2
+
+
+def test_a_batch_that_keeps_colliding_answers_409_not_500(client, monkeypatch):
+    """A 500's body is plain text, so the client can read no `detail` out of
+    it and shows its own fallback — which is what made this look like "the
+    list is broken" rather than "two taps arrived at once". A 409 says what
+    happened."""
+    from sqlalchemy.exc import IntegrityError
+
+    from app.routers import explore as explore_router
+
+    def always_collide(db, user_id, items):
+        raise IntegrityError("INSERT", {}, Exception("UNIQUE constraint failed"))
+
+    monkeypatch.setattr(explore_router, "_insert_batch", always_collide)
+
+    res = client.post("/explore/tracks/batch", json={"items": [_batch_item("aaaaaaaaaaa")]})
+
+    assert res.status_code == 409
+    assert "detail" in res.json(), "the client reads data.detail — a 500 gives it nothing"
+
+
+# --- A row that has been swapped for its song ------------------------------
+#
+# Playing a music video swaps the row for the song it is a video of, which
+# changes its video_id. The playlist it came from still lists the *video's*
+# id, so every later lookup by that id has to keep finding the same row —
+# without it the batch created a duplicate per tap, and the second row played
+# the music video's audio from the start. Measured on the live library: 205
+# rows in an hour, one track stored three times.
+
+
+def _swap(db_session, content, song_video_id="songvideo11"):
+    """What POST /content/{id}/song-version does to a row."""
+    from app.models import SwappedVideo
+
+    db_session.add(SwappedVideo(user_id=1, video_id=content.video_id, content_id=content.id))
+    content.video_id = song_video_id
+    db_session.commit()
+
+
+def test_a_swapped_row_is_found_by_the_id_the_playlist_still_shows(client, db_session):
+    ids = client.post(
+        "/explore/tracks/batch", json={"items": [_batch_item("aaaaaaaaaaa")]}
+    ).json()["content_ids"]
+    row = db_session.get(Content, ids[0])
+    _swap(db_session, row)
+
+    again = client.post(
+        "/explore/tracks/batch", json={"items": [_batch_item("aaaaaaaaaaa")]}
+    ).json()["content_ids"]
+
+    assert again == ids, "the same row, not a second one"
+    assert db_session.query(Content).count() == 1
+
+
+def test_a_swapped_row_is_found_by_the_single_add_too(client, db_session):
+    """Explore's own search results name the video as well."""
+    from app.models import Artist
+
+    artist = Artist(user_id=1, channel_id=CHANNEL_ID, name="Some Channel", followed=False)
+    db_session.add(artist)
+    db_session.commit()
+    row = Content(artist_id=artist.id, user_id=1, video_id="aaaaaaaaaaa", title="T", is_preview=True)
+    db_session.add(row)
+    db_session.commit()
+    db_session.refresh(row)
+    _swap(db_session, row)
+
+    res = client.post(
+        "/explore/tracks",
+        json={
+            "video_id": "aaaaaaaaaaa",
+            "channel_id": CHANNEL_ID,
+            "title": "T",
+            "thumbnail_url": None,
+            "duration_seconds": 100,
+            "channel_title": "Some Channel",
+        },
+    )
+
+    assert res.json()["content_id"] == row.id
+    assert db_session.query(Content).count() == 1
+
+
+def test_deleting_the_row_takes_its_mapping_with_it(client, db_session):
+    """Otherwise the mapping outlives what it points at and the next lookup
+    resolves to a row that no longer exists. app/database.py switches SQLite's
+    foreign keys on per connection, which is what makes ON DELETE CASCADE
+    actually fire here."""
+    from app.models import SwappedVideo
+
+    ids = client.post(
+        "/explore/tracks/batch", json={"items": [_batch_item("aaaaaaaaaaa")]}
+    ).json()["content_ids"]
+    row = db_session.get(Content, ids[0])
+    _swap(db_session, row)
+    assert db_session.query(SwappedVideo).count() == 1
+
+    db_session.delete(row)
+    db_session.commit()
+
+    assert db_session.query(SwappedVideo).count() == 0
+
+    # And the next start builds a fresh row rather than resolving to nothing.
+    again = client.post(
+        "/explore/tracks/batch", json={"items": [_batch_item("aaaaaaaaaaa")]}
+    ).json()["content_ids"]
+    assert db_session.get(Content, again[0]).video_id == "aaaaaaaaaaa"
+
+
+def test_another_users_swap_is_not_visible(client, db_session):
+    """A Content row is per user, and so is the mapping — one listener's swap
+    must not hand another listener's request someone else's row."""
+    from app.models import SwappedVideo
+
+    ids = client.post(
+        "/explore/tracks/batch", json={"items": [_batch_item("aaaaaaaaaaa")]}
+    ).json()["content_ids"]
+    row = db_session.get(Content, ids[0])
+    # The mapping exists, but it belongs to somebody else.
+    from app.auth import hash_password
+    from app.models import User
+
+    other = User(email="other@example.com", password_hash=hash_password("x"))
+    db_session.add(other)
+    db_session.commit()
+    db_session.add(SwappedVideo(user_id=other.id, video_id="bbbbbbbbbbb", content_id=row.id))
+    db_session.commit()
+
+    again = client.post(
+        "/explore/tracks/batch", json={"items": [_batch_item("bbbbbbbbbbb")]}
+    ).json()["content_ids"]
+
+    assert again[0] != row.id, "another user's mapping must not resolve here"
+    assert db_session.get(Content, again[0]).video_id == "bbbbbbbbbbb"

@@ -23,11 +23,12 @@ import {
 import { setupTabs } from "../home/tabs.js";
 import { setupFavorite, setupPlayer } from "../player.js";
 import { installBfcacheReload, registerServiceWorker } from "../resume.js";
-import { installKeyboardInset } from "../viewport.js";
+import { installHeaderOffset, installKeyboardInset } from "../viewport.js";
 
 installBfcacheReload();
 registerServiceWorker();
 installKeyboardInset();
+installHeaderOffset();
 
 setupTabs();
 setupPlayer();

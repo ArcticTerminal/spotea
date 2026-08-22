@@ -14,7 +14,7 @@ import urllib.request
 from pathlib import Path
 
 from app.config import settings
-from app.youtube.urls import video_still_url
+from app.youtube.urls import is_video_still, video_still_url
 
 FETCH_TIMEOUT_SECONDS = 10
 
@@ -184,6 +184,34 @@ def track_cover(item) -> str | None:
     # img-src CSP, but going through /image-proxy keeps this on the same
     # path as the rest and dodges the ORB refusals that path exists for.
     return proxied_image_url(still) if still else None
+
+
+def is_music_video(item) -> bool:
+    """Whether this row is a music video rather than the song itself.
+
+    Read off the cover, because that is the only place the distinction
+    survives: YouTube Music reports it as `videoType`, but nothing here
+    stores that, and a column can't be added to an existing install (the
+    schema is created, never migrated). It doesn't need to be stored —
+    the two are exactly correlated. A song's cover is square album art on
+    Google's image CDN; a video's is a 16:9 still on i.ytimg.com, which is
+    the same signature is_video_still matches on. Measured across three
+    playlists, the count of i.ytimg covers equalled the count of
+    videoType == OMV entries every time (197/197, 93/93, 198/198).
+
+    A row with no cover at all is not a video: it falls back to a still (see
+    track_cover above) but that is this app drawing something rather than
+    YouTube saying what the recording is.
+    """
+    stored = getattr(item, "thumbnail_url", None)
+    if not stored:
+        return False
+    # Stored proxied — /image-proxy?u=<escaped remote url> — so the real URL
+    # has to come back out before it can be recognised.
+    if stored.startswith("/image-proxy"):
+        _, _, query = stored.partition("?")
+        stored = urllib.parse.unquote(urllib.parse.parse_qs(query).get("u", [""])[0])
+    return is_video_still(stored)
 
 
 def cached_avatar_or_hotlink(channel_id: str, remote_url: str | None) -> str | None:

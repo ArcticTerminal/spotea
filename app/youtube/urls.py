@@ -183,6 +183,33 @@ def video_still_url(video_id: str | None) -> str | None:
     return f"https://i.ytimg.com/vi/{video_id}/mqdefault.jpg"
 
 
+# A video still on YouTube's image CDN, whatever size variant it names:
+#   https://i.ytimg.com/vi/<video id>/hqdefault.jpg?sqp=…&rs=…
+# A video still on YouTube's image CDN, whatever size variant it names:
+#   https://i.ytimg.com/vi/<video id>/hqdefault.jpg?sqp=…&rs=…
+_VIDEO_STILL_RE = re.compile(
+    r"^https://i\.ytimg\.com/vi(?:_webp)?/[A-Za-z0-9_-]{11}/[a-z0-9]+\.(?:jpg|webp)(?:\?.*)?$"
+)
+
+
+def is_video_still(url: str | None) -> bool:
+    """Whether this cover is a video frame rather than square album art.
+
+    Which is the same question as "is this row a music video": YouTube Music
+    serves a song's cover from its album-art CDN and a *video* entry's from
+    i.ytimg.com, and nothing else in this app ever renders one of these. See
+    images.is_music_video, the only caller, for why that distinction has to
+    be read off the URL rather than stored.
+
+    This was `sharper_still_url`, which rewrote the same URL to
+    `maxresdefault.jpg` so the proxy could fetch a 1280x720 copy of a
+    400x225 cover. That went away with the surface that needed it — the
+    player now plays the song, whose cover is square (see routers/content.py's
+    swap_in_song_version) — leaving only the recognition it was built on.
+    """
+    return bool(url) and _VIDEO_STILL_RE.match(url) is not None
+
+
 # YouTube Music hands back playlist ids as *browse* ids: the same id with a
 # "VL" glued on the front ("VLPL…", "VLRDCLAK5uy_…"). Nothing downstream
 # speaks that dialect — playlist_url() would build a youtube.com/playlist

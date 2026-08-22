@@ -31,6 +31,19 @@ let loadingFor = null;
 let lines = [];
 let activeIndex = -1;
 let lastManualScrollAt = 0;
+// Set while this module is the one scrolling, so the listener below can tell
+// its own smooth scroll from a reader's finger. Without it every automatic
+// scroll stamped lastManualScrollAt as it animated and locked the *next*
+// MANUAL_SCROLL_GRACE_MS out — so following along ran in bursts: several
+// lines would go by with the list held still (long enough on a phone for the
+// current line to slide off the bottom of a short panel), then one jump to
+// catch up, then another six seconds of nothing.
+let autoScrolling = false;
+// Cleared on `scrollend` where it exists; this is the fallback for a browser
+// that has no such event, and the backstop for a scrollTo that lands on the
+// position it was already at and therefore never animates or ends.
+const AUTO_SCROLL_MAX_MS = 800;
+let autoScrollTimer = null;
 
 function playerContentId() {
   return document.getElementById("player-root")?.dataset.contentId || "";
@@ -117,33 +130,54 @@ function indexAt(ms) {
   return -1;
 }
 
-function scrollActiveIntoView(el) {
+/**
+ * Centres a line in the panel.
+ *
+ * `force` skips the manual-scroll grace period — for the one case that isn't
+ * following along: the reader has just switched to this tab and is looking at
+ * whatever the list happened to be scrolled to, which may be nowhere near
+ * what is currently being sung.
+ */
+function scrollActiveIntoView(el, { force = false } = {}) {
   const box = scroller();
   if (!box) return;
-  if (Date.now() - lastManualScrollAt < MANUAL_SCROLL_GRACE_MS) return;
+  if (!force && Date.now() - lastManualScrollAt < MANUAL_SCROLL_GRACE_MS) return;
 
   // Measured rather than scrollIntoView(), which scrolls every scrollable
   // ancestor including the page behind the overlay.
   const boxRect = box.getBoundingClientRect();
   const elRect = el.getBoundingClientRect();
   const top = box.scrollTop + (elRect.top - boxRect.top) - (box.clientHeight - elRect.height) / 2;
+
+  autoScrolling = true;
+  clearTimeout(autoScrollTimer);
+  autoScrollTimer = setTimeout(() => {
+    autoScrolling = false;
+  }, AUTO_SCROLL_MAX_MS);
+
   box.scrollTo({ top, behavior: reducedMotion.matches ? "auto" : "smooth" });
 }
 
-function syncActiveLine() {
+/**
+ * Marks the line the track is on and brings it into view.
+ *
+ * `force` is passed by the tab switch below, which has to move the list even
+ * though the line hasn't changed — see showTab.
+ */
+function syncActiveLine({ force = false } = {}) {
   const seconds = activeAudio()?.currentTime;
   if (typeof seconds !== "number") return;
 
   const index = indexAt(Math.round(seconds * 1000));
-  if (index === activeIndex) return;
+  if (index === activeIndex && !force) return;
 
   const rendered = body()?.querySelectorAll(".lyrics-line") || [];
-  rendered[activeIndex]?.classList.remove("is-active");
+  if (index !== activeIndex) rendered[activeIndex]?.classList.remove("is-active");
   activeIndex = index;
   const el = rendered[index];
   if (!el) return;
   el.classList.add("is-active");
-  scrollActiveIntoView(el);
+  scrollActiveIntoView(el, { force });
 }
 
 function showTab(name) {
@@ -168,8 +202,23 @@ function showTab(name) {
 
   if (!isLyrics) return;
   const contentId = playerContentId();
-  if (contentId && contentId !== renderedFor) load(contentId);
-  else if (!contentId) setMessage("Nothing playing.");
+  if (contentId && contentId !== renderedFor) {
+    load(contentId);
+    return;
+  }
+  if (!contentId) {
+    setMessage("Nothing playing.");
+    return;
+  }
+  // Already rendered, so nothing is loading and the timeupdate handler only
+  // acts when the line *changes* — opening this tab in the middle of a verse
+  // would otherwise leave the reader at the top of the song until the next
+  // line came round. The scroll above is what makes this necessary and also
+  // what makes it safe to force: the list is at the top either way.
+  //
+  // Deferred a frame: the panel was `hidden` until a moment ago, so it has no
+  // measurable height yet and centring against it would compute against zero.
+  if (lines.length) requestAnimationFrame(() => syncActiveLine({ force: true }));
 }
 
 export function setupLyricsPanel() {
@@ -180,16 +229,35 @@ export function setupLyricsPanel() {
   queueTab.addEventListener("click", () => showTab("queue"));
   lyricsTab.addEventListener("click", () => showTab("lyrics"));
 
-  scroller()?.addEventListener(
+  const box = scroller();
+  box?.addEventListener(
     "scroll",
     () => {
-      // Only a person scrolling counts; the smooth scroll above fires this
-      // too, which is why it's stamped rather than acted on directly and why
-      // scrollActiveIntoView is the one thing that reads the stamp.
-      if (selected === "lyrics") lastManualScrollAt = Date.now();
+      // Only a person scrolling counts. This module's own smooth scroll fires
+      // the same event, dozens of times as it animates, and counting those as
+      // a reader's finger is what made following along stall for six seconds
+      // after every single line change (see autoScrolling).
+      if (selected === "lyrics" && !autoScrolling) lastManualScrollAt = Date.now();
     },
     { passive: true }
   );
+
+  // The moment the animation settles, hand the list back. Not universally
+  // supported — AUTO_SCROLL_MAX_MS covers the browsers without it.
+  box?.addEventListener(
+    "scrollend",
+    () => {
+      autoScrolling = false;
+      clearTimeout(autoScrollTimer);
+    },
+    { passive: true }
+  );
+
+  // A different track means different lyrics; the reader's place in the old
+  // ones has nothing to do with the new ones.
+  onPlayerEvent("loadedmetadata", () => {
+    lastManualScrollAt = 0;
+  });
 
   // The only hook into playback: read the clock, move the highlight. Listened
   // to through onPlayerEvent so this never holds a reference to the audio

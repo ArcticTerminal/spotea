@@ -45,6 +45,7 @@ def test_get_single_content_returns_full_shape(client, db_session):
         "id",
         "artist_id",
         "channel_title",
+        "artist_page_id",
         "video_id",
         "title",
         "thumbnail_url",
@@ -55,9 +56,26 @@ def test_get_single_content_returns_full_shape(client, db_session):
         "is_favorite",
         "is_played",
         "is_unavailable",
+        "is_music_video",
     }
     assert body["id"] == items[0].id
     assert body["channel_title"] == "Test Channel"
+
+
+def test_the_payload_says_how_to_open_the_artist(client, db_session):
+    """The player's artist line is a link now (see _player_overlay.html), and
+    this is what it opens. The browse id where the artist row has one; the
+    channel it was created from otherwise, which the yt-artist panel resolves
+    the same way Explore's own artist links do."""
+    artist, items = _seed(db_session, count=1)
+
+    artist.browse_id = "UCbrowseidbrowseid1234"
+    db_session.commit()
+    assert client.get(f"/content/{items[0].id}").json()["artist_page_id"] == "UCbrowseidbrowseid1234"
+
+    artist.browse_id = None
+    db_session.commit()
+    assert client.get(f"/content/{items[0].id}").json()["artist_page_id"] == artist.channel_id
 
 
 def test_the_payload_carries_a_cover_even_when_the_row_has_none(client, db_session):
@@ -338,13 +356,13 @@ def test_the_extracting_phase_reaches_the_status_endpoint(client, db_session, mo
     fake_file = tmp_path / f"{item.video_id}.m4a"
     fake_file.write_bytes(b"audio")
 
-    def fake_download(video_id, quality="high", on_progress=None):
+    def fake_download(video_id, quality="high", on_progress=None, user_id=None):
         on_progress("extracting", None)
         assert client.get(f"/content/{item.id}/status").json()["phase"] == "extracting"
         return fake_file
 
     monkeypatch.setattr(content_router, "download_audio", fake_download)
-    content_router._run_download(item.id, item.video_id, "high")
+    content_router._run_download(item.id, item.video_id, "high", USER_ID)
 
     # ...and it's cleared once the download settles, rather than leaving a
     # finished track reporting a phase forever.
@@ -387,3 +405,128 @@ def test_downloading_a_track_does_not_record_it_as_played(client, db_session, tm
     assert item.last_played_at is None
 
 
+
+
+# --- POST /content/{id}/song-version --------------------------------------
+#
+# Explore's playlists are music-video playlists almost end to end (measured:
+# 3 of 200, 3 of 96 and 2 of 200 entries were songs). A video entry carries a
+# 16:9 still where the rest of the app draws square album art, has no lyrics
+# and is a different recording. This route swaps the row for the song.
+
+_STILL = "/image-proxy?u=https%3A//i.ytimg.com/vi/downloadvi1/hqdefault.jpg%3Fsqp%3Dabc"
+_SQUARE = "/image-proxy?u=https%3A//yt3.ggpht.com/abc%3Dw544-h544-l90-rj"
+
+
+def _song(video_id="songvideo11", title="Download Me", duration=200):
+    from app.youtube.models import VideoSearchResult
+
+    return VideoSearchResult(
+        video_id=video_id,
+        title=title,
+        thumbnail_url=_SQUARE,
+        duration_seconds=duration,
+        channel_title="Download Channel",
+        channel_id="UCsomethingsomething",
+    )
+
+
+def test_a_music_video_row_is_rewritten_in_place(client, db_session, monkeypatch):
+    """In place, not alongside. The client is holding this row's id — it is in
+    the queue and it is what the player is opening — so a second row would
+    mean the id being played and the id in the queue disagreeing, and
+    queue.js drops a queue the playing track isn't in."""
+    from app.routers import content as content_router
+
+    item = _seed_one(db_session, thumbnail_url=_STILL, duration_seconds=235)
+    monkeypatch.setattr(content_router, "find_song_version", lambda *a: _song())
+
+    res = client.post(f"/content/{item.id}/song-version")
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["id"] == item.id
+    assert body["video_id"] == "songvideo11"
+    assert body["thumbnail_url"] == _SQUARE
+    assert body["duration_seconds"] == 200
+    assert body["is_music_video"] is False
+
+    db_session.refresh(item)
+    assert item.video_id == "songvideo11"
+
+
+def test_a_row_that_is_already_the_song_is_left_alone(client, db_session, monkeypatch):
+    """Square art means YouTube Music called it a song. Nothing to resolve,
+    and no search worth paying for."""
+    from app.routers import content as content_router
+
+    item = _seed_one(db_session, thumbnail_url=_SQUARE)
+
+    def fail(*a):
+        raise AssertionError("must not search for a row that is already a song")
+
+    monkeypatch.setattr(content_router, "find_song_version", fail)
+
+    res = client.post(f"/content/{item.id}/song-version")
+
+    assert res.status_code == 200
+    assert res.json()["video_id"] == item.video_id
+
+
+def test_a_downloaded_row_is_never_rewritten(client, db_session, monkeypatch):
+    """Rewriting video_id under a file that has already been fetched would
+    orphan it and leave the row naming audio it no longer points at."""
+    from app.routers import content as content_router
+
+    item = _seed_one(db_session, thumbnail_url=_STILL, status="ready", file_path="data/x.m4a")
+
+    def fail(*a):
+        raise AssertionError("must not search for a row that is already downloaded")
+
+    monkeypatch.setattr(content_router, "find_song_version", fail)
+
+    res = client.post(f"/content/{item.id}/song-version")
+
+    assert res.status_code == 200
+    assert res.json()["video_id"] == "downloadvi1"
+
+
+def test_no_song_version_leaves_the_video_playable(client, db_session, monkeypatch):
+    """A miss is a normal answer, not an error — the caller plays what it gets
+    back."""
+    from app.routers import content as content_router
+
+    item = _seed_one(db_session, thumbnail_url=_STILL)
+    monkeypatch.setattr(content_router, "find_song_version", lambda *a: None)
+
+    res = client.post(f"/content/{item.id}/song-version")
+
+    assert res.status_code == 200
+    assert res.json()["video_id"] == "downloadvi1"
+    assert res.json()["is_music_video"] is True
+
+
+def test_a_song_already_in_the_library_is_not_swapped_into(client, db_session, monkeypatch):
+    """The unique constraint is on (user_id, video_id). Handing back the other
+    row's id would take the playing track out of the queue it came from, so
+    the video is left as it is."""
+    from app.models import Content
+    from app.routers import content as content_router
+
+    item = _seed_one(db_session, thumbnail_url=_STILL)
+    db_session.add(
+        Content(
+            artist_id=item.artist_id,
+            user_id=USER_ID,
+            video_id="songvideo11",
+            title="Download Me",
+            status="not_downloaded",
+        )
+    )
+    db_session.commit()
+    monkeypatch.setattr(content_router, "find_song_version", lambda *a: _song())
+
+    res = client.post(f"/content/{item.id}/song-version")
+
+    assert res.status_code == 200
+    assert res.json()["video_id"] == "downloadvi1"

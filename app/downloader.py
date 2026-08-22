@@ -219,9 +219,31 @@ def _postprocessor_hook(on_progress: ProgressCallback, event: dict) -> None:
         on_progress("converting", None)
 
 
-def download_audio(video_id: str, quality: str = "high", on_progress: ProgressCallback | None = None) -> Path:
-    settings.storage_dir.mkdir(parents=True, exist_ok=True)
-    out_template = str(settings.storage_dir / f"{video_id}.%(ext)s")
+def user_storage_dir(user_id: int | None) -> Path:
+    """Where one listener's audio lives.
+
+    A subdirectory per user, because the file name is the video id and
+    nothing else: two listeners with the same track used to be two rows
+    pointing at one file, so either of them deleting it — an Explore preview
+    dismissed, an artist unfollowed, "Clear all" — silently took the other's
+    copy with it. That happened for real: one account's cleanup left another
+    account's row saying "ready" with nothing on disk behind it.
+
+    `None` is the pre-existing flat layout, which older rows still name in
+    their file_path and which keeps working exactly as it did.
+    """
+    return settings.storage_dir if user_id is None else settings.storage_dir / str(user_id)
+
+
+def download_audio(
+    video_id: str,
+    quality: str = "high",
+    on_progress: ProgressCallback | None = None,
+    user_id: int | None = None,
+) -> Path:
+    destination = user_storage_dir(user_id)
+    destination.mkdir(parents=True, exist_ok=True)
+    out_template = str(destination / f"{video_id}.%(ext)s")
 
     codec = settings.audio_format
     postprocessor = {"key": "FFmpegExtractAudio", "preferredcodec": codec}
@@ -309,7 +331,13 @@ def download_audio(video_id: str, quality: str = "high", on_progress: ProgressCa
     if last_exc is not None:
         raise DownloadError(str(last_exc)) from last_exc
 
-    final_path = settings.storage_dir / f"{video_id}.{codec}"
+    # `destination`, not settings.storage_dir — audio is written into a
+    # directory per user (see user_storage_dir) and this is where the
+    # out_template above actually put it. Derived from storage_dir directly,
+    # this looked one level too high and raised on every single download the
+    # moment the per-user layout landed: "Download completed but output file
+    # was not found", with the file sitting right there.
+    final_path = destination / f"{video_id}.{codec}"
     if not final_path.exists():
         raise DownloadError("Download completed but output file was not found")
 

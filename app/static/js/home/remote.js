@@ -76,10 +76,30 @@ function remoteRows() {
  * no second page and no /content/queue/... endpoint, so what's on screen is
  * by definition the whole list.
  */
+/**
+ * Whether a "start this list" request is already on its way.
+ *
+ * "Play all" passes its button and gets disabled for the duration; clicking a
+ * row passes none, so nothing stopped a double tap sending two of these at
+ * once. Both then read the same "none of these exist yet" answer off the
+ * database and both insert — a UNIQUE violation for whichever commits second,
+ * which surfaced as a 500 and, because a 500's body isn't JSON, as api()'s
+ * fallback toast: "Could not start this list". The server retries past it now
+ * (see routers/explore.py's add_video_batch); this is the half that stops the
+ * pointless second request being made at all.
+ *
+ * Ignored rather than queued: the second tap is the same tap. Running it
+ * after the first would rebuild the queue a moment after playback had already
+ * started from it.
+ */
+let listStartInFlight = false;
+
 export async function playRemoteList(source, { startVideoId = null, button = null } = {}) {
   const rows = remoteRows();
   if (!rows.length) return;
+  if (listStartInFlight) return;
 
+  listStartInFlight = true;
   if (button) button.disabled = true;
   try {
     const items = rows
@@ -125,6 +145,7 @@ export async function playRemoteList(source, { startVideoId = null, button = nul
     const startId = setQueue(source, data.content_ids, { startId: clickedId });
     if (startId != null) openPlayer(startId);
   } finally {
+    listStartInFlight = false;
     if (button) button.disabled = false;
   }
 }

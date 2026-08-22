@@ -358,6 +358,18 @@ def image_proxy(u: str) -> Response:
     if host not in _IMAGE_PROXY_ALLOWED_HOSTS:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST)
 
+    # Fetched exactly as asked for, at the size YouTube Music named.
+    #
+    # This used to try `maxresdefault` first for a video still and fall back,
+    # to sharpen the 400x225 covers a music-video playlist entry carries. It
+    # worked and it is gone, because the reason for it is: a video row is now
+    # swapped for its song before it plays (see routers/content.py's
+    # swap_in_song_version), and the song's cover is square album art at
+    # 544px — so the player, the one surface that drew a still large enough
+    # for 400px to look soft, no longer draws one at all. What was left was
+    # a list of 200px cards paying for 1280x720 frames: measured over 24 real
+    # covers, 496 KB became 2151 KB, 4.3x the bytes to a phone, for artwork
+    # that is already sharp at the size it is drawn.
     fetched = fetch_image_bytes(u)
     if fetched is None:
         # Logged rather than swallowed: turning every failure into a blank
